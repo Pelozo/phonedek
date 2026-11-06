@@ -11,6 +11,10 @@ PhoneDeck is two apps that work together:
 
 No cloud, no account, no vendor lock-in: the phone talks directly to your PC over the local network.
 
+![PhoneDeck desktop editor](docs/screenshots/editor.png)
+
+<p align="center"><img src="docs/screenshots/pairing.png" width="82%" alt="Pairing dialog with QR code" /></p>
+
 ```
 ┌──────────────────────────┐        Wi-Fi / LAN         ┌──────────────────────────┐
 │  Android phone           │  HTTP config + WebSocket   │  Windows PC              │
