@@ -24,6 +24,7 @@
 - **Target app runs as Administrator**: Windows UIPI blocks input from a non-elevated app. Run PhoneDeck as Administrator as well.
 - **Launch app / URL / command**: the log shows spawn errors. Use an absolute path for apps not on `PATH`.
 - **Command** actions run with your user account; antivirus/policy may block them.
+- **Games with anti-cheat** may ignore synthetic input. PhoneDeck uses the standard Windows `SendInput` API (no driver), so competitive games that block automation will not respond.
 
 ## Keyboard helper does not start
 

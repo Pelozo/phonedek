@@ -142,7 +142,7 @@ export class DeckServer {
         else response.end()
       })
     })
-    const wss = new WebSocketServer({ noServer: true, clientTracking: true })
+    const wss = new WebSocketServer({ noServer: true, clientTracking: true, maxPayload: 256 * 1024 })
     this.httpServer = server
     this.wss = wss
 

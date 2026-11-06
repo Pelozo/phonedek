@@ -8,6 +8,7 @@
 4. Turn on **Start PhoneDeck with Windows** in Settings if you want the deck available after login.
 
 The installer uses a per-user NSIS install and creates Desktop/Start Menu shortcuts.
+Keep PhoneDeck running while you use the deck; closing the window stops the LAN server.
 
 ## Data locations
 

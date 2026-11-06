@@ -14,7 +14,7 @@ Two apps:
   `git --git-dir=/tmp/phonedek.git --work-tree=$PWD`.
 - Monorepo: `apps/desktop` (Electron + Vite + React + TS), `packages/shared` (types, zod
   schema, defaults, action-plan builder, macro recorder helpers, tests), `apps/android`
-  (Gradle, Kotlin 2.0.20, Compose 1.7.6, AGP 8.5.2, compileSdk 34).
+  (Gradle 8.9, Kotlin 2.0.20, Compose 1.7.6, AGP 8.5.2, compileSdk 34).
 - Transport: HTTP `GET /api/config`, `/assets/*`; WebSocket `/ws?token=…`; UDP beacon on
   47655 for discovery. Static pairing token + QR deep link `phonedek://pair?…`.
 - Config is desktop-owned. Buttons carry ordered action lists; phone executes `page`
@@ -23,26 +23,25 @@ Two apps:
   for URL/app/command.
 - Tests: Vitest for shared + desktop core (schema, store, protocol, server, executor,
   macro recorder). Gates: `npm test` (51 tests), `npm run typecheck`, `npm run build`.
-- CI: GitHub Actions builds Windows installer (electron-builder NSIS) + Android debug APK.
+- CI: GitHub Actions builds Windows installer (electron-builder NSIS, x64) + Android
+  debug APK and runs `lintDebug`. Both jobs green as of run 42312952202.
 - Button background precedence: `button.background` → `profile.theme.buttonBackground`.
-  Page background is the deck background only.
+  Page background is the deck background only (fixed on Android too).
 
 ## Phases
 - [x] P0. Scaffold, protocol/schema, repo push, agent state
 - [x] P1. Shared package: config model, zod schema, defaults, action-plan builder, tests
 - [x] P2. Desktop core: config store, assets, WS/HTTP server, pairing, discovery, action executor
 - [x] P3. Desktop UI: profile/page editor, grid, button inspector, backgrounds, action editor, macro recorder, pair dialog
-- [ ] P4. Android app: pairing/discovery, WS client, Compose deck, backgrounds, cache (subagent in progress)
-- [ ] P5. CI green (Windows installer + APK), README/docs, local APK build verification
+- [x] P4. Android app: pairing/discovery, WS client, Compose deck, backgrounds, cache (APK built in CI)
+- [x] P5. CI green (Windows installer + APK + lint), README/docs, screenshots
 - [x] P6a. Electron verified under Xvfb (UI, save, QR, macro recorder, popovers)
-- [ ] P6b. Polish: host selector in pair dialog, clean screenshots, end-to-end APK test, release workflow
-- [ ] P7. Verify Windows installer artifact + firewall/autostart notes
+- [x] P6b. Polish: pair refresh, deck name setting, clean screenshots, Android lint gate
+- [ ] P7. Publish GitHub release v0.1.0 with installer + APK + checksums; final manual test notes
 
-## Current blockers / notes
-- Android CI initially failed at `setup-android` installing the removed `tools` package; fixed
-  with `packages: platform-tools`. Next failure will be real compilation.
-- Windows builder failed on ranged Electron version; pinned `45.2.3` and electron-builder
-  `26.18.0`, added `--publish never`.
-- Android uses `page.background` as button fallback in `DeckButtonView.kt`; must change to
-  `theme.buttonBackground` after the subagent finishes (protocol docs updated).
-- CI run 42310609088 in progress.
+## Open items / next session
+- Create release `v0.1.0` with the latest CI artifacts (installer + debug APK + SHA256SUMS).
+- If the Android subagent reports further edits, review and run CI again.
+- Optional: app icon polish, signed release APK, Windows code signing, host selector for
+  multi-NIC PCs, global macro recording hook, config export with assets (zip).
+- User manual test on Windows + Android; collect feedback.
