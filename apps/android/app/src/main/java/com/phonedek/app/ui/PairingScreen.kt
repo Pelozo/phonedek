@@ -36,6 +36,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -89,7 +90,7 @@ fun PairingScreen(
     var tokenError by rememberSaveable { mutableStateOf<String?>(null) }
     var hint by rememberSaveable { mutableStateOf<String?>(null) }
     var discoveryError by rememberSaveable { mutableStateOf<String?>(null) }
-    var appliedDraftNonce by rememberSaveable { mutableStateOf(0L) }
+    var appliedDraftNonce by rememberSaveable { mutableLongStateOf(0L) }
 
     val tokenFocus = remember { FocusRequester() }
     val servers = remember { mutableStateMapOf<String, DiscoveredServer>() }

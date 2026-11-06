@@ -73,6 +73,19 @@ export function PairDialog({
     }
   }
 
+  const setPairHost = async (host: string): Promise<void> => {
+    setBusy(true)
+    try {
+      const result = await window.phonedek.setPairHost(host)
+      if (result.state) onServerUpdate(result.state.server)
+      if (!result.ok) onToast(result.error ?? 'Could not use that address', 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const hostOptions = Array.from(new Set([...server.lanAddresses, '127.0.0.1']))
+
   return (
     <Modal
       title="Pair your phone"
@@ -139,8 +152,18 @@ export function PairDialog({
             </label>
             <div className="two-col">
               <label className="field">
-                <span>Host</span>
-                <input readOnly value={server.pair?.host ?? '—'} />
+                <span>Advertised host</span>
+                <select value={settings.pairHost} onChange={(event) => void setPairHost(event.target.value)} disabled={busy}>
+                  <option value="">Automatic ({server.pair?.host ?? 'not detected'})</option>
+                  {hostOptions.map((address) => (
+                    <option key={address} value={address}>
+                      {address}{address === '127.0.0.1' ? ' (loopback)' : ''}
+                    </option>
+                  ))}
+                  {settings.pairHost && !hostOptions.includes(settings.pairHost) && (
+                    <option value={settings.pairHost}>{settings.pairHost} (not detected)</option>
+                  )}
+                </select>
               </label>
               <label className="field">
                 <span>Port</span>

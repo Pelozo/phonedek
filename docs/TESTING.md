@@ -9,6 +9,7 @@ Report issues with `%APPDATA%\PhoneDeck\phonedek.log`, the Windows version and t
 - [ ] App opens with the starter deck and **Saved** in the top bar.
 - [ ] Server pill/status bar shows **LAN server on 47654**.
 - [ ] **Pair phone** shows a QR, host, port and token; **Copy** puts the link on the clipboard.
+- [ ] **Advertised host** lists the detected LAN addresses; choosing another adapter changes the QR host.
 - [ ] Change the port to `47655`-ish (e.g. 49000), Apply → status updates; the QR host/port changes.
 - [ ] Change the deck name in **Settings** → the QR/name updates.
 - [ ] Create a profile, add a page, switch pages, rename them.

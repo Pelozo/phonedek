@@ -29,6 +29,7 @@ export interface SettingsView {
   port: number
   discovery: boolean
   launchAtLogin: boolean
+  pairHost: string
 }
 
 export interface AppState {
@@ -66,6 +67,7 @@ export interface PhoneDeckApi {
   rotateToken(): Promise<OperationResult>
   setDiscovery(enabled: boolean): Promise<OperationResult>
   setLaunchAtLogin(enabled: boolean): Promise<OperationResult>
+  setPairHost(host: string): Promise<OperationResult>
   exportConfig(): Promise<OperationResult>
   importConfig(): Promise<SaveConfigResult>
   openLogs(): Promise<void>
@@ -85,6 +87,7 @@ export const IPC = {
   rotateToken: 'phonedek:rotate-token',
   setDiscovery: 'phonedek:set-discovery',
   setLaunchAtLogin: 'phonedek:set-launch-at-login',
+  setPairHost: 'phonedek:set-pair-host',
   exportConfig: 'phonedek:export-config',
   importConfig: 'phonedek:import-config',
   openLogs: 'phonedek:open-logs',

@@ -89,6 +89,15 @@ APP_BASE_NAME=${0##*/}
 APP_HOME=$( cd -P "${APP_HOME:-./}" > /dev/null && printf '%s
 ' "$PWD" ) || exit
 
+# Optional host-specific aapt2 wrapper (for example qemu-user on arm64). It is
+# stored in the gitignored local.properties, never in the repository.
+if [ -f "$APP_HOME/local.properties" ]; then
+    aapt2_override=$(sed -n 's/^aapt2\.override=//p' "$APP_HOME/local.properties" | tail -n 1)
+    if [ -n "$aapt2_override" ] && [ -f "$aapt2_override" ]; then
+        set -- "-Pandroid.aapt2FromMavenOverride=$aapt2_override" "$@"
+    fi
+fi
+
 # Some sandbox workspaces expose ~/.gradle on a FUSE mount that rejects chmod,
 # which Gradle's daemon registry requires. Use a writable cache home only when
 # the default one cannot accept a mode change.

@@ -9,6 +9,8 @@ export interface AppSettings {
   token: string
   discovery: boolean
   launchAtLogin: boolean
+  /** Optional LAN address to advertise in the QR code. Empty = auto. */
+  pairHost: string
 }
 
 export function createToken(): string {
@@ -21,6 +23,7 @@ export function defaultSettings(): AppSettings {
     token: createToken(),
     discovery: true,
     launchAtLogin: false,
+    pairHost: '',
   }
 }
 
@@ -35,11 +38,16 @@ function sanitize(input: Partial<AppSettings> | null | undefined): AppSettings {
     typeof input.token === 'string' && input.token.length >= 8 && input.token.length <= 128
       ? input.token
       : defaults.token
+  const pairHost =
+    typeof input.pairHost === 'string' && /^[A-Za-z0-9.-]{1,253}$/.test(input.pairHost.trim())
+      ? input.pairHost.trim()
+      : ''
   return {
     port,
     token,
     discovery: typeof input.discovery === 'boolean' ? input.discovery : defaults.discovery,
     launchAtLogin: typeof input.launchAtLogin === 'boolean' ? input.launchAtLogin : defaults.launchAtLogin,
+    pairHost,
   }
 }
 

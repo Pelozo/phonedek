@@ -4,7 +4,7 @@ import com.phonedek.app.data.DEFAULT_HTTP_PORT
 import com.phonedek.app.data.DeckConfig
 import com.phonedek.app.data.DeckJson
 import java.io.IOException
-import java.net.SocketTimeoutException
+import java.io.InterruptedIOException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -23,6 +23,16 @@ fun createHttpClient(): OkHttpClient = OkHttpClient.Builder()
     .writeTimeout(15, TimeUnit.SECONDS)
     .callTimeout(25, TimeUnit.SECONDS)
     .retryOnConnectionFailure(true)
+    .build()
+
+/**
+ * WebSockets are long-lived, so they must not inherit the HTTP call timeout.
+ * The app-level ping/pong watchdog in DeckConnection detects dead links.
+ */
+fun createWebSocketClient(): OkHttpClient = createHttpClient()
+    .newBuilder()
+    .callTimeout(0, TimeUnit.MILLISECONDS)
+    .readTimeout(0, TimeUnit.MILLISECONDS)
     .build()
 
 fun httpBaseUrl(host: String, port: Int): HttpUrl =
@@ -94,7 +104,7 @@ class HttpApi(private val client: OkHttpClient) {
                         }
                     }
                 }
-            } catch (error: SocketTimeoutException) {
+            } catch (error: InterruptedIOException) {
                 FetchResult.Failure(
                     "Connection timed out. Check the address and that PhoneDeck is running.",
                 )

@@ -100,8 +100,12 @@ describe('SettingsStore', () => {
     expect(token.length).toBeGreaterThan(10)
     expect(new SettingsStore(dir).get().token).toBe(token)
 
-    settings.update({ port: 49000, discovery: false })
+    settings.update({ port: 49000, discovery: false, pairHost: '192.168.1.50' })
     expect(new SettingsStore(dir).get().port).toBe(49000)
+    expect(new SettingsStore(dir).get().pairHost).toBe('192.168.1.50')
+
+    settings.update({ pairHost: '../not-an-address' })
+    expect(settings.get().pairHost).toBe('')
 
     const rotated = settings.rotateToken()
     expect(rotated).not.toBe(token)

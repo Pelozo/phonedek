@@ -20,6 +20,7 @@ import com.phonedek.app.net.DeckConnection
 import com.phonedek.app.net.FetchResult
 import com.phonedek.app.net.HttpApi
 import com.phonedek.app.net.createHttpClient
+import com.phonedek.app.net.createWebSocketClient
 import com.phonedek.app.util.parseEndpoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -56,6 +57,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = PrefsRepository(application)
     private val cache = ConfigCache(application)
     private val httpClient = createHttpClient()
+    private val socketClient = createWebSocketClient()
     private val http = HttpApi(httpClient)
     private val ingestMutex = Mutex()
 
@@ -85,7 +87,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var authWarningShown = false
 
     private val connection = DeckConnection(
-        client = httpClient,
+        client = socketClient,
         scope = viewModelScope,
         device = deviceInfo,
         listener = object : DeckConnection.Listener {

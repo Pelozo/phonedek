@@ -64,11 +64,14 @@ async function buildServerInfo(): Promise<ServerInfoView> {
   const port = server?.port || currentSettings.port
   let pair: PairView | null = null
   try {
-    const key = `${currentSettings.token}|${port}|${config.serverName}|${primaryLanAddress() ?? '127.0.0.1'}`
+    const detected = lanAddresses().map((item) => item.address)
+    const requestedHost = detected.includes(currentSettings.pairHost) ? currentSettings.pairHost : undefined
+    const host = requestedHost ?? primaryLanAddress() ?? '127.0.0.1'
+    const key = `${currentSettings.token}|${port}|${config.serverName}|${host}`
     if (pairCache?.key === key) {
       pair = pairCache.value
     } else {
-      const info = await createPairInfo(currentSettings.token, port, config.serverName)
+      const info = await createPairInfo(currentSettings.token, port, config.serverName, requestedHost)
       pair = {
         host: info.host,
         port: info.port,
@@ -94,6 +97,7 @@ async function buildServerInfo(): Promise<ServerInfoView> {
       port: currentSettings.port,
       discovery: currentSettings.discovery,
       launchAtLogin: currentSettings.launchAtLogin,
+      pairHost: currentSettings.pairHost,
     },
     clients: server?.getClients() ?? [],
     error: serverError,
@@ -112,6 +116,7 @@ async function buildState(): Promise<AppState> {
       port: settings.get().port,
       discovery: settings.get().discovery,
       launchAtLogin: settings.get().launchAtLogin,
+      pairHost: settings.get().pairHost,
     },
   }
 }
@@ -237,6 +242,17 @@ function registerIpc(): void {
     } else {
       discovery.stop()
     }
+    await pushServerInfo()
+    return { ok: true, state: await buildState() }
+  })
+
+  ipcMain.handle(IPC.setPairHost, async (_event, host: string): Promise<OperationResult> => {
+    const clean = typeof host === 'string' ? host.trim() : ''
+    if (clean && !lanAddresses().some((item) => item.address === clean)) {
+      return { ok: false, error: 'That address is not currently assigned to this PC', state: await buildState() }
+    }
+    settings.update({ pairHost: clean })
+    pairCache = null
     await pushServerInfo()
     return { ok: true, state: await buildState() }
   })

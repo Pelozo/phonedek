@@ -20,6 +20,7 @@ Prerequisites:
 ```bash
 cd apps/android
 ./gradlew assembleDebug
+./gradlew testDebugUnitTest
 ./gradlew lintDebug
 ```
 
@@ -35,10 +36,25 @@ Install it on a connected phone:
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-The wrapper currently pins Gradle 8.9. The originally requested Gradle 8.5.2
+The wrapper pins Gradle 8.9. The originally requested Gradle 8.5.2
 distribution is no longer served by `services.gradle.org`/the Gradle GitHub
 releases (it returns 404), so the closest available wrapper was used. AGP is
 still 8.5.2 and Kotlin/Compose are 2.0.20 / BOM 2024.12.01 as specified.
+
+### Toolchain notes for constrained hosts
+
+- **ARM64 Linux:** AGP downloads an x86-64 `aapt2`. If qemu-user is available,
+  create a small wrapper that runs it with an x86-64 sysroot, then add
+  `aapt2.override=/absolute/path/to/wrapper` to the gitignored
+  `local.properties`. `gradlew` forwards that as
+  `-Pandroid.aapt2FromMavenOverride`. On x86-64 hosts the key is not needed.
+- **File-attribute-restricted project mounts:** if the project tree cannot
+  perform chmod/attribute-preserving copies (some FUSE/NTFS mounts), the app
+  build automatically uses `~/.cache/phonedek/android-build` for intermediates
+  and mirrors the final APK back to the conventional path above.
+- **Non-chmod Gradle home:** if `~/.gradle` is on a mount that rejects chmod,
+  `gradlew` falls back to `~/.cache/phonedek-gradle` so the Gradle daemon can
+  start.
 
 ## Pairing
 

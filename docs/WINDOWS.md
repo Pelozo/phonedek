@@ -38,6 +38,7 @@ curl http://192.168.1.42:47654/api/info
 If this fails:
 
 - allow the app on **Private** networks,
+- if the PC has VPN/Docker/Hyper-V adapters, open **Pair phone → Advertised host** and pick the Wi-Fi address the phone can reach (or leave it on Automatic),
 - make sure both devices are on the same subnet,
 - disable VPN split tunnelling temporarily,
 - check that the Wi-Fi is not a guest network with client isolation.
