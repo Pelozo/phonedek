@@ -30,12 +30,15 @@ if (localPropertiesFile.isFile) {
         ?.let { path ->
             val override = file(path)
             if (override.isFile) {
-                gradle.beforeProject {
-                    it.extensions.extraProperties.set(
-                        "android.aapt2FromMavenOverride",
-                        override.absolutePath,
-                    )
+                val action = object : org.gradle.api.Action<org.gradle.api.Project> {
+                    override fun execute(project: org.gradle.api.Project) {
+                        project.extensions.extraProperties.set(
+                            "android.aapt2FromMavenOverride",
+                            override.absolutePath,
+                        )
+                    }
                 }
+                gradle.beforeProject(action)
             }
         }
 }
