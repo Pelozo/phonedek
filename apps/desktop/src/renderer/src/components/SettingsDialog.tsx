@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { DeckConfig } from '@phonedek/shared'
 import type { ServerInfoView, SettingsView } from '../../../shared/api'
 import { Icon } from './Icons'
@@ -7,6 +7,8 @@ import { Modal, Toggle } from './Primitives'
 export function SettingsDialog({
   server,
   settings,
+  serverName,
+  onRenameServer,
   onClose,
   onServerUpdate,
   onConfigImported,
@@ -14,12 +16,23 @@ export function SettingsDialog({
 }: {
   server: ServerInfoView
   settings: SettingsView
+  serverName: string
+  onRenameServer: (name: string) => void
   onClose: () => void
   onServerUpdate: (server: ServerInfoView) => void
   onConfigImported: (config: DeckConfig) => void
   onToast: (message: string, kind?: 'info' | 'success' | 'error') => void
 }) {
   const [busy, setBusy] = useState(false)
+  const [nameDraft, setNameDraft] = useState(serverName)
+
+  useEffect(() => setNameDraft(serverName), [serverName])
+
+  const commitName = (): void => {
+    const next = nameDraft.trim()
+    if (next && next !== serverName) onRenameServer(next)
+    else setNameDraft(serverName)
+  }
 
   const toggleLogin = async (enabled: boolean): Promise<void> => {
     setBusy(true)
@@ -69,6 +82,22 @@ export function SettingsDialog({
         </button>
       }
     >
+      <div className="settings-section">
+        <h3>Deck</h3>
+        <label className="field">
+          <span>Name shown on the phone</span>
+          <input
+            value={nameDraft}
+            maxLength={80}
+            onChange={(event) => setNameDraft(event.target.value)}
+            onBlur={commitName}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') (event.target as HTMLInputElement).blur()
+            }}
+          />
+        </label>
+      </div>
+
       <div className="settings-section">
         <h3>Startup</h3>
         <Toggle

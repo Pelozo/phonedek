@@ -340,6 +340,8 @@ export default function App() {
         <SettingsDialog
           server={server}
           settings={server.settings}
+          serverName={config.serverName}
+          onRenameServer={(name) => setConfig({ ...config, serverName: name })}
           onClose={() => setSettingsOpen(false)}
           onServerUpdate={setServer}
           onConfigImported={handleConfigImported}
