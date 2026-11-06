@@ -62,6 +62,12 @@ export class DiscoveryService {
 
     if (!this.socket) return false
 
+    try {
+      socket.setBroadcast(true)
+    } catch (error) {
+      this.options.logger?.warn(`Discovery could not enable broadcast: ${(error as Error).message}`)
+    }
+
     socket.on('error', (error) => this.options.logger?.warn(`Discovery socket error: ${error.message}`))
     socket.on('message', (message, rinfo) => {
       if (!isProbe(message.toString('utf8'))) return

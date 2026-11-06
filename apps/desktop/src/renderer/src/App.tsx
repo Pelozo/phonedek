@@ -159,11 +159,17 @@ export default function App() {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
         event.preventDefault()
         if (config) void save(config)
+        return
       }
+      if (event.key !== 'Escape' || !selectedButtonId) return
+      const target = event.target as HTMLElement | null
+      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
+      if (document.querySelector('.modal-backdrop')) return
+      setSelectedButtonId(null)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [config, save])
+  }, [config, save, selectedButtonId])
 
   const selectProfile = (id: string): void => {
     setSelectedProfileId(id)

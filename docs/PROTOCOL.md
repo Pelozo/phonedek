@@ -154,7 +154,7 @@ Notes for the Android renderer:
 
 - A page has at most `columns * rows` buttons. `slot` is `0..capacity-1`
   (row-major). Missing slots are empty.
-- `background` precedence: button background → page background → profile theme.
+- Deck background: `page.background` → `profile.theme.background`. Button background: `button.background` → `profile.theme.buttonBackground` (a page background is the deck, not the buttons).
 - `image` backgrounds reference a file served at `/assets/<asset>` with the
   token attached. `overlay` is a black scrim in `0..1`.
 - Colors are `#RGB`, `#RRGGBB` or `#RRGGBBAA`; `angle` is CSS degrees.

@@ -77,7 +77,7 @@ export const MacroStepSchema = z.discriminatedUnion('type', [
 export const ActionSchema = z.union([
   z.object({ type: z.literal('hotkey'), keys, holdMs }),
   z.object({ type: z.literal('text'), text: z.string().max(10_000), perCharMs }),
-  z.object({ type: z.literal('macro'), steps: z.array(MacroStepSchema).min(1).max(300) }),
+  z.object({ type: z.literal('macro'), steps: z.array(MacroStepSchema).max(300) }),
   z.object({
     type: z.literal('launch'),
     path: z.string().min(1).max(4096),

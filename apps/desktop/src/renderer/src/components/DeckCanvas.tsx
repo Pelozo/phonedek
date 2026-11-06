@@ -127,9 +127,6 @@ export function DeckCanvas({
                 }}
                 onDrop={(event) => onDrop(event, slot)}
                 onClick={() => onSelectButton(button.id)}
-                onDoubleClick={() => {
-                  if (button.actions.length) void window.phonedek.testActions(button.actions, button.label)
-                }}
                 role="button"
                 tabIndex={0}
                 onKeyDown={(event) => {
@@ -153,7 +150,7 @@ export function DeckCanvas({
         </div>
       </div>
       <div className="deck-hint">
-        <Icon name="drag" size={14} /> Drag to rearrange · click an empty cell to add a button · double-click to test
+        <Icon name="drag" size={14} /> Drag to rearrange · click an empty cell to add a button · press Esc for page settings
       </div>
     </div>
   )
