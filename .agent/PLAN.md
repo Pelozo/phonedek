@@ -37,7 +37,7 @@ Two apps:
 - [x] P5. CI green (Windows installer + APK + lint), README/docs, screenshots
 - [x] P6a. Electron verified under Xvfb (UI, save, QR, macro recorder, popovers)
 - [x] P6b. Polish: pair refresh, deck name setting, clean screenshots, Android lint gate
-- [ ] P7. Publish GitHub release v0.1.0 with installer + APK + checksums; final manual test notes
+- [x] P7. Published GitHub release v0.1.0 with installer + APK + checksums
 
 ## Open items / next session
 - Create release `v0.1.0` with the latest CI artifacts (installer + debug APK + SHA256SUMS).

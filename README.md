@@ -152,6 +152,10 @@ docs/
   ANDROID.md        Build/install/pairing notes
 ```
 
+## Manual testing
+
+A step-by-step checklist is in [docs/TESTING.md](docs/TESTING.md). The first preview is published at [v0.1.0](https://github.com/Pelozo/phonedek/releases/tag/v0.1.0).
+
 ## Status
 
 Early but usable. The core editor, protocol, action execution, Android rendering and pairing are implemented. See [`.agent/PLAN.md`](.agent/PLAN.md) for the live roadmap and known gaps.

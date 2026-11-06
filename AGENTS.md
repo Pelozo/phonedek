@@ -92,9 +92,10 @@ Autopilot loop rules:
    the in-flight task (it normally does), just continue where you were. Re-read
    only when: the context was compacted/summarized, you are genuinely unsure
    what to do next, or this is a fresh session. Keep the heartbeat cheap.
-1. One small task at a time: implement → verify (real code + gates: core tests
-   69/69, `npm run typecheck`, `npm run build`) → commit + push via
-   `/tmp/proxylab-push` → update `.agent/STATE.md`/`.agent/PLAN.md`.
+1. One small task at a time: implement → verify (real code + gates: `npm test`,
+   `npm run typecheck`, `npm run build`, and CI for Android) → commit + push with
+   `git --git-dir=/tmp/phonedek.git` (the NTFS workspace cannot host `.git`) → update
+   `.agent/STATE.md`/`.agent/PLAN.md`.
 2. Pick the next item from `.agent/PLAN.md` immediately; there is always work.
 3. Never end a turn without the wake-up timer (unless `.agent/STOP` exists).
 4. If blocked: record it in STATE.md, mark it, and move to the next task instead

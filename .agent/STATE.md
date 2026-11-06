@@ -12,13 +12,16 @@
   `resources/keyboard-helper.ps1`, app.asar has ws/zod/qrcode.
 - Android APK verified: 11 MB, debug-signed (v2), package `com.phonedek.app`, deep link
   `phonedek://pair`, minSdk 26/target 34.
-- Latest commit: 1f8ec00 "Add deck name setting" (final CI run 42313296530 in progress).
+- Release v0.1.0 published: https://github.com/Pelozo/phonedek/releases/tag/v0.1.0
+  (installer 122,033,305 B, debug APK 11,290,856 B, SHA256SUMS).
+- Latest code commit: 4d4f436 "Harden WebSocket payload limit"; CI run 42313515104 green.
 - Android background precedence fixed (`DeckButtonView` uses theme, not page).
 - Android subagent session `ses_e4cf99e72ffen0aq1xsuJgWb94`: its files are in the repo and
   CI-green; local arm64 Gradle still runs/fails on x86_64 aapt2 (CI x64 is authoritative).
   If it reports edits after 20:35, review and re-run CI.
-- Next action: wait for run 42313296530, download latest artifacts, create GitHub release
-  `v0.1.0` with installer + APK + SHA256SUMS and install/test instructions.
+- Next action: user manual test using docs/TESTING.md; collect feedback and fix issues.
+- Optional backlog: host selector for multi-NIC PCs, signed release APK, Windows code signing,
+  global macro recording hook, config export with assets (zip), tray/minimize-to-tray.
 - Release notes draft:
   - Windows: unsigned NSIS installer, SmartScreen warning; allow Private network firewall.
   - Android: sideload debug APK; scan QR with camera or enter host/port/token.
