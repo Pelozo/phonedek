@@ -1,5 +1,7 @@
 # PhoneDeck
 
+[![Build](https://github.com/Pelozo/phonedek/actions/workflows/build.yml/badge.svg)](https://github.com/Pelozo/phonedek/actions/workflows/build.yml)
+
 **Turn an Android phone into a wireless Stream Deck for your Windows PC.**
 
 PhoneDeck is two apps that work together:
@@ -33,7 +35,7 @@ No cloud, no account, no vendor lock-in: the phone talks directly to your PC ove
 
 ### Deck editor
 
-- **Profiles and pages** — multiple PCs/layouts, unlimited pages per profile, instant page switching.
+- **Profiles and pages** — multiple PCs/layouts, up to 20 pages per profile, instant page switching.
 - **Any grid you want** — 1×1 to 10×10 cells; buttons snap to slots; drag to rearrange or swap.
 - **Buttons** — label, sublabel, emoji icon, solid/gradient/image background, dark overlay, custom text color, per-button radius.
 - **Backgrounds** — curated gradients, color presets, or import your own PNG/JPG/WEBP/GIF/BMP (up to 25 MB). Images are copied into the app's data folder and served to the phone.
@@ -62,7 +64,7 @@ No cloud, no account, no vendor lock-in: the phone talks directly to your PC ove
 
 ## Quick start (Windows)
 
-> The easiest path is a GitHub Actions artifact. Every push builds a Windows installer and a debug APK.
+> The easiest path is the [latest release](https://github.com/Pelozo/phonedek/releases/latest) or a GitHub Actions artifact. Every push builds a Windows installer and a debug APK.
 
 1. Open the **Actions** tab → latest **Build** run → download:
    - `PhoneDeck-Windows` (installer `.exe`)

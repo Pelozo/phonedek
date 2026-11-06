@@ -102,6 +102,17 @@ export function PairDialog({
           <div className="pair-status">
             <span className={server.running ? 'dot online' : 'dot offline'} />
             {server.running ? `Listening on port ${server.port}` : 'Server offline'}
+            <button
+              type="button"
+              className="icon-button tiny"
+              title="Refresh address and QR"
+              onClick={async () => {
+                const state = await window.phonedek.getState()
+                onServerUpdate(state.server)
+              }}
+            >
+              <Icon name="refresh" size={13} />
+            </button>
           </div>
         </div>
 

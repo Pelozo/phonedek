@@ -12,7 +12,7 @@ import { ActionExecutor } from './executor'
 import { createHostActions } from './host-actions'
 import { createKeySender, type KeySender } from './key-sender'
 import { createLogger, type Logger } from './logger'
-import { lanAddresses, urlsForPort } from './lan'
+import { lanAddresses, primaryLanAddress, urlsForPort } from './lan'
 import { createPairInfo } from './qr'
 import { DeckServer, type PressContext } from './server'
 import { SettingsStore } from './settings-store'
@@ -64,7 +64,7 @@ async function buildServerInfo(): Promise<ServerInfoView> {
   const port = server?.port || currentSettings.port
   let pair: PairView | null = null
   try {
-    const key = `${currentSettings.token}|${port}|${config.serverName}`
+    const key = `${currentSettings.token}|${port}|${config.serverName}|${primaryLanAddress() ?? '127.0.0.1'}`
     if (pairCache?.key === key) {
       pair = pairCache.value
     } else {

@@ -18,7 +18,9 @@ cd apps/android
 
 Or open `apps/android` in Android Studio (Ladybug or newer), let Gradle sync, and press Run.
 
-Requirements: JDK 17/21, Android SDK Platform 34, Build-Tools 34.0.0. The project uses Gradle 8.5.2, AGP 8.5.2, Kotlin 2.0.20 and Compose.
+Requirements: JDK 17/21, Android SDK Platform 34, Build-Tools 34.0.0. The project uses Gradle 8.9, AGP 8.5.2, Kotlin 2.0.20 and Compose.
+
+On **arm64 Linux** hosts the Android SDK ships an x86_64 `aapt2`, which needs binfmt/qemu; the GitHub Actions x64 runner is the simplest way to build the APK. Windows and x86_64 Linux build natively.
 
 ## Install the APK
 
