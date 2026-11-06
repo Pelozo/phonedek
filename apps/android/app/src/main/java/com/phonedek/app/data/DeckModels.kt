@@ -3,6 +3,7 @@ package com.phonedek.app.data
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.decodeFromJsonElement
 
 const val DEFAULT_HTTP_PORT = 47654
 const val DISCOVERY_PORT = 47655

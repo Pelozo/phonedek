@@ -297,7 +297,6 @@ private fun DeckGrid(
                         if (button != null) {
                             DeckButtonView(
                                 button = button,
-                                page = page,
                                 theme = profile.theme,
                                 pairing = pairing,
                                 onPress = { onPress(button) },

@@ -103,7 +103,7 @@ class DeckConnection(
         pageId: String,
         buttonId: String,
     ): Boolean {
-        val socket = webSocket
+        val socket = webSocketRef
         if (!active || !connected || socket == null) return false
         val payload = buildJsonObject {
             put("type", "press")

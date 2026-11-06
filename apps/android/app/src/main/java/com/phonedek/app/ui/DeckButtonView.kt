@@ -37,7 +37,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.phonedek.app.data.DeckButton
-import com.phonedek.app.data.DeckPage
 import com.phonedek.app.data.DeckProfile
 import com.phonedek.app.data.Pairing
 import com.phonedek.app.data.ProfileTheme
@@ -45,7 +44,6 @@ import com.phonedek.app.data.ProfileTheme
 @Composable
 fun DeckButtonView(
     button: DeckButton,
-    page: DeckPage,
     theme: ProfileTheme,
     pairing: Pairing?,
     onPress: () -> Unit,
@@ -54,7 +52,7 @@ fun DeckButtonView(
     val pressed by interaction.collectIsPressedAsState()
     val haptics = LocalHapticFeedback.current
 
-    val background = button.background ?: page.background ?: theme.buttonBackground
+    val background = button.background ?: theme.buttonBackground
     val fallback = parseHexColor(
         when (theme.buttonBackground?.type) {
             "color" -> theme.buttonBackground.color
