@@ -1,0 +1,102 @@
+import type { SVGProps } from 'react'
+
+export type IconName =
+  | 'plus'
+  | 'trash'
+  | 'copy'
+  | 'chevron-down'
+  | 'chevron-left'
+  | 'chevron-right'
+  | 'play'
+  | 'record'
+  | 'settings'
+  | 'wifi'
+  | 'phone'
+  | 'x'
+  | 'check'
+  | 'grid'
+  | 'image'
+  | 'keyboard'
+  | 'text'
+  | 'bolt'
+  | 'link'
+  | 'app'
+  | 'terminal'
+  | 'music'
+  | 'refresh'
+  | 'monitor'
+  | 'save'
+  | 'download'
+  | 'upload'
+  | 'folder'
+  | 'pause'
+  | 'drag'
+  | 'lock'
+  | 'mouse'
+  | 'clock'
+  | 'layers'
+  | 'arrow-up'
+  | 'arrow-down'
+
+const paths: Record<IconName, string> = {
+  plus: 'M12 5v14M5 12h14',
+  trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6',
+  copy: 'M9 9h11v11H9zM4 15V4h11',
+  'chevron-down': 'm6 9 6 6 6-6',
+  'chevron-left': 'm15 18-6-6 6-6',
+  'chevron-right': 'm9 18 6-6-6-6',
+  play: 'M8 5v14l11-7z',
+  record: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
+  settings:
+    'M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.5a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.51 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.12.37.33.7.6 1 .3.26.68.4 1.1.4H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z',
+  wifi: 'M5 12.5a10 10 0 0 1 14 0M8.5 16a5.5 5.5 0 0 1 7 0M12 20h.01M2 9a15 15 0 0 1 20 0',
+  phone: 'M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM11 18h2',
+  x: 'M6 6l12 12M18 6 6 18',
+  check: 'm5 13 4 4L19 7',
+  grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
+  image: 'M4 5h16v14H4zM4 15l4-4 4 4 3-3 5 5M9 9h.01',
+  keyboard: 'M3 6h18v12H3zM7 10h.01M11 10h.01M15 10h.01M7 14h10',
+  text: 'M5 6h14M12 6v12M8 18h8',
+  bolt: 'm13 2-9 12h7l-1 8 9-12h-7z',
+  link: 'M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1',
+  app: 'M4 4h16v16H4zM8 8h8v8H8z',
+  terminal: 'm5 7 5 5-5 5M12 17h7',
+  music: 'M9 18V5l11-2v13M9 18a3 3 0 1 1-3-3M20 16a3 3 0 1 1-3-3',
+  refresh: 'M20 11a8 8 0 1 0-2 5M20 4v7h-7',
+  monitor: 'M3 4h18v12H3zM8 20h8M12 16v4',
+  save: 'M4 4h13l3 3v13H4zM8 4v6h8V4M8 20v-6h8v6',
+  download: 'M12 3v12M7 10l5 5 5-5M5 21h14',
+  upload: 'M12 21V9M7 14l5-5 5 5M5 3h14',
+  folder: 'M3 6h7l2 2h9v12H3z',
+  pause: 'M8 5v14M16 5v14',
+  drag: 'M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01',
+  lock: 'M6 10h12v11H6zM9 10V7a3 3 0 0 1 6 0v3',
+  mouse: 'M7 3h10v18H7zM12 3v7M9 7h6',
+  clock: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2',
+  layers: 'm12 3 9 5-9 5-9-5zM3 13l9 5 9-5M3 18l9 5 9-5',
+  'arrow-up': 'M12 19V5M6 11l6-6 6 6',
+  'arrow-down': 'M12 5v14M6 13l6 6 6-6',
+}
+
+export function Icon({
+  name,
+  size = 18,
+  ...props
+}: { name: IconName; size?: number } & SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d={paths[name]} />
+    </svg>
+  )
+}

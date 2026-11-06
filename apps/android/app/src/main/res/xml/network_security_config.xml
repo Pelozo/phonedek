@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- PhoneDeck is a LAN-only app. The desktop speaks plain HTTP/WS on the
+         local network, so cleartext must be allowed. No traffic leaves the LAN. -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

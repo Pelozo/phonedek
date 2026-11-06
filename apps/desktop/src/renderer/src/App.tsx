@@ -1,0 +1,346 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  addButton,
+  createEmptyButton,
+  nextFreeSlot,
+} from '@phonedek/shared'
+import type { DeckConfig } from '@phonedek/shared'
+import type { AppState, ServerInfoView } from '../../shared/api'
+import { DeckCanvas } from './components/DeckCanvas'
+import { Icon } from './components/Icons'
+import { Inspector } from './components/Inspector'
+import { PairDialog } from './components/PairDialog'
+import { SettingsDialog } from './components/SettingsDialog'
+import { Sidebar } from './components/Sidebar'
+
+type ToastKind = 'info' | 'success' | 'error'
+interface ToastState {
+  message: string
+  kind: ToastKind
+}
+
+type SaveStatus = 'saved' | 'saving' | 'error'
+
+export default function App() {
+  const [config, setConfig] = useState<DeckConfig | null>(null)
+  const [server, setServer] = useState<ServerInfoView | null>(null)
+  const [fatal, setFatal] = useState<string | null>(null)
+  const [selectedProfileId, setSelectedProfileId] = useState('')
+  const [selectedPageId, setSelectedPageId] = useState('')
+  const [selectedButtonId, setSelectedButtonId] = useState<string | null>(null)
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved')
+  const [saveErrors, setSaveErrors] = useState<string[]>([])
+  const [toast, setToast] = useState<ToastState | null>(null)
+  const [pairOpen, setPairOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+
+  const skipSave = useRef(true)
+  const saveNonce = useRef(0)
+  const toastTimer = useRef<number | null>(null)
+  const lastErrorShown = useRef('')
+
+  const showToast = useCallback((message: string, kind: ToastKind = 'info') => {
+    setToast({ message, kind })
+    if (toastTimer.current) window.clearTimeout(toastTimer.current)
+    toastTimer.current = window.setTimeout(() => setToast(null), 3800)
+  }, [])
+
+  useEffect(
+    () => () => {
+      if (toastTimer.current) window.clearTimeout(toastTimer.current)
+    },
+    [],
+  )
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const state: AppState = await window.phonedek.getState()
+        if (cancelled) return
+        setConfig(state.config)
+        setServer(state.server)
+        setSelectedProfileId(state.config.defaultProfileId)
+        const profile = state.config.profiles.find((item) => item.id === state.config.defaultProfileId)
+        setSelectedPageId(profile?.defaultPageId ?? state.config.profiles[0]?.defaultPageId ?? '')
+      } catch (error) {
+        if (!cancelled) setFatal(error instanceof Error ? error.message : String(error))
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    const offServer = window.phonedek.onServerInfo((info) => setServer(info))
+    const offConfig = window.phonedek.onConfigChanged((next) => {
+      skipSave.current = true
+      setConfig(next)
+      setSelectedProfileId(next.defaultProfileId)
+      const profile = next.profiles.find((item) => item.id === next.defaultProfileId)
+      setSelectedPageId(profile?.defaultPageId ?? next.profiles[0]?.defaultPageId ?? '')
+      setSelectedButtonId(null)
+    })
+    return () => {
+      offServer()
+      offConfig()
+    }
+  }, [])
+
+  const save = useCallback(
+    async (target: DeckConfig) => {
+      const nonce = ++saveNonce.current
+      setSaveStatus('saving')
+      try {
+        const result = await window.phonedek.saveConfig(target)
+        if (nonce !== saveNonce.current) return
+        if (result.ok) {
+          setSaveStatus('saved')
+          setSaveErrors([])
+          lastErrorShown.current = ''
+        } else {
+          const errors = result.errors ?? ['Could not save the configuration']
+          setSaveStatus('error')
+          setSaveErrors(errors)
+          const message = errors[0] ?? 'Could not save the configuration'
+          if (message !== lastErrorShown.current) {
+            lastErrorShown.current = message
+            showToast(message, 'error')
+          }
+        }
+      } catch (error) {
+        if (nonce !== saveNonce.current) return
+        const message = error instanceof Error ? error.message : String(error)
+        setSaveStatus('error')
+        setSaveErrors([message])
+        showToast(message, 'error')
+      }
+    },
+    [showToast],
+  )
+
+  useEffect(() => {
+    if (!config) return
+    if (skipSave.current) {
+      skipSave.current = false
+      return
+    }
+    setSaveStatus('saving')
+    const timer = window.setTimeout(() => void save(config), 320)
+    return () => window.clearTimeout(timer)
+  }, [config, save])
+
+  useEffect(() => {
+    if (!config) return
+    if (!config.profiles.some((item) => item.id === selectedProfileId)) {
+      setSelectedProfileId(config.defaultProfileId)
+    }
+  }, [config, selectedProfileId])
+
+  const profile = config?.profiles.find((item) => item.id === selectedProfileId) ?? config?.profiles[0] ?? null
+  const page = profile?.pages.find((item) => item.id === selectedPageId) ?? profile?.pages[0] ?? null
+
+  useEffect(() => {
+    if (!profile) return
+    if (!profile.pages.some((item) => item.id === selectedPageId)) {
+      setSelectedPageId(profile.defaultPageId)
+    }
+  }, [profile, selectedPageId])
+
+  useEffect(() => {
+    if (selectedButtonId && page && !page.buttons.some((item) => item.id === selectedButtonId)) {
+      setSelectedButtonId(null)
+    }
+  }, [page, selectedButtonId])
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault()
+        if (config) void save(config)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [config, save])
+
+  const selectProfile = (id: string): void => {
+    setSelectedProfileId(id)
+    const next = config?.profiles.find((item) => item.id === id)
+    if (next) setSelectedPageId(next.defaultPageId)
+    setSelectedButtonId(null)
+  }
+
+  const selectPage = (id: string): void => {
+    setSelectedPageId(id)
+    setSelectedButtonId(null)
+  }
+
+  const addNewButton = (): void => {
+    if (!config || !profile || !page) return
+    const slot = nextFreeSlot(page, profile.grid)
+    if (slot === null) {
+      showToast('This page is full. Add rows/columns or delete a button first.', 'error')
+      return
+    }
+    const button = createEmptyButton(slot)
+    try {
+      const next = addButton(config, profile.id, page.id, button)
+      setConfig(next)
+      setSelectedButtonId(button.id)
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error')
+    }
+  }
+
+  const handleConfigImported = (next: DeckConfig): void => {
+    skipSave.current = true
+    setConfig(next)
+    setSelectedProfileId(next.defaultProfileId)
+    const nextProfile = next.profiles.find((item) => item.id === next.defaultProfileId)
+    setSelectedPageId(nextProfile?.defaultPageId ?? next.profiles[0]?.defaultPageId ?? '')
+    setSelectedButtonId(null)
+  }
+
+  if (fatal) {
+    return (
+      <div className="boot">
+        <span className="brand-mark large">
+          <Icon name="grid" size={26} />
+        </span>
+        <h1>PhoneDeck could not start</h1>
+        <p className="muted">{fatal}</p>
+        <button className="button primary" onClick={() => window.location.reload()}>
+          Try again
+        </button>
+      </div>
+    )
+  }
+
+  if (!config || !server || !profile || !page) {
+    return (
+      <div className="boot">
+        <span className="brand-mark large pulse">
+          <Icon name="grid" size={26} />
+        </span>
+        <h1>PhoneDeck</h1>
+        <p className="muted">Starting the deck server…</p>
+      </div>
+    )
+  }
+
+  const selectedButton = page.buttons.find((item) => item.id === selectedButtonId) ?? null
+  const saveLabel = saveStatus === 'saving' ? 'Saving…' : saveStatus === 'error' ? 'Unsaved' : 'Saved'
+
+  return (
+    <div className="app-shell">
+      <Sidebar
+        config={config}
+        profile={profile}
+        page={page}
+        server={server}
+        settings={server.settings}
+        onChangeConfig={setConfig}
+        onSelectProfile={selectProfile}
+        onSelectPage={selectPage}
+        onOpenPair={() => setPairOpen(true)}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onToast={showToast}
+      />
+
+      <main className="workspace">
+        <header className="topbar">
+          <div className="breadcrumbs">
+            <span>{profile.name}</span>
+            <Icon name="chevron-right" size={14} />
+            <strong>{page.name}</strong>
+            <span className="grid-pill">
+              {profile.grid.columns} × {profile.grid.rows}
+            </span>
+            <span className="slot-pill">
+              {page.buttons.length}/{profile.grid.columns * profile.grid.rows} slots
+            </span>
+          </div>
+
+          <div className="topbar-actions">
+            <div className={`save-state ${saveStatus}`} title={saveErrors[0] ?? 'Configuration is stored on this PC'}>
+              <Icon name={saveStatus === 'saved' ? 'check' : saveStatus === 'saving' ? 'refresh' : 'bolt'} size={15} />
+              {saveLabel}
+            </div>
+            <button type="button" className="button secondary" onClick={addNewButton}>
+              <Icon name="plus" size={16} /> Add button
+            </button>
+            <button type="button" className="button primary" onClick={() => setPairOpen(true)}>
+              <span className={`dot ${server.running ? 'online' : 'offline'}`} />
+              Pair phone
+              {server.clients.length > 0 && <span className="client-count">{server.clients.length}</span>}
+            </button>
+            <button type="button" className="icon-button bordered" onClick={() => setSettingsOpen(true)} aria-label="Settings">
+              <Icon name="settings" size={18} />
+            </button>
+          </div>
+        </header>
+
+        <div className="workspace-body">
+          <DeckCanvas
+            config={config}
+            profile={profile}
+            page={page}
+            server={server}
+            selectedButtonId={selectedButtonId}
+            onChangeConfig={setConfig}
+            onSelectButton={setSelectedButtonId}
+            onToast={showToast}
+          />
+          <Inspector
+            config={config}
+            profile={profile}
+            page={page}
+            button={selectedButton}
+            server={server}
+            onChangeConfig={setConfig}
+            onSelectButton={setSelectedButtonId}
+            onToast={showToast}
+          />
+        </div>
+
+        <footer className="statusbar">
+          <span>
+            <Icon name={server.running ? 'wifi' : 'monitor'} size={14} />
+            {server.running ? `LAN server on ${server.port}` : (server.error ?? 'Server offline')}
+          </span>
+          <span>
+            <Icon name="lock" size={13} /> Token pairing
+          </span>
+          <span>
+            <Icon name="phone" size={13} /> {server.clients.length} device{server.clients.length === 1 ? '' : 's'}
+          </span>
+          <span className="spacer" />
+          <span>{server.version}</span>
+        </footer>
+      </main>
+
+      {pairOpen && (
+        <PairDialog
+          server={server}
+          settings={server.settings}
+          onClose={() => setPairOpen(false)}
+          onServerUpdate={setServer}
+          onToast={showToast}
+        />
+      )}
+      {settingsOpen && (
+        <SettingsDialog
+          server={server}
+          settings={server.settings}
+          onClose={() => setSettingsOpen(false)}
+          onServerUpdate={setServer}
+          onConfigImported={handleConfigImported}
+          onToast={showToast}
+        />
+      )}
+      {toast && <div className={`toast ${toast.kind}`}>{toast.message}</div>}
+    </div>
+  )
+}

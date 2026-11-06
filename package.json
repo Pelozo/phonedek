@@ -1,0 +1,30 @@
+{
+  "name": "phonedek",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PhoneDeck — turn an Android phone into a wireless Stream Deck for Windows",
+  "license": "MIT",
+  "workspaces": [
+    "packages/*",
+    "apps/desktop"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "dev": "npm run dev -w @phonedek/desktop",
+    "build": "npm run build -w @phonedek/desktop",
+    "start": "npm run start -w @phonedek/desktop",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "npm run typecheck -w @phonedek/desktop",
+    "dist": "npm run dist -w @phonedek/desktop",
+    "dist:win": "npm run dist:win -w @phonedek/desktop",
+    "android:apk": "cd apps/android && ./gradlew assembleDebug"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

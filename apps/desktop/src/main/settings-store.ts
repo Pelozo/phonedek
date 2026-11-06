@@ -1,0 +1,103 @@
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { randomBytes } from 'node:crypto'
+import { DEFAULT_HTTP_PORT } from '@phonedek/shared'
+import type { Logger } from './logger'
+
+export interface AppSettings {
+  port: number
+  token: string
+  discovery: boolean
+  launchAtLogin: boolean
+}
+
+export function createToken(): string {
+  return randomBytes(18).toString('base64url')
+}
+
+export function defaultSettings(): AppSettings {
+  return {
+    port: DEFAULT_HTTP_PORT,
+    token: createToken(),
+    discovery: true,
+    launchAtLogin: false,
+  }
+}
+
+function sanitize(input: Partial<AppSettings> | null | undefined): AppSettings {
+  const defaults = defaultSettings()
+  if (!input) return defaults
+  const port =
+    typeof input.port === 'number' && Number.isInteger(input.port) && input.port >= 1024 && input.port <= 65535
+      ? input.port
+      : defaults.port
+  const token =
+    typeof input.token === 'string' && input.token.length >= 8 && input.token.length <= 128
+      ? input.token
+      : defaults.token
+  return {
+    port,
+    token,
+    discovery: typeof input.discovery === 'boolean' ? input.discovery : defaults.discovery,
+    launchAtLogin: typeof input.launchAtLogin === 'boolean' ? input.launchAtLogin : defaults.launchAtLogin,
+  }
+}
+
+export class SettingsStore {
+  readonly file: string
+  private settings: AppSettings
+  private readonly logger?: Logger
+
+  constructor(dir: string, logger?: Logger) {
+    this.file = join(dir, 'settings.json')
+    this.logger = logger
+    mkdirSync(dir, { recursive: true })
+    this.settings = this.load()
+  }
+
+  get(): AppSettings {
+    return { ...this.settings }
+  }
+
+  update(patch: Partial<AppSettings>): AppSettings {
+    this.settings = sanitize({ ...this.settings, ...patch })
+    this.write()
+    return this.get()
+  }
+
+  rotateToken(): string {
+    const token = createToken()
+    this.settings = { ...this.settings, token }
+    this.write()
+    return token
+  }
+
+  private load(): AppSettings {
+    if (!existsSync(this.file)) {
+      const settings = defaultSettings()
+      this.writeValue(settings)
+      return settings
+    }
+    try {
+      const parsed = JSON.parse(readFileSync(this.file, 'utf8')) as Partial<AppSettings>
+      const settings = sanitize(parsed)
+      this.writeValue(settings)
+      return settings
+    } catch (error) {
+      this.logger?.warn(`settings.json was invalid, regenerating: ${String(error)}`)
+      const settings = defaultSettings()
+      this.writeValue(settings)
+      return settings
+    }
+  }
+
+  private write(): void {
+    this.writeValue(this.settings)
+  }
+
+  private writeValue(settings: AppSettings): void {
+    const temp = `${this.file}.${process.pid}.tmp`
+    writeFileSync(temp, `${JSON.stringify(settings, null, 2)}\n`, 'utf8')
+    renameSync(temp, this.file)
+  }
+}

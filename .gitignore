@@ -1,0 +1,29 @@
+node_modules/
+dist/
+out/
+release/
+coverage/
+*.log
+.DS_Store
+Thumbs.db
+.env
+.env.*
+!.env.example
+
+# Android
+apps/android/.gradle/
+apps/android/local.properties
+apps/android/**/build/
+apps/android/.idea/
+apps/android/*.iml
+apps/android/captures/
+*.jks
+*.keystore
+
+# Electron
+apps/desktop/out/
+apps/desktop/dist/
+apps/desktop/release/
+
+# Agent scratch
+.agent/STOP
