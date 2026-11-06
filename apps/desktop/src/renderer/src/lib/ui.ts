@@ -4,8 +4,9 @@ import type { ServerInfoView } from '../../../shared/api'
 
 export function assetUrl(server: ServerInfoView | null, asset: string): string | null {
   if (!server?.running) return null
-  const host = server.lanAddresses[0] ?? '127.0.0.1'
-  return `http://${host}:${server.port}/assets/${encodeURIComponent(asset)}?token=${encodeURIComponent(server.token)}`
+  // The editor always runs on the same machine as the server, so the loopback
+  // address is both faster and compatible with the renderer CSP.
+  return `http://127.0.0.1:${server.port}/assets/${encodeURIComponent(asset)}?token=${encodeURIComponent(server.token)}`
 }
 
 export function backgroundStyle(

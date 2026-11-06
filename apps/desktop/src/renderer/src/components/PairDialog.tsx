@@ -25,7 +25,7 @@ export function PairDialog({
 
   const copy = async (text: string, label: string): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(text)
+      await window.phonedek.copyText(text)
       onToast(`${label} copied`, 'success')
     } catch {
       onToast('Clipboard is unavailable. Select the text and copy manually.', 'error')

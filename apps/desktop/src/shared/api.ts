@@ -70,6 +70,7 @@ export interface PhoneDeckApi {
   importConfig(): Promise<SaveConfigResult>
   openLogs(): Promise<void>
   openExternal(url: string): Promise<void>
+  copyText(text: string): Promise<void>
   onServerInfo(listener: (info: ServerInfoView) => void): () => void
   onConfigChanged(listener: (config: DeckConfig) => void): () => void
 }
@@ -88,6 +89,7 @@ export const IPC = {
   importConfig: 'phonedek:import-config',
   openLogs: 'phonedek:open-logs',
   openExternal: 'phonedek:open-external',
+  copyText: 'phonedek:copy-text',
   serverInfoEvent: 'phonedek:server-info',
   configChangedEvent: 'phonedek:config-changed',
 } as const

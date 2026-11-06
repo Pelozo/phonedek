@@ -113,7 +113,8 @@ fun PairingScreen(
         while (true) {
             delay(3_000)
             val cutoff = SystemClock.elapsedRealtime() - 12_000
-            servers.entries.removeAll { it.value.lastSeen < cutoff }
+            val stale = servers.values.filter { it.lastSeen < cutoff }.map { it.key }
+            stale.forEach { servers.remove(it) }
         }
     }
 

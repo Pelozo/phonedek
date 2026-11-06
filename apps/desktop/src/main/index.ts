@@ -1,4 +1,5 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from 'electron'
+import type { OpenDialogOptions, SaveDialogOptions } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
@@ -25,6 +26,10 @@ import type {
   ServerInfoView,
 } from '../shared/api'
 
+app.setName('PhoneDeck')
+
+const APP_VERSION = '0.1.0'
+
 let mainWindow: BrowserWindow | null = null
 let logger: Logger
 let store: ConfigStore
@@ -42,6 +47,15 @@ function helperPath(): string {
   return app.isPackaged
     ? join(process.resourcesPath, 'keyboard-helper.ps1')
     : join(app.getAppPath(), 'resources', 'keyboard-helper.ps1')
+}
+
+
+async function showOpen(options: OpenDialogOptions) {
+  return mainWindow ? dialog.showOpenDialog(mainWindow, options) : dialog.showOpenDialog(options)
+}
+
+async function showSave(options: SaveDialogOptions) {
+  return mainWindow ? dialog.showSaveDialog(mainWindow, options) : dialog.showSaveDialog(options)
 }
 
 async function buildServerInfo(): Promise<ServerInfoView> {
@@ -83,7 +97,7 @@ async function buildServerInfo(): Promise<ServerInfoView> {
     },
     clients: server?.getClients() ?? [],
     error: serverError,
-    version: app.getVersion(),
+    version: APP_VERSION,
     platform: process.platform,
     configPath: store.file,
     logPath: logger.logPath,
@@ -165,7 +179,7 @@ function registerIpc(): void {
   })
 
   ipcMain.handle(IPC.importAsset, async (): Promise<AssetPickResult> => {
-    const result = await dialog.showOpenDialog(mainWindow ?? undefined!, {
+    const result = await showOpen({
       title: 'Choose a button background',
       properties: ['openFile'],
       filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }],
@@ -180,7 +194,7 @@ function registerIpc(): void {
   })
 
   ipcMain.handle(IPC.pickApplication, async (): Promise<string | null> => {
-    const result = await dialog.showOpenDialog(mainWindow ?? undefined!, {
+    const result = await showOpen({
       title: 'Choose an application',
       properties: ['openFile'],
       filters:
@@ -241,7 +255,7 @@ function registerIpc(): void {
   })
 
   ipcMain.handle(IPC.exportConfig, async (): Promise<OperationResult> => {
-    const result = await dialog.showSaveDialog(mainWindow ?? undefined!, {
+    const result = await showSave({
       title: 'Export PhoneDeck configuration',
       defaultPath: 'phonedek-config.json',
       filters: [{ name: 'PhoneDeck config', extensions: ['json'] }],
@@ -256,7 +270,7 @@ function registerIpc(): void {
   })
 
   ipcMain.handle(IPC.importConfig, async (): Promise<SaveConfigResult> => {
-    const result = await dialog.showOpenDialog(mainWindow ?? undefined!, {
+    const result = await showOpen({
       title: 'Import PhoneDeck configuration',
       properties: ['openFile'],
       filters: [{ name: 'PhoneDeck config', extensions: ['json'] }],
@@ -284,6 +298,10 @@ function registerIpc(): void {
     const parsed = new URL(url)
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Invalid URL')
     await shell.openExternal(url)
+  })
+
+  ipcMain.handle(IPC.copyText, async (_event, text: string): Promise<void> => {
+    clipboard.writeText(String(text).slice(0, 20_000))
   })
 }
 
@@ -336,7 +354,7 @@ function createWindow(): void {
 async function bootstrap(): Promise<void> {
   const userData = app.getPath('userData')
   logger = createLogger(userData)
-  logger.info(`PhoneDeck ${app.getVersion()} starting on ${process.platform} (${process.arch})`)
+  logger.info(`PhoneDeck ${APP_VERSION} starting on ${process.platform} (${process.arch})`)
   logger.info(`Data directory: ${userData}`)
 
   store = new ConfigStore({ dir: userData, logger })
@@ -356,7 +374,7 @@ async function bootstrap(): Promise<void> {
   server = new DeckServer({
     port: settings.get().port,
     token: settings.get().token,
-    version: app.getVersion(),
+    version: APP_VERSION,
     assets,
     getConfig: () => store.get(),
     getServerName: () => store.get().serverName,
@@ -371,7 +389,7 @@ async function bootstrap(): Promise<void> {
   discovery = new DiscoveryService({
     getPort: () => server.port || settings.get().port,
     getName: () => store.get().serverName,
-    version: app.getVersion(),
+    version: APP_VERSION,
     logger,
   })
 

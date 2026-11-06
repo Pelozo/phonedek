@@ -89,6 +89,22 @@ APP_BASE_NAME=${0##*/}
 APP_HOME=$( cd -P "${APP_HOME:-./}" > /dev/null && printf '%s
 ' "$PWD" ) || exit
 
+# Some sandbox workspaces expose ~/.gradle on a FUSE mount that rejects chmod,
+# which Gradle's daemon registry requires. Use a writable cache home only when
+# the default one cannot accept a mode change.
+if [ -z "${GRADLE_USER_HOME:-}" ] && [ -d "$HOME/.gradle" ]; then
+    if touch "$HOME/.gradle/.phonedek-chmod-probe" 2>/dev/null &&
+        chmod 600 "$HOME/.gradle/.phonedek-chmod-probe" 2>/dev/null; then
+        rm -f "$HOME/.gradle/.phonedek-chmod-probe" 2>/dev/null
+    else
+        rm -f "$HOME/.gradle/.phonedek-chmod-probe" 2>/dev/null
+        GRADLE_USER_HOME="${XDG_CACHE_HOME:-$HOME/.cache}/phonedek-gradle"
+        export GRADLE_USER_HOME
+        mkdir -p "$GRADLE_USER_HOME" 2>/dev/null
+        echo "PhoneDeck: ~/.gradle rejects chmod; using $GRADLE_USER_HOME" >&2
+    fi
+fi
+
 # Use the maximum available, or set MAX_FD != -1 to use that value.
 MAX_FD=maximum
 

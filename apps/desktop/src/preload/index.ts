@@ -25,6 +25,7 @@ const api: PhoneDeckApi = {
   importConfig: (): Promise<SaveConfigResult> => ipcRenderer.invoke(IPC.importConfig),
   openLogs: (): Promise<void> => ipcRenderer.invoke(IPC.openLogs),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke(IPC.openExternal, url),
+  copyText: (text: string): Promise<void> => ipcRenderer.invoke(IPC.copyText, text),
   onServerInfo: (listener: (info: ServerInfoView) => void): (() => void) => {
     const handler = (_event: unknown, info: ServerInfoView): void => listener(info)
     ipcRenderer.on(IPC.serverInfoEvent, handler)

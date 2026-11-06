@@ -82,6 +82,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var pairJob: Job? = null
     private var fetchJob: Job? = null
     private var protocolWarningShown = false
+    private var authWarningShown = false
 
     private val connection = DeckConnection(
         client = httpClient,
@@ -177,6 +178,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         val hadPairing = _state.value.pairing != null
         pairJob?.cancel()
+        fetchJob?.cancel()
         pairJob = viewModelScope.launch {
             _state.update { it.copy(pairingBusy = true, pairingError = null) }
             when (val result = http.fetchConfig(endpoint.host, endpoint.port, token)) {
@@ -191,6 +193,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     cache.write(result.raw)
                     lastRawConfig = result.raw
+                    authWarningShown = false
 
                     val pairing = Pairing(
                         host = endpoint.host,
@@ -283,6 +286,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         lastPageId = null
         lastProfileId = null
         protocolWarningShown = false
+        authWarningShown = false
         val keepScreenOn = _state.value.keepScreenOn
         _state.value = UiState(
             ready = true,
@@ -335,28 +339,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         lastProfileId = stored.lastProfileId
 
         val cachedRaw = cache.read()
-        val cached = cachedRaw?.let { runCatching { DeckJson.parse(it) }.getOrNull() }
-        lastRawConfig = cachedRaw.takeIf { cached != null }
+        val current = _state.value
+        val cached = cachedRaw?.let {
+            withContext(Dispatchers.IO) { runCatching { DeckJson.parse(it) }.getOrNull() }
+        }
+        if (current.config == null && cached != null) {
+            lastRawConfig = cachedRaw
+        }
 
         val active = cached?.let { resolveActive(it, stored.lastProfileId, stored.lastPageId) }
-        _state.value = UiState(
+        val pairing = current.pairing ?: stored.pairing
+        val profileId = current.activeProfileId ?: active?.first
+        val pageId = current.activePageId ?: active?.second
+
+        // Merge instead of replacing: a deep link can arrive while this read is
+        // still in flight, and its draft/error/busy/pairing state must survive.
+        _state.value = current.copy(
             ready = true,
-            pairing = stored.pairing,
-            config = cached,
-            activeProfileId = active?.first,
-            activePageId = active?.second,
+            pairing = pairing,
+            config = current.config ?: cached,
+            activeProfileId = profileId,
+            activePageId = pageId,
             keepScreenOn = stored.keepScreenOn,
-            connection = ConnectionStatus.OFFLINE,
         )
         loaded = true
 
-        if (active != null) {
+        if (current.activeProfileId == null && active != null) {
             lastProfileId = active.first
             lastPageId = active.second
         }
 
-        val pairing = stored.pairing
-        if (pairing != null && foreground) {
+        if (pairing != null && foreground && !current.pairingBusy) {
             connection.start(pairing.host, pairing.port, pairing.token)
         }
     }
@@ -369,7 +382,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 is FetchResult.Success -> ingestConfig(result.raw)
                 is FetchResult.Failure -> {
                     // The WebSocket may still be healthy; only surface auth failures.
-                    if (result.unauthorized) emit(result.message)
+                    if (result.unauthorized && !authWarningShown) {
+                        authWarningShown = true
+                        emit("${result.message} Re-pair if the desktop token was rotated.")
+                    }
                 }
             }
         }

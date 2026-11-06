@@ -2264,9 +2264,10 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 .popmenu-panel {
-  position: absolute;
-  top: calc(100% + 6px);
-  z-index: 30;
+  position: fixed;
+  z-index: 70;
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
   padding: 5px;
   border: 1px solid #2a3c5d;
   border-radius: 11px;

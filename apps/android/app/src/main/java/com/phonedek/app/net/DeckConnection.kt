@@ -62,7 +62,6 @@ class DeckConnection(
     private var lastPongAt = 0L
 
     private var socketGeneration = 0L
-    private var webSocket: WebSocket? = null
     private var host = ""
     private var port = 0
     private var token = ""
@@ -168,23 +167,16 @@ class DeckConnection(
                 }
             }
 
-            override fun onPong(webSocket: WebSocket, payload: okio.ByteString) {
-                lastPongAt = SystemClock.elapsedRealtime()
-                scope.launch {
-                    if (active && generation == socketGeneration) listener.onPong()
-                }
-            }
-
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 webSocket.close(1000, null)
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                scope.launch { handleDisconnect(generation, "closed") }
+                scope.launch { handleDisconnect(generation) }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                scope.launch { handleDisconnect(generation, t.message ?: "connection failed") }
+                scope.launch { handleDisconnect(generation) }
             }
         })
 
@@ -200,7 +192,7 @@ class DeckConnection(
     @Volatile
     private var webSocketRef: WebSocket? = null
 
-    private fun handleDisconnect(generation: Long, reason: String) {
+    private fun handleDisconnect(generation: Long) {
         if (!active || generation != socketGeneration) return
         connected = false
         webSocketRef = null
