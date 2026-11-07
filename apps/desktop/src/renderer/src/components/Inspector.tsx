@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Action, DeckButton, DeckConfig, DeckPage, DeckProfile, MacroStep } from '@phonedek/shared'
+import type { Action, ActionPack, ActionPreset, DeckButton, DeckConfig, DeckPage, DeckProfile, MacroStep } from '@phonedek/shared'
 import {
   capacity,
   compactPage,
@@ -18,6 +18,7 @@ import { BackgroundEditor } from './BackgroundEditor'
 import { Icon } from './Icons'
 import { IconPicker } from './IconPicker'
 import { PopMenu } from './Menu'
+import { PresetPicker } from './PresetPicker'
 import { ColorField, NumberField, Toggle } from './Primitives'
 
 const DEFAULT_MACRO_STEP: MacroStep = { type: 'hotkey', keys: ['CTRL', 'C'], holdMs: 35 }
@@ -67,6 +68,7 @@ export function Inspector({
   const [customBackground, setCustomBackground] = useState(button?.background !== undefined)
   const [customText, setCustomText] = useState(button?.textColor !== undefined)
   const [pageCustomBackground, setPageCustomBackground] = useState(page.background !== undefined)
+  const [presetsOpen, setPresetsOpen] = useState(false)
 
   useEffect(() => {
     setCustomBackground(button?.background !== undefined)
@@ -274,6 +276,21 @@ export function Inspector({
     update({ actions })
   }
 
+  const addPreset = (pack: ActionPack, preset: ActionPreset): void => {
+    const plainLabel = button.label.trim().toLowerCase()
+    const untitled = plainLabel === '' || plainLabel === 'untitled' || plainLabel === 'untitled button' || plainLabel === 'new button'
+    update({
+      actions: [...button.actions, ...structuredClone(preset.actions)],
+      ...(untitled
+        ? {
+            label: preset.name,
+            ...(preset.icon ? { icon: preset.icon } : {}),
+          }
+        : {}),
+    })
+    onToast(`${pack.name} · ${preset.name} added`, 'success')
+  }
+
   const deleteButton = (): void => {
     if (!window.confirm(`Delete the “${button.label || 'Untitled'}” button?`)) return
     onChangeConfig(removeButton(config, profile.id, page.id, button.id))
@@ -395,25 +412,38 @@ export function Inspector({
             <h3>
               Actions <span className="count">{button.actions.length}</span>
             </h3>
-            <PopMenu
-              align="right"
-              trigger={
-                <button type="button" className="button secondary small">
-                  <Icon name="plus" size={15} /> Add action
-                </button>
-              }
-              items={[
-                { label: 'Shortcut', icon: 'keyboard', description: 'Send a key combination', onClick: () => update({ actions: [...button.actions, defaultAction('hotkey')] }) },
-                { label: 'Type text', icon: 'text', description: 'Type a phrase on the PC', onClick: () => update({ actions: [...button.actions, defaultAction('text')] }) },
-                { label: 'Macro', icon: 'bolt', description: 'A recorded sequence', onClick: () => update({ actions: [...button.actions, defaultAction('macro')] }) },
-                { label: 'Launch app', icon: 'app', description: 'Start a program', onClick: () => update({ actions: [...button.actions, defaultAction('launch')] }) },
-                { label: 'Open URL', icon: 'link', description: 'Open a web page', onClick: () => update({ actions: [...button.actions, defaultAction('url')] }) },
-                { label: 'Run command', icon: 'terminal', description: 'Run a shell command', onClick: () => update({ actions: [...button.actions, defaultAction('command')] }) },
-                { label: 'Media key', icon: 'music', description: 'Play, pause, volume…', onClick: () => update({ actions: [...button.actions, defaultAction('media')] }) },
-                { label: 'Delay', icon: 'clock', description: 'Wait before the next action', onClick: () => update({ actions: [...button.actions, defaultAction('delay')] }) },
-                { label: 'Change page', icon: 'layers', description: 'Navigate to another deck page', onClick: () => update({ actions: [...button.actions, defaultAction('page')] }) },
-              ]}
-            />
+            <div className="row gap">
+              <button
+                type="button"
+                className="button secondary small preset-launch"
+                onClick={() => setPresetsOpen(true)}
+                aria-label="Browse preset actions"
+                title="Browse preset actions"
+              >
+                <Icon name="grid" size={15} />
+                <span className="preset-launch-label">Presets</span>
+              </button>
+              <PopMenu
+                align="right"
+                trigger={
+                  <button type="button" className="button secondary small">
+                    <Icon name="plus" size={15} /> Add action
+                  </button>
+                }
+                items={[
+                  { label: 'Browse presets…', icon: 'grid', description: 'Ready-made shortcut packs', onClick: () => setPresetsOpen(true) },
+                  { label: 'Shortcut', icon: 'keyboard', description: 'Send a key combination', onClick: () => update({ actions: [...button.actions, defaultAction('hotkey')] }) },
+                  { label: 'Type text', icon: 'text', description: 'Type a phrase on the PC', onClick: () => update({ actions: [...button.actions, defaultAction('text')] }) },
+                  { label: 'Macro', icon: 'bolt', description: 'A recorded sequence', onClick: () => update({ actions: [...button.actions, defaultAction('macro')] }) },
+                  { label: 'Launch app', icon: 'app', description: 'Start a program', onClick: () => update({ actions: [...button.actions, defaultAction('launch')] }) },
+                  { label: 'Open URL', icon: 'link', description: 'Open a web page', onClick: () => update({ actions: [...button.actions, defaultAction('url')] }) },
+                  { label: 'Run command', icon: 'terminal', description: 'Run a shell command', onClick: () => update({ actions: [...button.actions, defaultAction('command')] }) },
+                  { label: 'Media key', icon: 'music', description: 'Play, pause, volume…', onClick: () => update({ actions: [...button.actions, defaultAction('media')] }) },
+                  { label: 'Delay', icon: 'clock', description: 'Wait before the next action', onClick: () => update({ actions: [...button.actions, defaultAction('delay')] }) },
+                  { label: 'Change page', icon: 'layers', description: 'Navigate to another deck page', onClick: () => update({ actions: [...button.actions, defaultAction('page')] }) },
+                ]}
+              />
+            </div>
           </div>
 
           {button.actions.length === 0 ? (
@@ -448,6 +478,8 @@ export function Inspector({
           )}
         </section>
       </div>
+
+      {presetsOpen && <PresetPicker onClose={() => setPresetsOpen(false)} onPick={addPreset} />}
     </aside>
   )
 }
