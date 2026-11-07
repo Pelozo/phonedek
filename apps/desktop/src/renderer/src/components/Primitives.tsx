@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from './Icons'
 
@@ -9,6 +9,7 @@ export function Modal({
   children,
   footer,
   wide,
+  compact,
   closeOnEscape = true,
 }: {
   title: string
@@ -17,20 +18,35 @@ export function Modal({
   children: ReactNode
   footer?: ReactNode
   wide?: boolean
+  compact?: boolean
   closeOnEscape?: boolean
 }) {
+  const backdropRef = useRef<HTMLDivElement>(null)
+
   useEffect(() => {
     if (!closeOnEscape) return
     const handler = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') onClose()
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      // Only the top-most modal owns Escape; a confirm opened from another
+      // dialog must not dismiss the dialog underneath it.
+      const backdrops = document.querySelectorAll('.modal-backdrop')
+      if (backdrops[backdrops.length - 1] !== backdropRef.current) return
+      event.preventDefault()
+      onClose()
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [closeOnEscape, onClose])
 
+  const className = wide ? 'modal modal-wide' : compact ? 'modal modal-compact' : 'modal'
+
   return createPortal(
-    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className={wide ? 'modal modal-wide' : 'modal'} role="dialog" aria-modal="true" aria-label={title}>
+    <div
+      ref={backdropRef}
+      className="modal-backdrop"
+      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <div className={className} role="dialog" aria-modal="true" aria-label={title}>
         <header className="modal-header">
           <div>
             <h2>{title}</h2>
@@ -46,6 +62,117 @@ export function Modal({
     </div>,
     document.body,
   )
+}
+
+export interface ConfirmOptions {
+  title: string
+  message: ReactNode
+  /** Optional supporting lines, rendered as a mono readout list. */
+  details?: ReactNode[]
+  /** Optional irreversible/impact warning line. */
+  warning?: ReactNode
+  confirmLabel?: string
+  cancelLabel?: string
+  /** Use the solid danger primary for destructive operations. */
+  danger?: boolean
+}
+
+type ConfirmFn = (options: ConfirmOptions) => Promise<boolean>
+
+const ConfirmContext = createContext<ConfirmFn | null>(null)
+
+function ConfirmDialog({
+  options,
+  onCancel,
+  onConfirm,
+}: {
+  options: ConfirmOptions
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const primaryRef = useRef<HTMLButtonElement>(null)
+  const cancelRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    // Destructive confirms land on Cancel so Enter cannot remove data by reflex.
+    const target = options.danger ? cancelRef.current : primaryRef.current
+    target?.focus()
+  }, [options])
+
+  return (
+    <Modal
+      title={options.title}
+      onClose={onCancel}
+      compact
+      footer={
+        <>
+          <button ref={cancelRef} type="button" className="button secondary" onClick={onCancel}>
+            {options.cancelLabel ?? 'Cancel'}
+          </button>
+          <button
+            ref={primaryRef}
+            type="button"
+            className={`button ${options.danger ? 'danger-solid' : 'primary'}`}
+            onClick={onConfirm}
+          >
+            {options.confirmLabel ?? 'Confirm'}
+          </button>
+        </>
+      }
+    >
+      <div className="confirm-content">
+        <p className="confirm-message">{options.message}</p>
+        {options.details && options.details.length > 0 && (
+          <ul className="confirm-details">
+            {options.details.map((line, index) => (
+              <li key={index}>{line}</li>
+            ))}
+          </ul>
+        )}
+        {options.warning && <p className="confirm-warning">{options.warning}</p>}
+      </div>
+    </Modal>
+  )
+}
+
+export function ConfirmProvider({ children }: { children: ReactNode }) {
+  const [request, setRequest] = useState<{ options: ConfirmOptions } | null>(null)
+  const resolver = useRef<((confirmed: boolean) => void) | null>(null)
+
+  const confirm = useCallback<ConfirmFn>((options) => {
+    return new Promise<boolean>((resolve) => {
+      // A newer request supersedes a stale one instead of leaking its promise.
+      resolver.current?.(false)
+      resolver.current = resolve
+      setRequest({ options })
+    })
+  }, [])
+
+  const settle = useCallback((confirmed: boolean) => {
+    const resolve = resolver.current
+    resolver.current = null
+    setRequest(null)
+    resolve?.(confirmed)
+  }, [])
+
+  return (
+    <ConfirmContext.Provider value={confirm}>
+      {children}
+      {request && (
+        <ConfirmDialog
+          options={request.options}
+          onCancel={() => settle(false)}
+          onConfirm={() => settle(true)}
+        />
+      )}
+    </ConfirmContext.Provider>
+  )
+}
+
+export function useConfirm(): ConfirmFn {
+  const confirm = useContext(ConfirmContext)
+  if (!confirm) throw new Error('useConfirm must be used inside <ConfirmProvider>')
+  return confirm
 }
 
 export function Toggle({

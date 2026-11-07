@@ -18,7 +18,7 @@ import {
 } from '@phonedek/shared'
 import type { ServerInfoView, SettingsView } from '../../../shared/api'
 import { Icon } from './Icons'
-import { NumberField } from './Primitives'
+import { NumberField, useConfirm } from './Primitives'
 
 const GRID_PRESETS = [
   { columns: 3, rows: 3 },
@@ -171,6 +171,7 @@ export function Sidebar({
   onToast: (message: string, kind?: 'info' | 'success' | 'error') => void
 }) {
   const [profileGridOpen, setProfileGridOpen] = useState(false)
+  const confirm = useConfirm()
 
   const addNewProfile = (): void => {
     const result = addProfile(config, `Profile ${config.profiles.length + 1}`)
@@ -190,12 +191,19 @@ export function Sidebar({
     onToast('Profile duplicated', 'success')
   }
 
-  const removeProfile = (profileId: string): void => {
+  const removeProfile = async (profileId: string): Promise<void> => {
     if (config.profiles.length <= 1) {
       onToast('At least one profile is required', 'error')
       return
     }
-    if (!window.confirm('Delete this profile and all of its pages?')) return
+    const confirmed = await confirm({
+      title: 'Delete profile',
+      message: 'Delete this profile and all of its pages?',
+      warning: 'Every page, button and action in the profile is removed. This cannot be undone.',
+      confirmLabel: 'Delete profile',
+      danger: true,
+    })
+    if (!confirmed) return
     const next = deleteProfile(config, profileId)
     onChangeConfig(next)
     const first = next.profiles[0]
@@ -218,12 +226,19 @@ export function Sidebar({
     onToast('Page duplicated', 'success')
   }
 
-  const removePage = (pageId: string): void => {
+  const removePage = async (pageId: string): Promise<void> => {
     if (profile.pages.length <= 1) {
       onToast('A profile needs at least one page', 'error')
       return
     }
-    if (!window.confirm('Delete this page and its buttons?')) return
+    const confirmed = await confirm({
+      title: 'Delete page',
+      message: 'Delete this page and its buttons?',
+      warning: 'The page and its buttons are removed. This cannot be undone.',
+      confirmLabel: 'Delete page',
+      danger: true,
+    })
+    if (!confirmed) return
     const next = deletePage(config, profile.id, pageId)
     onChangeConfig(next)
     const nextProfile = next.profiles.find((item) => item.id === profile.id)
@@ -233,7 +248,7 @@ export function Sidebar({
   const usedButtons = profile.pages.reduce((count, item) => count + item.buttons.length, 0)
   const activePageGrid = pageGrid(profile, page)
 
-  const applyPageGrid = (columns: number, rows: number): void => {
+  const applyPageGrid = async (columns: number, rows: number): Promise<void> => {
     const nextColumns = Math.max(1, Math.min(10, Math.round(columns)))
     const nextRows = Math.max(1, Math.min(10, Math.round(rows)))
     if (nextColumns === activePageGrid.columns && nextRows === activePageGrid.rows) return
@@ -241,9 +256,16 @@ export function Sidebar({
     const limit = nextColumns * nextRows
     const removed = page.buttons.filter((button) => button.slot >= limit).length
     if (removed > 0) {
-      const confirmed = window.confirm(
-        `Resize “${page.name}” to ${nextColumns} × ${nextRows}? This removes ${removed} button${removed === 1 ? '' : 's'} from this page that no longer fit. This cannot be undone.`,
-      )
+      const confirmed = await confirm({
+        title: 'Resize page grid',
+        message: `Resize “${page.name}” to ${nextColumns} × ${nextRows}?`,
+        details: [
+          `This removes ${removed} button${removed === 1 ? '' : 's'} from this page that no longer fit.`,
+        ],
+        warning: 'This cannot be undone.',
+        confirmLabel: `Resize and remove ${removed}`,
+        danger: true,
+      })
       if (!confirmed) return
     }
 
@@ -262,7 +284,7 @@ export function Sidebar({
     )
   }
 
-  const applyProfileGrid = (columns: number, rows: number): void => {
+  const applyProfileGrid = async (columns: number, rows: number): Promise<void> => {
     const nextColumns = Math.max(1, Math.min(10, Math.round(columns)))
     const nextRows = Math.max(1, Math.min(10, Math.round(rows)))
     if (nextColumns === profile.grid.columns && nextRows === profile.grid.rows) return
@@ -279,9 +301,17 @@ export function Sidebar({
 
     if (removed > 0) {
       const where = losses.map((item) => `${item.name} (${item.count})`).join(', ')
-      const confirmed = window.confirm(
-        `Resize the profile default grid to ${nextColumns} × ${nextRows}? This removes ${removed} button${removed === 1 ? '' : 's'} from inheriting pages: ${where}. Pages with their own layout are unaffected. This cannot be undone.`,
-      )
+      const confirmed = await confirm({
+        title: 'Resize profile grid',
+        message: `Resize the profile default grid to ${nextColumns} × ${nextRows}?`,
+        details: [
+          `This removes ${removed} button${removed === 1 ? '' : 's'} from inheriting pages: ${where}.`,
+          'Pages with their own layout are unaffected.',
+        ],
+        warning: 'This cannot be undone.',
+        confirmLabel: `Resize and remove ${removed}`,
+        danger: true,
+      })
       if (!confirmed) return
     }
 
@@ -294,14 +324,19 @@ export function Sidebar({
     )
   }
 
-  const inheritProfileGrid = (): void => {
+  const inheritProfileGrid = async (): Promise<void> => {
     if (!page.grid) return
     const limit = profile.grid.columns * profile.grid.rows
     const removed = page.buttons.filter((button) => button.slot >= limit).length
     if (removed > 0) {
-      const confirmed = window.confirm(
-        `Use the profile default grid (${profile.grid.columns} × ${profile.grid.rows}) for “${page.name}”? This removes ${removed} button${removed === 1 ? '' : 's'} that no longer fit. This cannot be undone.`,
-      )
+      const confirmed = await confirm({
+        title: 'Use profile grid',
+        message: `Use the profile default grid (${profile.grid.columns} × ${profile.grid.rows}) for “${page.name}”?`,
+        details: [`This removes ${removed} button${removed === 1 ? '' : 's'} that no longer fit.`],
+        warning: 'This cannot be undone.',
+        confirmLabel: `Use profile grid and remove ${removed}`,
+        danger: true,
+      })
       if (!confirmed) return
     }
 
@@ -358,7 +393,7 @@ export function Sidebar({
                   <button type="button" className="icon-button tiny" onClick={() => copyProfile(item.id)} title="Duplicate profile">
                     <Icon name="copy" size={13} />
                   </button>
-                  <button type="button" className="icon-button tiny danger" onClick={() => removeProfile(item.id)} title="Delete profile">
+                  <button type="button" className="icon-button tiny danger" onClick={() => void removeProfile(item.id)} title="Delete profile">
                     <Icon name="trash" size={13} />
                   </button>
                 </div>
@@ -386,7 +421,7 @@ export function Sidebar({
                 {page.grid ? 'Custom page layout' : 'Inherited from profile'}
               </span>
               {page.grid && (
-                <button type="button" className="grid-reset" onClick={inheritProfileGrid}>
+                <button type="button" className="grid-reset" onClick={() => void inheritProfileGrid()}>
                   Use profile default
                 </button>
               )}
@@ -481,7 +516,7 @@ export function Sidebar({
                   <button type="button" className="icon-button tiny" onClick={() => copyPage(item.id)} title="Duplicate page">
                     <Icon name="copy" size={13} />
                   </button>
-                  <button type="button" className="icon-button tiny danger" onClick={() => removePage(item.id)} title="Delete page">
+                  <button type="button" className="icon-button tiny danger" onClick={() => void removePage(item.id)} title="Delete page">
                     <Icon name="trash" size={13} />
                   </button>
                 </div>

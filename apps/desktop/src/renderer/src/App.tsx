@@ -14,6 +14,7 @@ import { Icon } from './components/Icons'
 import { Inspector } from './components/Inspector'
 import { PairDialog } from './components/PairDialog'
 import { PermissionBanner } from './components/PermissionBanner'
+import { ConfirmProvider } from './components/Primitives'
 import { SettingsDialog } from './components/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
 import { HostPlatformProvider } from './lib/platform'
@@ -26,7 +27,7 @@ interface ToastState {
 
 type SaveStatus = 'saved' | 'saving' | 'error'
 
-export default function App() {
+function AppContent() {
   const [config, setConfig] = useState<DeckConfig | null>(null)
   const [server, setServer] = useState<ServerInfoView | null>(null)
   const [fatal, setFatal] = useState<string | null>(null)
@@ -469,5 +470,13 @@ export default function App() {
       {toast && <div className={`toast ${toast.kind}`}>{toast.message}</div>}
       </div>
     </HostPlatformProvider>
+  )
+}
+
+export default function App() {
+  return (
+    <ConfirmProvider>
+      <AppContent />
+    </ConfirmProvider>
   )
 }

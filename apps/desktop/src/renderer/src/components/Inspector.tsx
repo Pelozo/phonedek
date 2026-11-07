@@ -21,7 +21,7 @@ import { Icon } from './Icons'
 import { IconPicker } from './IconPicker'
 import { PopMenu } from './Menu'
 import { PresetPicker } from './PresetPicker'
-import { ColorField, NumberField, Toggle } from './Primitives'
+import { ColorField, NumberField, Toggle, useConfirm } from './Primitives'
 import { useHostPlatform } from '../lib/platform'
 
 const DEFAULT_MACRO_STEP: MacroStep = { type: 'hotkey', keys: ['CTRL', 'C'], holdMs: 35 }
@@ -78,6 +78,7 @@ export function Inspector({
   const [presetsOpen, setPresetsOpen] = useState(false)
   const [iconBusy, setIconBusy] = useState<'image' | 'video' | null>(null)
   const platform = useHostPlatform()
+  const confirm = useConfirm()
 
   const makeAction = (type: Action['type']): Action => defaultAction(type, platform)
 
@@ -348,8 +349,15 @@ export function Inspector({
     update({ iconMedia: undefined })
   }
 
-  const deleteButton = (): void => {
-    if (!window.confirm(`Delete the “${button.label || 'Untitled'}” button?`)) return
+  const deleteButton = async (): Promise<void> => {
+    const confirmed = await confirm({
+      title: 'Delete button',
+      message: `Delete the “${button.label || 'Untitled'}” button?`,
+      warning: 'Its content and all of its actions are removed. This cannot be undone.',
+      confirmLabel: 'Delete button',
+      danger: true,
+    })
+    if (!confirmed) return
     onChangeConfig(removeButton(config, profile.id, page.id, button.id))
     onSelectButton(null)
   }
@@ -374,7 +382,7 @@ export function Inspector({
           <button type="button" className="button secondary small" onClick={() => void testActions(button.actions, button.label)}>
             <Icon name="play" size={14} /> Test
           </button>
-          <button type="button" className="icon-button bordered danger" onClick={deleteButton} aria-label="Delete button">
+          <button type="button" className="icon-button bordered danger" onClick={() => void deleteButton()} aria-label="Delete button">
             <Icon name="trash" size={16} />
           </button>
         </div>

@@ -8,7 +8,7 @@ import {
   updateProgressPercent,
 } from '../../../shared/update-status'
 import { Icon } from './Icons'
-import { Modal, Toggle } from './Primitives'
+import { Modal, Toggle, useConfirm } from './Primitives'
 
 export function SettingsDialog({
   server,
@@ -43,6 +43,7 @@ export function SettingsDialog({
 }) {
   const [busy, setBusy] = useState(false)
   const [nameDraft, setNameDraft] = useState(serverName)
+  const confirm = useConfirm()
 
   useEffect(() => setNameDraft(serverName), [serverName])
 
@@ -105,7 +106,12 @@ export function SettingsDialog({
     const message = version
       ? `PhoneDeck will close and restart to install version ${version}. Continue?`
       : 'PhoneDeck will close and restart to install the downloaded update. Continue?'
-    if (!window.confirm(message)) return
+    const confirmed = await confirm({
+      title: 'Restart and install',
+      message,
+      confirmLabel: 'Restart and install',
+    })
+    if (!confirmed) return
     setBusy(true)
     try {
       await onInstallUpdate()

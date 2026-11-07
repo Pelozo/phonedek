@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ServerInfoView, SettingsView } from '../../../shared/api'
 import { timeAgo } from '../lib/ui'
 import { Icon } from './Icons'
-import { Modal, Toggle } from './Primitives'
+import { Modal, Toggle, useConfirm } from './Primitives'
 
 export function PairDialog({
   server,
@@ -19,6 +19,7 @@ export function PairDialog({
 }) {
   const [port, setPort] = useState(String(settings.port))
   const [busy, setBusy] = useState(false)
+  const confirm = useConfirm()
 
   useEffect(() => setPort(String(settings.port)), [settings.port])
 
@@ -49,7 +50,13 @@ export function PairDialog({
   }
 
   const rotate = async (): Promise<void> => {
-    if (!window.confirm('Generate a new 4-digit PIN? Every paired phone will be disconnected and must pair again.')) return
+    const confirmed = await confirm({
+      title: 'Generate new PIN',
+      message: 'Generate a new 4-digit PIN? Every paired phone will be disconnected and must pair again.',
+      confirmLabel: 'Generate PIN',
+      danger: true,
+    })
+    if (!confirmed) return
     setBusy(true)
     try {
       const result = await window.phonedek.rotateToken()

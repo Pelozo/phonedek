@@ -3,7 +3,7 @@ import { describeStep, formatCombo } from '@phonedek/shared'
 import type { MacroStep, MediaKey, MouseAction } from '@phonedek/shared'
 import { Icon } from './Icons'
 import { PopMenu } from './Menu'
-import { NumberField } from './Primitives'
+import { NumberField, useConfirm } from './Primitives'
 import { Keycaps, ShortcutDialog } from './ShortcutDialog'
 import { MacroRecordDialog } from './MacroRecordDialog'
 import { useHostPlatform } from '../lib/platform'
@@ -115,6 +115,7 @@ export function MacroEditor({
   const [recordOpen, setRecordOpen] = useState(false)
   const [shortcutIndex, setShortcutIndex] = useState<number | null>(null)
   const platform = useHostPlatform()
+  const confirm = useConfirm()
 
   const update = (index: number, next: MacroStep): void => {
     onChange(steps.map((step, current) => (current === index ? next : step)))
@@ -133,6 +134,17 @@ export function MacroEditor({
     const [item] = copy.splice(index, 1)
     if (item) copy.splice(target, 0, item)
     onChange(copy)
+  }
+  const clearSteps = async (): Promise<void> => {
+    if (!steps.length) return
+    const confirmed = await confirm({
+      title: 'Clear macro',
+      message: 'Remove every step from this macro?',
+      warning: `All ${steps.length} step${steps.length === 1 ? '' : 's'} are removed. This cannot be undone.`,
+      confirmLabel: 'Remove steps',
+      danger: true,
+    })
+    if (confirmed) onChange([])
   }
 
   return (
@@ -167,7 +179,7 @@ export function MacroEditor({
             ]}
           />
           {steps.length > 0 && (
-            <button type="button" className="icon-button tiny danger" title="Clear all steps" onClick={() => { if (steps.length && window.confirm('Remove every step from this macro?')) onChange([]) }}>
+            <button type="button" className="icon-button tiny danger" title="Clear all steps" onClick={() => void clearSteps()}>
               <Icon name="trash" size={14} />
             </button>
           )}

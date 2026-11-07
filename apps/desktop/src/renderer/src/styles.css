@@ -245,6 +245,17 @@ input[type="range"]:focus-visible {
   border-color: rgba(224, 104, 94, 0.35);
 }
 
+.button.danger-solid {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--accent-ink);
+}
+
+.button.danger-solid:hover {
+  background: #ea8178;
+  border-color: #ea8178;
+}
+
 .button.small {
   height: 28px;
   padding: 0 9px;
@@ -3193,6 +3204,10 @@ input[type="range"]::-webkit-slider-thumb {
   width: min(1040px, 100%);
 }
 
+.modal-compact {
+  width: min(430px, 100%);
+}
+
 @keyframes modal-in {
   from {
     opacity: 0;
@@ -3258,6 +3273,51 @@ input[type="range"]::-webkit-slider-thumb {
   border-top: 1px solid var(--line);
   background: rgba(0, 0, 0, 0.14);
   flex: 0 0 auto;
+}
+
+.confirm-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.confirm-message {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.confirm-details {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-deep);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-soft);
+}
+
+.confirm-details li {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+
+.confirm-details li:last-child {
+  border-bottom: 0;
+}
+
+.confirm-warning {
+  margin: 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--danger);
+  color: var(--warn);
+  font-size: 11.5px;
+  line-height: 1.5;
 }
 
 .shortcut-capture {
