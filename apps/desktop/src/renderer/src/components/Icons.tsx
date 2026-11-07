@@ -110,3 +110,33 @@ export function Icon({
     </svg>
   )
 }
+
+/**
+ * PhoneDeck brand mark: dark chassis tile with a 2x2 key grid, three
+ * warm-white keys and one signal-orange key. Geometry mirrors the Android
+ * adaptive-icon foreground so every surface uses the same mark.
+ */
+export function DeckMark({
+  size = 28,
+  title,
+  ...props
+}: { size?: number; title?: string } & SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 108 108"
+      role={title ? 'img' : undefined}
+      aria-hidden={title ? undefined : true}
+      focusable="false"
+      {...props}
+    >
+      {title ? <title>{title}</title> : null}
+      <rect x="0" y="0" width="108" height="108" rx="23.8" fill="#0B0A09" />
+      <rect x="30" y="30" width="22" height="22" rx="4" fill="#F1ECE2" />
+      <rect x="56" y="30" width="22" height="22" rx="4" fill="#F1ECE2" />
+      <rect x="30" y="56" width="22" height="22" rx="4" fill="#F1ECE2" />
+      <rect x="56" y="56" width="22" height="22" rx="4" fill="#F26A2E" />
+    </svg>
+  )
+}

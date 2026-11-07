@@ -1,40 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#101c33"/>
-      <stop offset="1" stop-color="#060a13"/>
-    </linearGradient>
-    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#6ee7b7"/>
-      <stop offset="1" stop-color="#10b981"/>
-    </linearGradient>
-    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#67e8f9"/>
-      <stop offset="1" stop-color="#0891b2"/>
-    </linearGradient>
-    <linearGradient id="purple" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#c084fc"/>
-      <stop offset="1" stop-color="#7c3aed"/>
-    </linearGradient>
-    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="10" result="blur"/>
-      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
-  </defs>
-  <rect width="512" height="512" rx="116" fill="url(#bg)"/>
-  <rect x="26" y="26" width="460" height="460" rx="96" fill="none" stroke="#1d2b47" stroke-width="3"/>
-  <rect x="70" y="70" width="372" height="372" rx="58" fill="#0a1120" stroke="#243654" stroke-width="4"/>
-  <g filter="url(#glow)">
-    <rect x="104" y="118" width="92" height="76" rx="20" fill="url(#green)"/>
-    <rect x="210" y="118" width="92" height="76" rx="20" fill="#1e3350"/>
-    <rect x="316" y="118" width="92" height="76" rx="20" fill="url(#cyan)"/>
-    <rect x="104" y="208" width="92" height="76" rx="20" fill="#1e3350"/>
-    <rect x="210" y="208" width="92" height="76" rx="20" fill="url(#green)"/>
-    <rect x="316" y="208" width="92" height="76" rx="20" fill="#1e3350"/>
-    <rect x="104" y="298" width="92" height="76" rx="20" fill="url(#purple)"/>
-    <rect x="210" y="298" width="92" height="76" rx="20" fill="#1e3350"/>
-    <rect x="316" y="298" width="92" height="76" rx="20" fill="url(#green)"/>
-  </g>
-  <circle cx="404" cy="404" r="14" fill="#34d399"/>
-  <circle cx="404" cy="404" r="24" fill="none" stroke="#34d399" stroke-opacity="0.28" stroke-width="5"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 108 108" role="img" aria-labelledby="title">
+  <title id="title">PhoneDeck</title>
+  <!-- Chassis tile: 22% corner radius, transparent outside. -->
+  <rect x="0" y="0" width="108" height="108" rx="23.8" fill="#0B0A09" />
+  <!-- 2x2 key grid, matching the Android adaptive-icon foreground. -->
+  <rect x="30" y="30" width="22" height="22" rx="4" fill="#F1ECE2" />
+  <rect x="56" y="30" width="22" height="22" rx="4" fill="#F1ECE2" />
+  <rect x="30" y="56" width="22" height="22" rx="4" fill="#F1ECE2" />
+  <rect x="56" y="56" width="22" height="22" rx="4" fill="#F26A2E" />
 </svg>

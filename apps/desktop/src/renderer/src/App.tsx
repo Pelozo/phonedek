@@ -12,7 +12,7 @@ import type { ControlSpec, DeckButton, DeckConfig } from '@phonedek/shared'
 import type { AppState, ServerInfoView, UpdateStatus, PermissionStatus } from '../../shared/api'
 import { isUpdateNoticeVisible, updateIndicatorLabel } from '../../shared/update-status'
 import { DeckCanvas } from './components/DeckCanvas'
-import { Icon } from './components/Icons'
+import { DeckMark, Icon } from './components/Icons'
 import { Inspector } from './components/Inspector'
 import { PopMenu } from './components/Menu'
 import { PairDialog } from './components/PairDialog'
@@ -358,9 +358,7 @@ function AppContent() {
   if (fatal) {
     return (
       <div className="boot">
-        <span className="brand-mark large">
-          <Icon name="grid" size={26} />
-        </span>
+        <DeckMark className="brand-mark large" size={58} />
         <span className="boot-status">Boot failure</span>
         <h1>PhoneDeck could not start</h1>
         <p className="muted">{fatal}</p>
@@ -374,9 +372,7 @@ function AppContent() {
   if (!config || !server || !profile || !page) {
     return (
       <div className="boot">
-        <span className="brand-mark large">
-          <Icon name="grid" size={26} />
-        </span>
+        <DeckMark className="brand-mark large" size={58} />
         <span className="boot-status">Starting deck server</span>
         <h1>PhoneDeck</h1>
         <p className="muted">Loading profiles and the LAN server…</p>

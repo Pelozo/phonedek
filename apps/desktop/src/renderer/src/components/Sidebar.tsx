@@ -19,7 +19,7 @@ import {
   updateProfileMeta,
 } from '@phonedek/shared'
 import type { ServerInfoView, SettingsView } from '../../../shared/api'
-import { Icon } from './Icons'
+import { DeckMark, Icon } from './Icons'
 import { NumberField, useConfirm } from './Primitives'
 
 const GRID_PRESETS = [
@@ -374,9 +374,7 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <div className="brand">
-        <span className="brand-mark">
-          <Icon name="grid" size={18} />
-        </span>
+        <DeckMark className="brand-mark" size={40} />
         <div>
           <strong>PhoneDeck</strong>
           <small>Stream Deck for Android</small>

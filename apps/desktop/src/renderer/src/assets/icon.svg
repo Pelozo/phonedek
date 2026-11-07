@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="108" height="108" viewBox="0 0 108 108" role="img" aria-labelledby="title">
+  <title id="title">PhoneDeck</title>
+  <rect x="0" y="0" width="108" height="108" rx="23.8" fill="#0B0A09" />
+  <rect x="30" y="30" width="22" height="22" rx="4" fill="#F1ECE2" />
+  <rect x="56" y="30" width="22" height="22" rx="4" fill="#F1ECE2" />
+  <rect x="30" y="56" width="22" height="22" rx="4" fill="#F1ECE2" />
+  <rect x="56" y="56" width="22" height="22" rx="4" fill="#F26A2E" />
+</svg>
