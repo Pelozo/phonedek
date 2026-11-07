@@ -36,17 +36,19 @@ No cloud, no account, no vendor lock-in: the phone talks directly to your PC ove
 ### Deck editor
 
 - **Profiles and pages** — multiple PCs/layouts, up to 20 pages per profile, instant page switching.
-- **Any grid you want** — 1×1 to 10×10 cells; buttons snap to slots; drag to rearrange or swap.
-- **Buttons** — label, sublabel, 130+ categorized emoji icons (or paste your own), solid/gradient/image background, dark overlay, custom text color, per-button radius.
-- **Backgrounds** — curated gradients, color presets, or import your own PNG/JPG/WEBP/GIF/BMP (up to 25 MB). Images are copied into the app's data folder and served to the phone.
+- **Per-page grids** — 1×1 to 10×10 cells per page, with optional profile defaults; buttons snap to slots; drag to rearrange or swap. Change one page without touching the rest.
+- **Buttons** — label, sublabel, 175 searchable emoji icons or your own, plus animated GIF/video media icons; solid/gradient/image/video backgrounds, dark overlay, custom text color, per-button radius.
+- **Backgrounds** — curated gradients, color presets, or import PNG/JPG/WEBP/GIF/BMP (up to 25 MB) and MP4/WEBM/M4V/MOV video (up to 100 MB). Animated GIFs and videos play in the editor and on the phone.
 - **Live preview** — the editor canvas is the same grid the phone renders, including slots and overflow warnings.
-- **Backups** — export/import a ZIP containing the config and every background image; legacy JSON configs still import.
+- **Backups** — export/import a ZIP containing the config and every image/video asset; legacy JSON configs still import.
 - **Instant sync** — every saved change is pushed to connected phones over WebSocket.
 
 ### Actions
 
-- **Shortcuts** — Ctrl+C, Win+Shift+S, Alt+Tab, media keys, F-keys, punctuation…
-- **Macros** — record chords, typing and pauses with pause/resume/undo; choose whether pauses and text grouping are captured; repeat a macro 1–50× with a gap; edit/reorder/duplicate steps; mouse click, double-click, hold, release, move and scroll; launch/URL/command steps; keys can press, hold or release.
+- **Shortcuts** — Ctrl+C, Cmd+Shift+3, Alt+Tab, media keys, F-keys, punctuation… labels and presets follow the host OS, so macOS shows Cmd/Option and Windows shows Win/Alt.
+- **Preset packs** — Chrome, OBS Studio, VS Code, System and Media shortcuts, filterable and platform-aware.
+- **Full-screen screenshots** — the Screenshot button uses the Snipping Tool on Windows and a silent full-screen PNG on macOS.
+- **Macros** — record chords, typing and pauses with pause/resume/undo; choose whether pauses and text grouping are captured; repeat a macro 1–50× with a gap; edit/reorder/duplicate steps; mouse click, double-click, hold, release, move and scroll; launch/URL/command steps; keys can press, hold or release. Macro actions stay collapsed as one summary until you expand them.
 - **Type text** — full Unicode text typed into the active window.
 - **Launch applications** — pick an `.exe`, `.lnk`, `.bat` or `.cmd`, with arguments.
 - **Open URLs** — http/https only.
