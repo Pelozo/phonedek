@@ -1,3 +1,4 @@
+import { basename } from 'node:path'
 import { actionsToPlan, isScreenshotShortcut } from '@phonedek/shared'
 import type { Action, KeyboardPlanStep, PressResult } from '@phonedek/shared'
 import type { HostActions } from './host-actions'
@@ -9,6 +10,8 @@ const KEYBOARD_KINDS = new Set(['keys', 'text', 'delay', 'media', 'mouse'])
 export interface ExecutorOptions {
   /** Host platform; defaults to the running process. Injected in tests. */
   platform?: NodeJS.Platform
+  /** Called after a successful macOS screenshot with the absolute saved path. */
+  onScreenshot?: (path: string) => void
 }
 
 /**
@@ -21,12 +24,14 @@ export class ActionExecutor {
   private readonly host: HostActions
   private readonly logger?: Logger
   private readonly platform: NodeJS.Platform
+  private readonly onScreenshot?: (path: string) => void
 
   constructor(keys: KeySender, host: HostActions, logger?: Logger, options: ExecutorOptions = {}) {
     this.keys = keys
     this.host = host
     this.logger = logger
     this.platform = options.platform ?? process.platform
+    this.onScreenshot = options.onScreenshot
   }
 
   execute(actions: readonly Action[], label = 'button'): Promise<PressResult> {
@@ -46,6 +51,7 @@ export class ActionExecutor {
     }
 
     this.logger?.info(`Pressed "${label}" (${plan.length} step${plan.length === 1 ? '' : 's'})`)
+    const screenshots: string[] = []
     try {
       for (const step of plan) {
         switch (step.kind) {
@@ -72,7 +78,15 @@ export class ActionExecutor {
                 step.action === 'press' &&
                 isScreenshotShortcut(step.keys)
               ) {
-                await this.host.screenshot()
+                const path = await this.host.screenshot()
+                screenshots.push(path)
+                try {
+                  this.onScreenshot?.(path)
+                } catch (error) {
+                  this.logger?.warn(
+                    `Screenshot notification failed: ${error instanceof Error ? error.message : String(error)}`,
+                  )
+                }
                 this.logger?.info(`Captured the screen for "${label}"`)
                 break
               }
@@ -80,6 +94,12 @@ export class ActionExecutor {
             }
             break
         }
+      }
+      if (screenshots.length === 1) {
+        return { ok: true, message: `Screenshot saved to Desktop: ${basename(screenshots[0]!)}` }
+      }
+      if (screenshots.length > 1) {
+        return { ok: true, message: `${screenshots.length} screenshots saved to Desktop` }
       }
       return { ok: true }
     } catch (error) {

@@ -447,6 +447,7 @@ export class DeckServer {
       buttonId: message.buttonId,
       ok: result.ok,
       ...(result.error ? { error: result.error } : {}),
+      ...(result.message ? { message: result.message } : {}),
     })
   }
 

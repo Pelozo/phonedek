@@ -47,7 +47,7 @@ No cloud, no account, no vendor lock-in: the phone talks directly to your PC ove
 
 - **Shortcuts** — Ctrl+C, Cmd+Shift+3, Alt+Tab, media keys, F-keys, punctuation… labels and presets follow the host OS, so macOS shows Cmd/Option and Windows shows Win/Alt.
 - **Preset packs** — Chrome, OBS Studio, VS Code, System and Media shortcuts, filterable and platform-aware.
-- **Full-screen screenshots** — the Screenshot button uses the Snipping Tool on Windows and a silent full-screen PNG on macOS.
+- **Full-screen screenshots** — the Screenshot button uses the Snipping Tool on Windows and a silent full-screen PNG on macOS, saved to the Desktop with a completion notification.
 - **Macros** — record chords, typing and pauses with pause/resume/undo; choose whether pauses and text grouping are captured; repeat a macro 1–50× with a gap; edit/reorder/duplicate steps; mouse click, double-click, hold, release, move and scroll; launch/URL/command steps; keys can press, hold or release. Macro actions stay collapsed as one summary until you expand them.
 - **Type text** — full Unicode text typed into the active window.
 - **Launch applications** — pick an `.exe`, `.lnk`, `.bat` or `.cmd`, with arguments.

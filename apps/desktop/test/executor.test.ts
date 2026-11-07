@@ -17,7 +17,11 @@ function fakeKeys(log: string[]): KeySender {
   }
 }
 
-function fakeHost(log: string[]): HostActions {
+const SCREENSHOT_PATH = '/Users/ada/Desktop/PhoneDeck Screenshot 2026-11-07 at 12.34.56.png'
+const SCREENSHOT_BASENAME = 'PhoneDeck Screenshot 2026-11-07 at 12.34.56.png'
+
+function fakeHost(log: string[], screenshotPaths: string[] = [SCREENSHOT_PATH]): HostActions {
+  let nextScreenshot = 0
   return {
     async launch(path, args) {
       log.push(`launch:${path}:${args.join(',')}`)
@@ -29,7 +33,10 @@ function fakeHost(log: string[]): HostActions {
       log.push(`command:${command}`)
     },
     async screenshot() {
+      const path = screenshotPaths[Math.min(nextScreenshot, screenshotPaths.length - 1)] ?? SCREENSHOT_PATH
+      nextScreenshot += 1
       log.push('screenshot')
+      return path
     },
   }
 }
@@ -78,13 +85,41 @@ describe('ActionExecutor', () => {
     expect(log).toEqual([])
   })
 
-  it('captures the full screen on macOS for the Win+Shift+S intent', async () => {
+  it('captures the full screen on macOS and reports the saved file', async () => {
     const log: string[] = []
-    const executor = new ActionExecutor(fakeKeys(log), fakeHost(log), undefined, { platform: 'darwin' })
+    const screenshots: string[] = []
+    const executor = new ActionExecutor(fakeKeys(log), fakeHost(log), undefined, {
+      platform: 'darwin',
+      onScreenshot: (path) => screenshots.push(path),
+    })
     await expect(
       executor.execute([{ type: 'hotkey', keys: ['WIN', 'SHIFT', 'S'] }], 'shot'),
-    ).resolves.toEqual({ ok: true })
+    ).resolves.toEqual({
+      ok: true,
+      message: `Screenshot saved to Desktop: ${SCREENSHOT_BASENAME}`,
+    })
     expect(log).toEqual(['screenshot'])
+    expect(screenshots).toEqual([SCREENSHOT_PATH])
+  })
+
+  it('reports multiple screenshots without exposing the home path', async () => {
+    const log: string[] = []
+    const paths = ['/Users/ada/Desktop/first.png', '/Users/ada/Desktop/second.png']
+    const screenshots: string[] = []
+    const executor = new ActionExecutor(fakeKeys(log), fakeHost(log, paths), undefined, {
+      platform: 'darwin',
+      onScreenshot: (path) => screenshots.push(path),
+    })
+    const result = await executor.execute(
+      [
+        { type: 'hotkey', keys: ['WIN', 'SHIFT', 'S'] },
+        { type: 'hotkey', keys: ['WIN', 'SHIFT', 'S'] },
+      ],
+      'shots',
+    )
+    expect(result).toEqual({ ok: true, message: '2 screenshots saved to Desktop' })
+    expect(result.message).not.toContain('/Users/ada')
+    expect(screenshots).toEqual(paths)
   })
 
   it('replaces the intent inside a macro on macOS', async () => {
@@ -99,13 +134,18 @@ describe('ActionExecutor', () => {
     expect(log).toEqual(['screenshot', 'delay:10'])
   })
 
-  it('still sends Win+Shift+S on Windows', async () => {
+  it('still sends Win+Shift+S on Windows with no saved-path notification', async () => {
     const log: string[] = []
-    const executor = new ActionExecutor(fakeKeys(log), fakeHost(log), undefined, { platform: 'win32' })
+    const screenshots: string[] = []
+    const executor = new ActionExecutor(fakeKeys(log), fakeHost(log), undefined, {
+      platform: 'win32',
+      onScreenshot: (path) => screenshots.push(path),
+    })
     await expect(
       executor.execute([{ type: 'hotkey', keys: ['WIN', 'SHIFT', 'S'] }], 'shot'),
     ).resolves.toEqual({ ok: true })
     expect(log).toEqual(['keys:SHIFT+WIN+S'])
+    expect(screenshots).toEqual([])
   })
 
   it('does not remap other chords on macOS', async () => {
@@ -117,16 +157,21 @@ describe('ActionExecutor', () => {
 
   it('returns a useful error when the macOS capture fails and keeps the queue alive', async () => {
     const log: string[] = []
+    const screenshots: string[] = []
     const host: HostActions = {
       ...fakeHost(log),
       async screenshot() {
         throw new Error('screencapture exited with 1: Screen Recording permission denied')
       },
     }
-    const executor = new ActionExecutor(fakeKeys(log), host, undefined, { platform: 'darwin' })
+    const executor = new ActionExecutor(fakeKeys(log), host, undefined, {
+      platform: 'darwin',
+      onScreenshot: (path) => screenshots.push(path),
+    })
     const failed = await executor.execute([{ type: 'hotkey', keys: ['WIN', 'SHIFT', 'S'] }], 'shot')
     expect(failed.ok).toBe(false)
     expect(failed.error).toMatch(/permission denied/)
+    expect(screenshots).toEqual([])
 
     const after = await executor.execute([{ type: 'hotkey', keys: ['WIN', 'D'] }], 'good')
     expect(after.ok).toBe(true)

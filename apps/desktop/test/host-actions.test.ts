@@ -80,13 +80,11 @@ describe('macOS screenshot', () => {
         captured.push(path)
       },
     })
-    await expect(host.screenshot()).resolves.toBeUndefined()
-    expect(captured).toHaveLength(1)
-    const target = captured[0]
-    if (!target) throw new Error('expected a screenshot path')
-    expect(dirname(target)).toBe(join(home, 'Desktop'))
+    const savedPath = await host.screenshot()
+    expect(captured).toEqual([savedPath])
     expect(existsSync(join(home, 'Desktop'))).toBe(true)
-    expect(basename(target)).toMatch(/^PhoneDeck Screenshot \d{4}-\d{2}-\d{2} at \d{2}\.\d{2}\.\d{2}\.png$/)
+    expect(dirname(savedPath)).toBe(join(home, 'Desktop'))
+    expect(basename(savedPath)).toMatch(/^PhoneDeck Screenshot \d{4}-\d{2}-\d{2} at \d{2}\.\d{2}\.\d{2}\.png$/)
   })
 
   it('does not overwrite an existing capture', async () => {

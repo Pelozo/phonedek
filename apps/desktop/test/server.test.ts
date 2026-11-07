@@ -11,6 +11,7 @@ import type {
   DeckConfig,
   InputMessage,
   PressMessage,
+  PressResult,
   ServerMessage,
 } from '@phonedek/shared'
 import { AssetStore } from '../src/main/assets'
@@ -34,7 +35,7 @@ interface Harness {
 
 const cleanups: Array<() => Promise<void>> = []
 
-async function harness(): Promise<Harness> {
+async function harness(pressResult: PressResult = { ok: true }): Promise<Harness> {
   const dir = mkdtempSync(join(tmpdir(), 'phonedek-server-'))
   const config = createDefaultConfig()
   config.serverName = 'Test deck'
@@ -53,7 +54,7 @@ async function harness(): Promise<Harness> {
     onPress: async (_client, message, context) => {
       presses.push(message)
       contexts.push(context)
-      return { ok: true }
+      return pressResult
     },
     onInput: async (_client, message, context) => {
       inputs.push({ message, context })
@@ -373,6 +374,31 @@ describe('DeckServer WebSocket', () => {
     const pong = await waitFor(() => messages.find((message) => message.type === 'pong'))
     expect(pong).toEqual({ type: 'pong', t: 42 })
 
+    ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
+  it('forwards a press result message to the phone', async () => {
+    const h = await harness({ ok: true, message: 'Screenshot saved to Desktop: shot.png' })
+    const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await waitFor(() => messages.find((message) => message.type === 'hello'))
+
+    const button = h.config.profiles[0]!.pages[0]!.buttons[0]!
+    ws.send(
+      JSON.stringify({
+        type: 'press',
+        requestId: 'message-1',
+        profileId: h.config.profiles[0]!.id,
+        pageId: h.config.profiles[0]!.pages[0]!.id,
+        buttonId: button.id,
+      }),
+    )
+    const result = await waitFor(() => messages.find((message) => message.type === 'pressResult'))
+    expect(result).toMatchObject({
+      type: 'pressResult',
+      ok: true,
+      message: 'Screenshot saved to Desktop: shot.png',
+    })
     ws.close()
     await waitFor(() => h.server.getClients().length === 0)
   })

@@ -8,8 +8,8 @@ export interface HostActions {
   launch(path: string, args: string[]): Promise<void>
   openUrl(url: string): Promise<void>
   runCommand(command: string, cwd: string | undefined, hidden: boolean): Promise<void>
-  /** Capture the full screen on macOS (no shutter sound). */
-  screenshot(): Promise<void>
+  /** Capture the full screen on macOS (no shutter sound); returns the saved path. */
+  screenshot(): Promise<string>
 }
 
 export interface HostActionOptions {
@@ -229,6 +229,7 @@ export function createHostActions(options: HostActionOptions = {}): HostActions 
         )
       }
       logger?.info(`Saved full-screen screenshot to ${target}`)
+      return target
     },
   }
 }

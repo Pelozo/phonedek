@@ -427,7 +427,7 @@ export type ServerMessage =
       capabilities?: string[]
     }
   | { type: 'config'; config: DeckConfig }
-  | { type: 'pressResult'; requestId: string; buttonId: string; ok: boolean; error?: string }
+  | { type: 'pressResult'; requestId: string; buttonId: string; ok: boolean; error?: string; message?: string }
   | { type: 'inputResult'; requestId: string; controlId: string; ok: boolean; error?: string }
   | { type: 'navigate'; direction: 'next' | 'prev' | 'goto'; pageId?: string }
   | { type: 'error'; code: string; message: string }
@@ -436,6 +436,8 @@ export type ServerMessage =
 export interface PressResult {
   ok: boolean
   error?: string
+  /** Optional user-facing note, e.g. where a screenshot was saved. */
+  message?: string
 }
 
 /** Result of a continuous-control input batch (sent on end or error). */

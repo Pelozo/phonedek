@@ -1,7 +1,7 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, shell, systemPreferences } from 'electron'
 import type { MenuItemConstructorOptions, OpenDialogOptions, SaveDialogOptions } from 'electron'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { z } from 'zod'
 import { ActionSchema, validateConfig } from '@phonedek/shared'
 import type { Action, AssetKind, DeckConfig, PressResult } from '@phonedek/shared'
@@ -547,7 +547,24 @@ async function bootstrap(): Promise<void> {
     openPath: async (path) => shell.openPath(path),
     openExternal: async (url) => shell.openExternal(url),
   })
-  executor = new ActionExecutor(keySender, host, logger)
+  executor = new ActionExecutor(keySender, host, logger, {
+    onScreenshot: (path) => {
+      logger.info(`Screenshot saved to ${path}`)
+      try {
+        if (!Notification.isSupported()) return
+        const notification = new Notification({
+          title: 'PhoneDeck',
+          body: `Screenshot saved to Desktop: ${basename(path)}`,
+        })
+        notification.on('click', () => shell.showItemInFolder(path))
+        notification.show()
+      } catch (error) {
+        logger.warn(
+          `Could not show screenshot notification: ${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+    },
+  })
   const router = new ControlInputRouter({
     execute: (actions, label) => executor.execute(actions, label),
     logger,
