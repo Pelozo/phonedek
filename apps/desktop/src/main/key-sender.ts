@@ -27,7 +27,8 @@ export function helperFailure(message: string | undefined, permission?: string):
   if (permission === 'accessibility') {
     return new Error(
       'Accessibility permission is required for PhoneDeck key and mouse actions. ' +
-        'Open System Settings → Privacy & Security → Accessibility, enable PhoneDeck, then try again.',
+        'Open System Settings → Privacy & Security → Accessibility (macOS 27+ calls this ' +
+        '"Device Control and Data Access"), enable PhoneDeck, then try again.',
     )
   }
   return new Error(message ?? 'Keyboard helper failed')

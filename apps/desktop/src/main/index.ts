@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell, systemPreferences } from 'electron'
 import type { MenuItemConstructorOptions, OpenDialogOptions, SaveDialogOptions } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -51,6 +51,32 @@ let bootstrapped = false
 const ACCESSIBILITY_SETTINGS_URL =
   'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'
 
+/**
+ * macOS 27 renamed the Accessibility privacy pane to "Device Control and Data
+ * Access". The TCC service and the deep link above are unchanged, so only the
+ * user-facing label needs to follow the OS version.
+ */
+function macPrivacyPaneName(): string {
+  const major = Number.parseInt(process.getSystemVersion().split('.')[0] ?? '', 10)
+  return Number.isFinite(major) && major >= 27 ? 'Device Control and Data Access' : 'Accessibility'
+}
+
+/**
+ * The Swift input helper only calls `AXIsProcessTrusted()`, which never shows
+ * the native permission prompt. Without this Electron call macOS never adds
+ * PhoneDeck to the privacy list, so users cannot enable it at all. Passing
+ * `prompt: true` shows the system alert and registers the app.
+ */
+function requestAccessibilityPermission(prompt: boolean): boolean {
+  if (process.platform !== 'darwin') return true
+  try {
+    return systemPreferences.isTrustedAccessibilityClient(prompt)
+  } catch (error) {
+    logger?.warn(`Could not request macOS accessibility permission: ${(error as Error).message}`)
+    return false
+  }
+}
+
 function helperPath(): string {
   return keyboardHelperPath(process.platform, {
     isPackaged: app.isPackaged,
@@ -65,8 +91,6 @@ async function openAccessibilitySettings(): Promise<void> {
   }
   await shell.openExternal(ACCESSIBILITY_SETTINGS_URL)
 }
-
-
 async function showOpen(options: OpenDialogOptions) {
   return mainWindow ? dialog.showOpenDialog(mainWindow, options) : dialog.showOpenDialog(options)
 }
@@ -371,10 +395,16 @@ function installApplicationMenu(): void {
       submenu: [
         { role: 'about' },
         {
-          label: 'Open Accessibility Settings…',
+          label: `Grant ${macPrivacyPaneName()} Permission…`,
+          click: () => {
+            requestAccessibilityPermission(true)
+          },
+        },
+        {
+          label: `Open ${macPrivacyPaneName()} Settings…`,
           click: () => {
             void openAccessibilitySettings().catch((error) => {
-              logger.warn(`Could not open Accessibility settings: ${(error as Error).message}`)
+              logger.warn(`Could not open ${macPrivacyPaneName()} settings: ${(error as Error).message}`)
             })
           },
         },
@@ -447,6 +477,11 @@ async function bootstrap(): Promise<void> {
   logger = createLogger(userData)
   logger.info(`PhoneDeck ${APP_VERSION} starting on ${process.platform} (${process.arch})`)
   logger.info(`Data directory: ${userData}`)
+
+  // Show the macOS permission alert on startup so PhoneDeck is registered in
+  // the privacy pane automatically. It only appears while permission is
+  // missing, and the alert links straight to the right pane.
+  if (process.platform === 'darwin') requestAccessibilityPermission(true)
 
   store = new ConfigStore({ dir: userData, logger })
   if (store.getLastError()) logger.warn(`Config was repaired: ${store.getLastError()}`)

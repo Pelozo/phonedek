@@ -106,9 +106,15 @@ ZIP and verifies that the bundled helper is executable, arm64 and passes
    right-click → **Open**. CLI equivalent:
    `xattr -dr com.apple.quarantine /Applications/PhoneDeck.app`.
 3. Grant **Accessibility**: System Settings → Privacy & Security →
-   Accessibility → enable PhoneDeck. The app menu has an
-   **Open Accessibility Settings…** shortcut. If macOS lists the helper
-   separately, enable it too. Restart PhoneDeck if input still fails.
+   Accessibility. **macOS 27 (Golden Gate) renamed this pane to “Device Control
+   and Data Access”** — it is the same TCC service and the deep link
+   (`…?Privacy_Accessibility`) is unchanged. PhoneDeck triggers the native
+   permission alert on launch, which registers the app in the list; the app
+   menu also has **Grant … Permission** and **Open … Settings** items. If the
+   helper is still reported as untrusted, add
+   `/Applications/PhoneDeck.app/Contents/Resources/keyboard-helper` as well
+   (macOS 27 may attribute the grant to the helper binary). Restart PhoneDeck
+   if input still fails.
 4. Allow incoming connections and, on macOS 15+, **Local Network** access so
    pairing/discovery work. Third-party firewalls need TCP 47654 and UDP 47655.
 

@@ -35,7 +35,7 @@ struct HelperFailure: Error {
 }
 
 let accessibilityPermission = "accessibility"
-let accessibilityHelp = "Accessibility permission is required for PhoneDeck key and mouse actions. Open System Settings -> Privacy & Security -> Accessibility, enable PhoneDeck (add the helper if macOS lists it separately), then try again."
+let accessibilityHelp = "Accessibility permission is required for PhoneDeck key and mouse actions. Open System Settings -> Privacy & Security -> Accessibility (called \"Device Control and Data Access\" on macOS 27+), enable PhoneDeck (add the helper if macOS lists it separately), then try again."
 
 func emit(_ object: [String: Any]) {
     guard let data = try? JSONSerialization.data(withJSONObject: object, options: []),
