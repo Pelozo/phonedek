@@ -158,9 +158,9 @@ fun SettingsSheet(
             )
             HorizontalDivider(color = Hairline)
             SettingToggle(
-                title = "Hide top bar when connected",
-                description = "Uses the full screen for the deck. A squared settings " +
-                    "control stays in the top-right, so Settings are one tap away.",
+                title = "Hide all chrome when connected",
+                description = "Uses the whole screen for the deck. Swipe down from the " +
+                    "top edge to show the top bar and Settings again.",
                 checked = state.hideTopBarWhenConnected,
                 onCheckedChange = onHideTopBarWhenConnected,
             )

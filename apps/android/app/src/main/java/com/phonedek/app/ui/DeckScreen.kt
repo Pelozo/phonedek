@@ -11,6 +11,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,8 +53,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -66,20 +73,21 @@ import com.phonedek.app.data.DeckProfile
 import com.phonedek.app.data.Pairing
 import com.phonedek.app.data.ProfileTheme
 import com.phonedek.app.net.ConnectionStatus
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlin.math.abs
 
 private val TopBarHeight = 56.dp
-private val HiddenChromeHeight = 40.dp
 private val ControlShape = RoundedCornerShape(4.dp)
 
 /**
- * Height reserved for the floating chrome when the top bar is hidden. The
- * settings control and the compact page indicator live in this strip so they
- * never cover deck buttons, yet it is much smaller than the full top bar.
+ * Full-screen deck mode. The top bar, page ticks and Settings control are all
+ * removed; a downward swipe from the top edge temporarily brings the bar back.
  */
 @Composable
 fun DeckScreen(state: UiState, viewModel: MainViewModel) {
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var chromeRevealed by rememberSaveable { mutableStateOf(false) }
 
     val config = state.config
     val profile = config?.profiles?.firstOrNull { it.id == state.activeProfileId }
@@ -96,14 +104,47 @@ fun DeckScreen(state: UiState, viewModel: MainViewModel) {
 
     // The bar is chrome for an unpaired/connecting deck; once the connection is
     // healthy it can get out of the way (default). Reconnecting brings it back.
-    val hideTopBar = state.hideTopBarWhenConnected &&
+    val canHideChrome = state.hideTopBarWhenConnected &&
         state.connection == ConnectionStatus.CONNECTED
+    val hideTopBar = canHideChrome && !chromeRevealed
     val topInset by animateDpAsState(
-        targetValue = if (hideTopBar) HiddenChromeHeight else TopBarHeight,
+        targetValue = if (hideTopBar) 0.dp else TopBarHeight,
         label = "deck-top-inset",
     )
 
-    Box(Modifier.fillMaxSize()) {
+    // Leaving the connected state restores the bar and forgets a temporary reveal.
+    LaunchedEffect(canHideChrome) {
+        if (!canHideChrome) chromeRevealed = false
+    }
+
+    // A revealed bar is temporary: it recedes again after a few seconds, or
+    // immediately if the user opens Settings (the sheet keeps the controls).
+    LaunchedEffect(chromeRevealed, showSettings) {
+        if (chromeRevealed && !showSettings) {
+            delay(8_000)
+            chromeRevealed = false
+        }
+    }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .revealChromeOnTopEdgeSwipe(enabled = hideTopBar) { chromeRevealed = true }
+            .then(
+                if (hideTopBar) {
+                    Modifier.semantics {
+                        customActions = listOf(
+                            CustomAccessibilityAction("Show top bar") {
+                                chromeRevealed = true
+                                true
+                            },
+                        )
+                    }
+                } else {
+                    Modifier
+                },
+            ),
+    ) {
         if (profile != null && pages.isNotEmpty()) {
             // Each page paints its own full-bleed background *under* the bar,
             // so the backdrop slides with the pager instead of going stale.
@@ -138,19 +179,6 @@ fun DeckScreen(state: UiState, viewModel: MainViewModel) {
             )
         }
 
-        AnimatedVisibility(
-            visible = hideTopBar,
-            modifier = Modifier.align(Alignment.TopCenter),
-            enter = fadeIn(),
-            exit = fadeOut(),
-        ) {
-            HiddenChrome(
-                status = state.connection,
-                pages = pages,
-                activePageId = page?.id,
-                onOpenSettings = { showSettings = true },
-            )
-        }
     }
 
     if (showSettings) {
@@ -172,115 +200,33 @@ fun DeckScreen(state: UiState, viewModel: MainViewModel) {
 }
 
 /**
- * Compact chrome for the hidden-bar mode: a status word on the left, page
- * ticks in the centre and a squared settings control on the right. The
- * container itself is not clickable, so swipes pass through.
+ * Watches pointer events without consuming them, so deck taps and page swipes
+ * keep working. A downward drag that starts near the top edge reveals hidden
+ * chrome; the bar then recedes on its own.
  */
-@Composable
-private fun HiddenChrome(
-    status: ConnectionStatus,
-    pages: List<DeckPage>,
-    activePageId: String?,
-    onOpenSettings: () -> Unit,
-) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .windowInsetsPadding(
-                WindowInsets.safeDrawing.only(
-                    WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
-                ),
-            )
-            .height(HiddenChromeHeight),
-    ) {
-        HiddenStatusChip(
-            status = status,
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .padding(start = 8.dp),
-        )
-
-        if (pages.size > 1) {
-            Row(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .clip(ControlShape)
-                    .background(InkDeep.copy(alpha = 0.62f))
-                    .border(1.dp, Hairline, ControlShape)
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                PageIndicator(
-                    pages = pages,
-                    activePageId = activePageId,
-                )
+private fun Modifier.revealChromeOnTopEdgeSwipe(
+    enabled: Boolean,
+    onReveal: () -> Unit,
+): Modifier {
+    if (!enabled) return this
+    return pointerInput(enabled) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            if (down.position.y > 64.dp.toPx()) return@awaitEachGesture
+            var dx = 0f
+            var dy = 0f
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                dx += change.positionChange().x
+                dy += change.positionChange().y
+                if (dy > 24.dp.toPx() && dy > abs(dx)) {
+                    onReveal()
+                    break
+                }
+                if (!change.pressed) break
             }
         }
-
-        SquaredSettingsButton(
-            onOpenSettings = onOpenSettings,
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .padding(end = 8.dp),
-        )
-    }
-}
-
-@Composable
-private fun HiddenStatusChip(
-    status: ConnectionStatus,
-    modifier: Modifier = Modifier,
-) {
-    val (fullLabel, color) = statusLabelAndColor(status)
-    val word = when (status) {
-        ConnectionStatus.CONNECTED -> "LIVE"
-        ConnectionStatus.CONNECTING, ConnectionStatus.RECONNECTING -> "LINK"
-        ConnectionStatus.OFFLINE -> "OFF"
-    }
-
-    Row(
-        modifier = modifier
-            .clip(ControlShape)
-            .background(InkDeep.copy(alpha = 0.62f))
-            .border(1.dp, Hairline, ControlShape)
-            .semantics {
-                contentDescription = "Connection status: ${fullLabel.lowercase()}."
-            }
-            .padding(horizontal = 6.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        ConsoleLed(color = color, size = 5.dp)
-        Spacer(Modifier.width(4.dp))
-        Text(
-            text = word,
-            color = TextSecondary,
-            fontFamily = ConsoleMono,
-            fontSize = 8.5.sp,
-            letterSpacing = 0.8.sp,
-        )
-    }
-}
-
-@Composable
-private fun SquaredSettingsButton(
-    onOpenSettings: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Box(
-        modifier = modifier
-            .size(32.dp)
-            .clip(ControlShape)
-            .background(InkDeep.copy(alpha = 0.62f))
-            .border(1.dp, Hairline, ControlShape)
-            .clickable(role = Role.Button, onClick = onOpenSettings)
-            .semantics { contentDescription = "Open settings" },
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = "⚙\uFE0E",
-            fontSize = 15.sp,
-            color = TextSecondary,
-        )
     }
 }
 
