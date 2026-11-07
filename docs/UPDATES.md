@@ -49,10 +49,25 @@ The updater cannot install itself into a build that does not contain it.
   must install the 0.1.3 `PhoneDeck-<version>-Setup.exe` manually once.
 - From 0.1.3 onward, later versions can be installed from inside the app.
 - **0.1.4 is the first release delivered through the updater** (from 0.1.3).
+- **0.2.0 is the latest feature release.** Windows 0.1.4 can update in-app; the
+  unsigned 0.1.4 macOS build needs one manual install before signed macOS
+  auto-updates can take over.
 
 Keep the version in the root `package.json`, `apps/desktop/package.json`, and the
 desktop `APP_VERSION` value in sync with the release tag. The updater compares
 the installed app version against `latest.yml`.
+
+## Publishing from CI
+
+Pushing a `v<version>` tag now triggers the full build and a `Publish GitHub
+release` job. It uploads the Windows installer/latest.yml/blockmap, macOS
+DMG/ZIP/latest-mac.yml/blockmaps, Android APK and `SHA256SUMS` to one release.
+The release notes live in `docs/RELEASE_NOTES_v<version>.md`.
+
+The macOS job signs and notarizes only when the Apple secrets are configured;
+otherwise it produces the unsigned community build, which correctly remains on
+manual updates. Publish all platform assets together so none of the update
+feeds go stale.
 
 ### macOS signing and the first signed update
 
