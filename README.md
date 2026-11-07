@@ -189,7 +189,7 @@ A step-by-step checklist is in [docs/TESTING.md](docs/TESTING.md). The current p
 
 ## Status
 
-Early but usable. The core editor, protocol, action execution, Android rendering and pairing are implemented. See [`.agent/PLAN.md`](.agent/PLAN.md) for the live roadmap and known gaps.
+Early but usable. The core editor, protocol, action execution, Android rendering and pairing are implemented.
 
 ## License
 

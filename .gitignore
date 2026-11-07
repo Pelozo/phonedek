@@ -29,5 +29,7 @@ apps/desktop/release/
 
 # Agent scratch
 AGENTS.md
+.agent/
+opencode.jsonc
 .opencode/
 .agent/STOP
