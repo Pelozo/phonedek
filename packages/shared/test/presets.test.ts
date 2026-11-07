@@ -65,7 +65,7 @@ describe('action packs', () => {
 
   it('exports the requested packs and presets', () => {
     expect(ACTION_PACKS.map((pack) => pack.id)).toEqual(
-      expect.arrayContaining(['chrome', 'obs', 'vscode', 'system', 'media']),
+      expect.arrayContaining(['chrome', 'obs', 'vscode', 'jetbrains', 'opencode', 'system', 'media']),
     )
     expect(findActionPack('chrome')?.presets.length).toBeGreaterThan(10)
     expect(findActionPack('obs')?.presets.length).toBeGreaterThan(0)
@@ -134,6 +134,45 @@ describe('action packs', () => {
     ])
   })
 
+  it('resolves JetBrains Windows and macOS keymaps', () => {
+    const run = findActionPreset('jetbrains-run')!
+    expect(resolvePresetActions(run, 'win32')).toEqual([{ type: 'hotkey', keys: ['SHIFT', 'F10'] }])
+    expect(resolvePresetActions(run, 'darwin')).toEqual([{ type: 'hotkey', keys: ['CTRL', 'R'] }])
+
+    const build = findActionPreset('jetbrains-build')!
+    expect(resolvePresetActions(build, 'win32')).toEqual([{ type: 'hotkey', keys: ['CTRL', 'F9'] }])
+    expect(resolvePresetActions(build, 'darwin')).toEqual([{ type: 'hotkey', keys: ['WIN', 'F9'] }])
+
+    const findAction = findActionPreset('jetbrains-find-action')!
+    expect(resolvePresetActions(findAction, 'darwin')).toEqual([
+      { type: 'hotkey', keys: ['WIN', 'SHIFT', 'A'] },
+    ])
+
+    expect(findActionPack('jetbrains')?.presets.length).toBeGreaterThanOrEqual(15)
+  })
+
+  it('builds OpenCode leader-sequence macros and keeps them available everywhere', () => {
+    const session = findActionPreset('opencode-new-session')!
+    const actions = resolvePresetActions(session, 'linux')
+    expect(actions).toHaveLength(1)
+    expect(actions[0]).toMatchObject({ type: 'macro' })
+    if (actions[0]?.type !== 'macro') throw new Error('expected a macro')
+    expect(actions[0].steps).toEqual([
+      { type: 'hotkey', keys: ['CTRL', 'X'] },
+      { type: 'delay', ms: 80 },
+      { type: 'hotkey', keys: ['N'] },
+    ])
+
+    expect(resolvePresetActions(findActionPreset('opencode-command-palette')!, 'darwin')).toEqual([
+      { type: 'hotkey', keys: ['CTRL', 'P'] },
+    ])
+    for (const id of ['opencode-new-session', 'opencode-models', 'opencode-agents']) {
+      for (const platform of ['win32', 'darwin', 'linux']) {
+        expect(isPresetAvailable(findActionPreset(id)!, platform), `${id}/${platform}`).toBe(true)
+      }
+    }
+  })
+
   it('resolves system and OBS overrides', () => {
     expect(resolvePresetActions(findActionPreset('system-lock')!, 'darwin')).toEqual([
       { type: 'hotkey', keys: ['CTRL', 'WIN', 'Q'] },
@@ -179,5 +218,90 @@ describe('action packs', () => {
         expect(preset.description.toLowerCase()).not.toContain('change ctrl')
       }
     }
+  })
+
+  it('uses the exact JetBrains macOS overrides for every preset', () => {
+    const cases: Array<[string, string[], string[]]> = [
+      ['jetbrains-build', ['CTRL', 'F9'], ['WIN', 'F9']],
+      ['jetbrains-run', ['SHIFT', 'F10'], ['CTRL', 'R']],
+      ['jetbrains-debug', ['SHIFT', 'F9'], ['CTRL', 'D']],
+      ['jetbrains-stop', ['CTRL', 'F2'], ['WIN', 'F2']],
+      ['jetbrains-find-action', ['CTRL', 'SHIFT', 'A'], ['WIN', 'SHIFT', 'A']],
+      ['jetbrains-open-class', ['CTRL', 'N'], ['WIN', 'O']],
+      ['jetbrains-open-file', ['CTRL', 'SHIFT', 'N'], ['WIN', 'SHIFT', 'O']],
+      ['jetbrains-find-in-path', ['CTRL', 'SHIFT', 'F'], ['WIN', 'SHIFT', 'F']],
+      ['jetbrains-replace-in-path', ['CTRL', 'SHIFT', 'R'], ['WIN', 'SHIFT', 'R']],
+      ['jetbrains-reformat', ['CTRL', 'ALT', 'L'], ['WIN', 'ALT', 'L']],
+      ['jetbrains-optimize-imports', ['CTRL', 'ALT', 'O'], ['CTRL', 'ALT', 'O']],
+      ['jetbrains-terminal', ['ALT', 'F12'], ['ALT', 'F12']],
+      ['jetbrains-project-view', ['ALT', '1'], ['WIN', '1']],
+      ['jetbrains-git', ['ALT', '9'], ['WIN', '9']],
+      ['jetbrains-logcat', ['ALT', '6'], ['WIN', '6']],
+    ]
+
+    for (const [id, windowsKeys, macKeys] of cases) {
+      const preset = findActionPreset(id)
+      expect(preset, id).toBeTruthy()
+      expect(resolvePresetActions(preset!, 'win32'), id).toEqual([{ type: 'hotkey', keys: windowsKeys }])
+      expect(resolvePresetActions(preset!, 'linux'), id).toEqual([{ type: 'hotkey', keys: windowsKeys }])
+      expect(resolvePresetActions(preset!, 'darwin'), id).toEqual([{ type: 'hotkey', keys: macKeys }])
+      for (const platform of ['win32', 'darwin', 'linux']) {
+        expect(isPresetAvailable(preset!, platform), `${id}/${platform}`).toBe(true)
+      }
+    }
+
+    const description = (id: string) => findActionPreset(id)!.platformDescriptions?.darwin
+    expect(description('jetbrains-build')).toBe('Cmd + F9')
+    expect(description('jetbrains-run')).toBe('Ctrl + R')
+    expect(description('jetbrains-reformat')).toBe('Cmd + Option + L')
+    expect(description('jetbrains-optimize-imports')).toBe('Ctrl + Option + O')
+    expect(description('jetbrains-terminal')).toBe('Option + F12')
+    expect(description('jetbrains-logcat')).toBe('Android Studio only — Cmd + 6')
+  })
+
+  it('builds every OpenCode leader macro with the requested key', () => {
+    const leaders: Array<[string, string]> = [
+      ['opencode-new-session', 'N'],
+      ['opencode-sessions', 'L'],
+      ['opencode-models', 'M'],
+      ['opencode-agents', 'A'],
+      ['opencode-undo', 'U'],
+      ['opencode-redo', 'R'],
+      ['opencode-compact-session', 'C'],
+      ['opencode-toggle-sidebar', 'B'],
+      ['opencode-editor', 'E'],
+      ['opencode-themes', 'T'],
+      ['opencode-export', 'X'],
+      ['opencode-status', 'S'],
+      ['opencode-exit', 'Q'],
+    ]
+    for (const [id, key] of leaders) {
+      const actions = resolvePresetActions(findActionPreset(id)!, 'darwin')
+      expect(actions).toEqual([
+        {
+          type: 'macro',
+          steps: [
+            { type: 'hotkey', keys: ['CTRL', 'X'] },
+            { type: 'delay', ms: 80 },
+            { type: 'hotkey', keys: [key] },
+          ],
+        },
+      ])
+    }
+    expect(resolvePresetActions(findActionPreset('opencode-command-palette')!, 'win32')).toEqual([
+      { type: 'hotkey', keys: ['CTRL', 'P'] },
+    ])
+  })
+
+  it('keeps the requested pack order', () => {
+    expect(ACTION_PACKS.map((pack) => pack.id)).toEqual([
+      'chrome',
+      'obs',
+      'vscode',
+      'jetbrains',
+      'opencode',
+      'system',
+      'media',
+    ])
   })
 })

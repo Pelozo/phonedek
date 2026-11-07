@@ -7,7 +7,7 @@
  * Windows-only chord on macOS (or a macOS-only chord on Windows).
  */
 
-import type { Action, DeckButton, MediaKey } from './types'
+import type { Action, DeckButton, MacroStep, MediaKey } from './types'
 import type { HostPlatform } from './platform'
 import { normalizeHostPlatform } from './platform'
 import { formatCombo } from './keys'
@@ -80,6 +80,48 @@ function platformHotkeyPreset(
     actions: [hotkey([...keys])],
     platformActions: { darwin: [hotkey(darwinKeys)] },
     platformDescriptions: { darwin: macDescription ?? formatCombo(darwinKeys, 'darwin') },
+  }
+}
+
+/**
+ * A hotkey preset whose macOS variant is written explicitly (JetBrains keeps
+ * several Ctrl chords on macOS instead of using Cmd).
+ */
+function dualHotkeyPreset(
+  id: string,
+  name: string,
+  description: string,
+  icon: string,
+  baseKeys: string[],
+  darwinKeys: string[],
+  darwinDescription?: string,
+): ActionPreset {
+  return {
+    id,
+    name,
+    description,
+    icon,
+    actions: [hotkey([...baseKeys])],
+    platformActions: { darwin: [hotkey([...darwinKeys])] },
+    platformDescriptions: {
+      darwin: darwinDescription ?? formatCombo(darwinKeys, 'darwin'),
+    },
+  }
+}
+
+/** OpenCode TUI leader sequence: Ctrl+X, short delay, then one key. */
+function leaderPreset(id: string, name: string, key: string, icon: string): ActionPreset {
+  const steps: MacroStep[] = [
+    { type: 'hotkey', keys: ['CTRL', 'X'] },
+    { type: 'delay', ms: 80 },
+    { type: 'hotkey', keys: [key] },
+  ]
+  return {
+    id,
+    name,
+    description: `Ctrl+X then ${key}`,
+    icon,
+    actions: [{ type: 'macro', steps }],
   }
 }
 
@@ -224,6 +266,110 @@ const vscode: ActionPack = {
   ],
 }
 
+const jetbrains: ActionPack = {
+  id: 'jetbrains',
+  name: 'JetBrains IDEs',
+  description:
+    'JetBrains shortcuts for Windows/Linux, with native macOS overrides. Logcat is Android Studio only.',
+  presets: [
+    dualHotkeyPreset('jetbrains-build', 'Build project', 'Ctrl + F9', '🔨', ['CTRL', 'F9'], ['WIN', 'F9']),
+    dualHotkeyPreset('jetbrains-run', 'Run', 'Shift + F10', '▶️', ['SHIFT', 'F10'], ['CTRL', 'R']),
+    dualHotkeyPreset('jetbrains-debug', 'Debug', 'Shift + F9', '🐞', ['SHIFT', 'F9'], ['CTRL', 'D']),
+    dualHotkeyPreset('jetbrains-stop', 'Stop', 'Ctrl + F2', '⏹️', ['CTRL', 'F2'], ['WIN', 'F2']),
+    dualHotkeyPreset(
+      'jetbrains-find-action',
+      'Find action',
+      'Ctrl + Shift + A',
+      '🔎',
+      ['CTRL', 'SHIFT', 'A'],
+      ['WIN', 'SHIFT', 'A'],
+    ),
+    dualHotkeyPreset('jetbrains-open-class', 'Open class', 'Ctrl + N', '🏷️', ['CTRL', 'N'], ['WIN', 'O']),
+    dualHotkeyPreset(
+      'jetbrains-open-file',
+      'Open file',
+      'Ctrl + Shift + N',
+      '📄',
+      ['CTRL', 'SHIFT', 'N'],
+      ['WIN', 'SHIFT', 'O'],
+    ),
+    dualHotkeyPreset(
+      'jetbrains-find-in-path',
+      'Find in path',
+      'Ctrl + Shift + F',
+      '🔍',
+      ['CTRL', 'SHIFT', 'F'],
+      ['WIN', 'SHIFT', 'F'],
+    ),
+    dualHotkeyPreset(
+      'jetbrains-replace-in-path',
+      'Replace in path',
+      'Ctrl + Shift + R',
+      '🔁',
+      ['CTRL', 'SHIFT', 'R'],
+      ['WIN', 'SHIFT', 'R'],
+    ),
+    dualHotkeyPreset(
+      'jetbrains-reformat',
+      'Reformat code',
+      'Ctrl + Alt + L',
+      '🧹',
+      ['CTRL', 'ALT', 'L'],
+      ['WIN', 'ALT', 'L'],
+    ),
+    dualHotkeyPreset(
+      'jetbrains-optimize-imports',
+      'Optimize imports',
+      'Ctrl + Alt + O',
+      '🧼',
+      ['CTRL', 'ALT', 'O'],
+      ['CTRL', 'ALT', 'O'],
+    ),
+    dualHotkeyPreset(
+      'jetbrains-terminal',
+      'Toggle terminal',
+      'Alt + F12',
+      '⌨️',
+      ['ALT', 'F12'],
+      ['ALT', 'F12'],
+    ),
+    dualHotkeyPreset('jetbrains-project-view', 'Project view', 'Alt + 1', '🗂️', ['ALT', '1'], ['WIN', '1']),
+    dualHotkeyPreset('jetbrains-git', 'Git', 'Alt + 9', '🌿', ['ALT', '9'], ['WIN', '9']),
+    dualHotkeyPreset(
+      'jetbrains-logcat',
+      'Logcat',
+      'Android Studio only — Alt + 6',
+      '📜',
+      ['ALT', '6'],
+      ['WIN', '6'],
+      'Android Studio only — Cmd + 6',
+    ),
+  ],
+}
+
+const opencode: ActionPack = {
+  id: 'opencode',
+  name: 'OpenCode',
+  description:
+    'OpenCode TUI leader shortcuts. Focus the TUI first; the leader is Ctrl+X with its ~2s window.',
+  presets: [
+    leaderPreset('opencode-new-session', 'New session', 'N', '➕'),
+    leaderPreset('opencode-sessions', 'Sessions', 'L', '🗂️'),
+    leaderPreset('opencode-models', 'Models', 'M', '🧠'),
+    leaderPreset('opencode-agents', 'Agents', 'A', '🤖'),
+    hotkeyPreset('opencode-command-palette', 'Command palette', 'Ctrl + P', '⌘', ['CTRL', 'P']),
+    leaderPreset('opencode-undo', 'Undo', 'U', '↩️'),
+    leaderPreset('opencode-redo', 'Redo', 'R', '↪️'),
+    leaderPreset('opencode-compact-session', 'Compact session', 'C', '🗜️'),
+    leaderPreset('opencode-toggle-sidebar', 'Toggle sidebar', 'B', '📑'),
+    leaderPreset('opencode-editor', 'Editor', 'E', '✏️'),
+    leaderPreset('opencode-themes', 'Themes', 'T', '🎨'),
+    leaderPreset('opencode-export', 'Export', 'X', '📤'),
+    leaderPreset('opencode-status', 'Status', 'S', '📊'),
+    leaderPreset('opencode-exit', 'Exit', 'Q', '🚪'),
+  ],
+}
+
 const system: ActionPack = {
   id: 'system',
   name: 'System',
@@ -305,7 +451,7 @@ const mediaPack: ActionPack = {
   ],
 }
 
-export const ACTION_PACKS: ActionPack[] = [chrome, obs, vscode, system, mediaPack]
+export const ACTION_PACKS: ActionPack[] = [chrome, obs, vscode, jetbrains, opencode, system, mediaPack]
 
 export function findActionPack(packId: string): ActionPack | undefined {
   return ACTION_PACKS.find((pack) => pack.id === packId)
