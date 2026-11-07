@@ -24,6 +24,7 @@ import com.phonedek.app.net.ConnectionStatus
 import com.phonedek.app.net.DeckConnection
 import com.phonedek.app.net.FetchResult
 import com.phonedek.app.net.HttpApi
+import com.phonedek.app.net.ImportResult
 import com.phonedek.app.net.createHttpClient
 import com.phonedek.app.net.createWebSocketClient
 import com.phonedek.app.util.Diag
@@ -70,6 +71,13 @@ data class UiState(
     val backupTotalBytes: Long = -1,
     val backupError: String? = null,
     val backupSavedName: String? = null,
+    val importBusy: Boolean = false,
+    val importProgress: Float = 0f,
+    val importBytes: Long = 0,
+    val importTotalBytes: Long = -1,
+    val importWaitingForApproval: Boolean = false,
+    val importError: String? = null,
+    val importSuccess: Boolean = false,
 )
 
 sealed interface UiEvent {
@@ -107,6 +115,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var pairJob: Job? = null
     private var fetchJob: Job? = null
     private var backupJob: Job? = null
+    private var importJob: Job? = null
     private var inputFlushJob: Job? = null
     private var activeControlId: String? = null
     private var pendingInputDelta = 0f
@@ -371,6 +380,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         fetchJob?.cancel()
         backupJob?.cancel()
         backupJob = null
+        importJob?.cancel()
+        importJob = null
         inputFlushJob?.cancel()
         inputFlushJob = null
         activeControlId = null
@@ -433,7 +444,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun saveBackup(uri: Uri) {
         val snapshot = _state.value
-        if (snapshot.backupBusy) return
+        if (snapshot.backupBusy || snapshot.importBusy) return
         val pairing = snapshot.pairing
         if (pairing == null) {
             reportBackupFailure("Pair with a PC before saving a backup.")
@@ -452,6 +463,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 backupTotalBytes = -1,
                 backupError = null,
                 backupSavedName = null,
+                importError = null,
+                importSuccess = false,
+                importWaitingForApproval = false,
             )
         }
 
@@ -564,6 +578,113 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }.getOrNull()?.takeIf { it.isNotBlank() }
+
+    /**
+     * Streams a user-selected backup ZIP to the currently paired desktop.
+     * The desktop holds the response while its native approval dialog is open.
+     */
+    fun sendBackup(uri: Uri) {
+        val snapshot = _state.value
+        if (snapshot.importBusy || snapshot.backupBusy) return
+        val pairing = snapshot.pairing
+        if (pairing == null) {
+            failImport("Pair with a PC before sending a backup.")
+            return
+        }
+        if (snapshot.connection != ConnectionStatus.CONNECTED) {
+            failImport("Connect to your PC to send a backup.")
+            return
+        }
+
+        _state.update {
+            it.copy(
+                importBusy = true,
+                importProgress = 0f,
+                importBytes = 0,
+                importTotalBytes = -1,
+                importWaitingForApproval = false,
+                importError = null,
+                importSuccess = false,
+                backupError = null,
+                backupSavedName = null,
+            )
+        }
+
+        importJob = viewModelScope.launch {
+            val resolver = getApplication<Application>().contentResolver
+            try {
+                val result = http.sendBackup(
+                    host = pairing.host,
+                    port = pairing.port,
+                    token = pairing.token,
+                    contentResolver = resolver,
+                    uri = uri,
+                    onProgress = { uploaded, total ->
+                        _state.update { current ->
+                            current.copy(
+                                importBytes = uploaded,
+                                importTotalBytes = total,
+                                importProgress = if (total > 0) {
+                                    (uploaded.toFloat() / total).coerceIn(0f, 1f)
+                                } else {
+                                    0f
+                                },
+                                importWaitingForApproval = total > 0 && uploaded >= total,
+                            )
+                        }
+                    },
+                    onUploadComplete = {
+                        _state.update {
+                            it.copy(
+                                importWaitingForApproval = true,
+                                importProgress = 1f,
+                            )
+                        }
+                    },
+                )
+                when (result) {
+                    is ImportResult.Success -> {
+                        _state.update {
+                            it.copy(
+                                importBusy = false,
+                                importProgress = 1f,
+                                importWaitingForApproval = false,
+                                importError = null,
+                                importSuccess = true,
+                            )
+                        }
+                        emit("Deck imported. Reconnecting…")
+                        reconnect()
+                    }
+
+                    is ImportResult.Failure -> failImport(result.message)
+                }
+            } catch (error: CancellationException) {
+                _state.update {
+                    it.copy(importBusy = false, importWaitingForApproval = false)
+                }
+                throw error
+            } catch (error: SecurityException) {
+                failImport("Could not read the selected backup ZIP.")
+            } catch (error: IOException) {
+                failImport("Backup upload failed. Check Wi-Fi and try again.")
+            } catch (error: Exception) {
+                failImport("Backup upload failed: ${error.message ?: "unknown error"}")
+            }
+        }
+    }
+
+    private fun failImport(message: String) {
+        _state.update {
+            it.copy(
+                importBusy = false,
+                importWaitingForApproval = false,
+                importError = message,
+                importSuccess = false,
+            )
+        }
+        emit(message)
+    }
 
     /**
      * Relative slider/dial input. Moves are coalesced to about 25 Hz; `end`
@@ -895,6 +1016,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         backupJob?.cancel()
+        importJob?.cancel()
         inputFlushJob?.cancel()
         connection.stop()
         super.onCleared()

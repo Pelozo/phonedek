@@ -278,6 +278,7 @@ fun DeckScreen(
             onLockLandscape = viewModel::setLockLandscape,
             onRotateContentInPortrait = viewModel::setRotateContentInPortrait,
             onSaveBackup = viewModel::saveBackup,
+            onSendBackup = viewModel::sendBackup,
             onShowSetupGuide = {
                 showSettings = false
                 settingsChangeServerOnOpen = false

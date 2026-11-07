@@ -1,21 +1,32 @@
 package com.phonedek.app.net
 
+import android.content.ContentResolver
+import android.net.Uri
+import android.os.SystemClock
+import android.provider.OpenableColumns
 import com.phonedek.app.data.DEFAULT_HTTP_PORT
 import com.phonedek.app.data.DeckConfig
 import com.phonedek.app.data.DeckJson
-import android.os.SystemClock
 import com.phonedek.app.util.Diag
 import java.io.IOException
 import java.io.InterruptedIOException
 import java.io.OutputStream
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import okhttp3.HttpUrl
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
+import okio.BufferedSink
 
 sealed interface FetchResult {
     data class Success(val raw: String, val config: DeckConfig) : FetchResult
@@ -28,6 +39,11 @@ sealed interface BackupResult {
         val message: String,
         val unsupported: Boolean = false,
     ) : BackupResult
+}
+
+sealed interface ImportResult {
+    data class Success(val bytes: Long) : ImportResult
+    data class Failure(val message: String) : ImportResult
 }
 
 fun createHttpClient(): OkHttpClient = OkHttpClient.Builder()
@@ -86,6 +102,12 @@ fun assetUrl(host: String, port: Int, asset: String, token: String? = null): Str
 class HttpApi(private val client: OkHttpClient) {
     // Backups can be large; do not inherit the short config call/read timeout.
     private val backupClient: OkHttpClient = client.newBuilder()
+        .callTimeout(0, TimeUnit.MILLISECONDS)
+        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .writeTimeout(0, TimeUnit.MILLISECONDS)
+        .build()
+
+    private val importClient: OkHttpClient = client.newBuilder()
         .callTimeout(0, TimeUnit.MILLISECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .writeTimeout(0, TimeUnit.MILLISECONDS)
@@ -309,10 +331,173 @@ class HttpApi(private val client: OkHttpClient) {
         }
     }
 
+    suspend fun sendBackup(
+        host: String,
+        port: Int,
+        token: String,
+        contentResolver: ContentResolver,
+        uri: Uri,
+        onProgress: (uploaded: Long, total: Long) -> Unit,
+        onUploadComplete: () -> Unit = {},
+    ): ImportResult = withContext(Dispatchers.IO) {
+        val urlResult = runCatching {
+            HttpUrl.Builder()
+                .scheme("http")
+                .host(host)
+                .port(port)
+                .addPathSegment("api")
+                .addPathSegment("import")
+                .build()
+        }
+        val url = urlResult.getOrNull() ?: run {
+            Diag.e(
+                "sendBackup: could not build HTTP URL for host=\"$host\" port=$port",
+                urlResult.exceptionOrNull(),
+            )
+            return@withContext ImportResult.Failure("That server address is not valid.")
+        }
+        val totalBytes = queryContentSize(contentResolver, uri)
+        val requestBody = object : RequestBody() {
+            override fun contentType() = "application/zip".toMediaType()
+
+            override fun contentLength(): Long = totalBytes ?: -1L
+
+            override fun writeTo(sink: BufferedSink) {
+                val input = contentResolver.openInputStream(uri)
+                    ?: throw IOException("Could not open the selected backup ZIP.")
+                input.use { stream ->
+                    val buffer = ByteArray(64 * 1024)
+                    var uploaded = 0L
+                    var lastReported = -1L
+                    while (true) {
+                        val read = stream.read(buffer)
+                        if (read < 0) break
+                        sink.write(buffer, 0, read)
+                        uploaded += read
+                        if (uploaded - lastReported >= 256 * 1024) {
+                            onProgress(uploaded, totalBytes ?: -1L)
+                            lastReported = uploaded
+                        }
+                    }
+                    sink.flush()
+                    onProgress(uploaded, totalBytes ?: -1L)
+                }
+                onUploadComplete()
+            }
+        }
+        val request = Request.Builder()
+            .url(url)
+            .post(requestBody)
+            .header("Authorization", "Bearer $token")
+            .header("Accept", "application/json")
+            .header("User-Agent", "PhoneDeck-Android")
+            .build()
+
+        Diag.i("sendBackup: host=\"$host\" port=$port token=${Diag.maskToken(token)}")
+        Diag.d("sendBackup URL ${Diag.redactUrl(url.toString())}")
+
+        val call = importClient.newCall(request)
+        val cancelOnCompletion = currentCoroutineContext()[Job]?.invokeOnCompletion {
+            call.cancel()
+        }
+        try {
+            call.execute().use { response ->
+                val responseText = response.body?.string().orEmpty()
+                val parsed = parseImportResponse(response.code, responseText)
+                if (parsed is ImportResult.Success) {
+                    parsed.copy(bytes = totalBytes ?: -1L)
+                } else {
+                    parsed
+                }
+            }
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
+        } catch (error: InterruptedIOException) {
+            Diag.e("sendBackup interrupted for \"$host:$port\"", error)
+            ImportResult.Failure("Backup upload stopped. Try again.")
+        } catch (error: IOException) {
+            Diag.e("sendBackup IO failure for \"$host:$port\"", error)
+            val detail = error.message.orEmpty()
+            val message = if (detail.contains("Could not open", ignoreCase = true)) {
+                "Could not open the selected backup ZIP."
+            } else {
+                "Backup upload failed. Check Wi-Fi and try again."
+            }
+            ImportResult.Failure(message)
+        } catch (error: SecurityException) {
+            Diag.e("sendBackup permission failure for \"$host:$port\"", error)
+            ImportResult.Failure("Could not read the selected backup ZIP.")
+        } catch (error: Exception) {
+            Diag.e("sendBackup unexpected failure for \"$host:$port\"", error)
+            ImportResult.Failure("Backup upload failed: ${error.message ?: "unknown error"}")
+        } finally {
+            cancelOnCompletion?.dispose()
+        }
+    }
+
     companion object {
         const val DEFAULT_PORT = DEFAULT_HTTP_PORT
     }
 }
+
+internal fun parseImportResponse(code: Int, body: String): ImportResult {
+    val json = runCatching {
+        DeckJson.format.parseToJsonElement(body) as? JsonObject
+    }.getOrNull()
+    val ok = (json?.get("ok") as? JsonPrimitive)?.booleanOrNull == true
+    val serverError = (json?.get("error") as? JsonPrimitive)
+        ?.contentOrNull
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+
+    return when {
+        code in 200..299 -> if (ok) {
+            ImportResult.Success(0)
+        } else {
+            ImportResult.Failure(serverError ?: "The PC did not confirm the import.")
+        }
+
+        code == 401 || code == 403 -> ImportResult.Failure(
+            "PIN rejected. Check the 4-digit PIN shown in PhoneDeck on your PC.",
+        )
+
+        code == 404 -> ImportResult.Failure(
+            "Update PhoneDeck on your PC to enable backup import.",
+        )
+
+        code == 409 -> ImportResult.Failure(
+            "Another import is already waiting for approval on the PC.",
+        )
+
+        code == 413 -> ImportResult.Failure(
+            "That backup is too large for this PC.",
+        )
+
+        code == 400 -> ImportResult.Failure(
+            serverError ?: "The backup ZIP is invalid or could not be read.",
+        )
+
+        else -> ImportResult.Failure("Backup import failed (HTTP $code).")
+    }
+}
+
+private fun queryContentSize(contentResolver: ContentResolver, uri: Uri): Long? =
+    runCatching {
+        contentResolver.query(
+            uri,
+            arrayOf(OpenableColumns.SIZE),
+            null,
+            null,
+            null,
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val index = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (index >= 0 && !cursor.isNull(index)) cursor.getLong(index) else null
+            } else {
+                null
+            }
+        }
+    }.getOrNull()?.takeIf { it > 0 }
 
 private fun isZipHeader(bytes: ByteArray, length: Int): Boolean {
     if (length < 4) return false

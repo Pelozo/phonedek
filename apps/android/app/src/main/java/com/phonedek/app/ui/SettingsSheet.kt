@@ -89,6 +89,7 @@ fun SettingsSheet(
     onLockLandscape: (Boolean) -> Unit,
     onRotateContentInPortrait: (Boolean) -> Unit,
     onSaveBackup: (Uri) -> Unit,
+    onSendBackup: (Uri) -> Unit,
     onShowSetupGuide: () -> Unit,
     confirmChangeOnOpen: Boolean = false,
 ) {
@@ -115,6 +116,16 @@ fun SettingsSheet(
         if (uri != null) onSaveBackup(uri)
     }
     val launchBackup: () -> Unit = { backupLauncher.launch(backupFileName()) }
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) onSendBackup(uri)
+    }
+    val launchImport: () -> Unit = {
+        importLauncher.launch(
+            arrayOf("application/zip", "application/octet-stream", "*/*"),
+        )
+    }
 
     if (useConsolePanel) {
         SettingsConsolePanel(
@@ -128,6 +139,7 @@ fun SettingsSheet(
             onLockLandscape = onLockLandscape,
             onRotateContentInPortrait = onRotateContentInPortrait,
             onLaunchBackup = launchBackup,
+            onLaunchImport = launchImport,
             onShowSetupGuide = onShowSetupGuide,
             onRefreshLogs = refreshLogs,
             onCopyLogs = copyLogs,
@@ -145,6 +157,7 @@ fun SettingsSheet(
             onLockLandscape = onLockLandscape,
             onRotateContentInPortrait = onRotateContentInPortrait,
             onLaunchBackup = launchBackup,
+            onLaunchImport = launchImport,
             onShowSetupGuide = onShowSetupGuide,
             onRefreshLogs = refreshLogs,
             onCopyLogs = copyLogs,
@@ -176,6 +189,7 @@ private fun SettingsBottomSheet(
     onLockLandscape: (Boolean) -> Unit,
     onRotateContentInPortrait: (Boolean) -> Unit,
     onLaunchBackup: () -> Unit,
+    onLaunchImport: () -> Unit,
     onShowSetupGuide: () -> Unit,
     onRefreshLogs: () -> Unit,
     onCopyLogs: () -> Unit,
@@ -236,6 +250,7 @@ private fun SettingsBottomSheet(
             SettingsBackupSection(
                 state = state,
                 onLaunchBackup = onLaunchBackup,
+                onLaunchImport = onLaunchImport,
             )
             Spacer(Modifier.height(18.dp))
             SettingsMeta()
@@ -255,6 +270,7 @@ private fun SettingsConsolePanel(
     onLockLandscape: (Boolean) -> Unit,
     onRotateContentInPortrait: (Boolean) -> Unit,
     onLaunchBackup: () -> Unit,
+    onLaunchImport: () -> Unit,
     onShowSetupGuide: () -> Unit,
     onRefreshLogs: () -> Unit,
     onCopyLogs: () -> Unit,
@@ -345,6 +361,7 @@ private fun SettingsConsolePanel(
                             SettingsBackupSection(
                                 state = state,
                                 onLaunchBackup = onLaunchBackup,
+                                onLaunchImport = onLaunchImport,
                             )
                             Spacer(Modifier.height(18.dp))
                             SettingsMeta()
@@ -549,15 +566,20 @@ private fun SettingsDiagnosticsSection(
 private fun SettingsBackupSection(
     state: UiState,
     onLaunchBackup: () -> Unit,
+    onLaunchImport: () -> Unit,
 ) {
     val unavailableReason = when {
-        state.pairing == null -> "Pair with a PC before saving a backup."
-        state.connection != ConnectionStatus.CONNECTED -> "Connect to your PC to save a backup."
+        state.pairing == null -> "Pair with a PC before using backups."
+        state.connection != ConnectionStatus.CONNECTED -> "Connect to your PC to use backups."
         else -> null
     }
-    val error = state.backupError
+    val saveError = state.backupError
     val savedName = state.backupSavedName
-    val totalBytes = state.backupTotalBytes
+    val downloadTotal = state.backupTotalBytes
+    val importError = state.importError
+    val importSuccess = state.importSuccess
+    val uploadTotal = state.importTotalBytes
+    val anyBusy = state.backupBusy || state.importBusy
 
     ConsoleSectionLabel(index = "04", label = "BACKUP")
     Spacer(Modifier.height(6.dp))
@@ -568,11 +590,19 @@ private fun SettingsBackupSection(
         fontSize = 11.sp,
         lineHeight = 16.sp,
     )
+    Spacer(Modifier.height(6.dp))
+    Text(
+        text = "Send a saved PhoneDeck backup ZIP to this PC. Approve the replacement " +
+            "on the PC. To move to another PC, pair with it first.",
+        color = TextMuted,
+        fontSize = 11.sp,
+        lineHeight = 16.sp,
+    )
     Spacer(Modifier.height(12.dp))
 
     Button(
         onClick = onLaunchBackup,
-        enabled = unavailableReason == null && !state.backupBusy,
+        enabled = unavailableReason == null && !anyBusy,
         modifier = Modifier
             .fillMaxWidth()
             .height(48.dp),
@@ -592,9 +622,26 @@ private fun SettingsBackupSection(
     }
 
     Spacer(Modifier.height(8.dp))
+    OutlinedButton(
+        onClick = onLaunchImport,
+        enabled = unavailableReason == null && !anyBusy,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp),
+        shape = ControlShape,
+        border = BorderStroke(1.dp, HairlineStrong),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
+    ) {
+        Text(
+            text = if (state.importBusy) "Sending backup…" else "Send backup to this PC…",
+            fontSize = 12.sp,
+        )
+    }
+
+    Spacer(Modifier.height(8.dp))
     when {
         state.backupBusy -> {
-            if (totalBytes > 0) {
+            if (downloadTotal > 0) {
                 LinearProgressIndicator(
                     progress = { state.backupProgress },
                     modifier = Modifier.fillMaxWidth(),
@@ -611,9 +658,9 @@ private fun SettingsBackupSection(
             Spacer(Modifier.height(6.dp))
             val percent = (state.backupProgress * 100).roundToInt()
             val downloaded = formatBackupBytes(state.backupBytes)
-            val status = if (totalBytes > 0) {
+            val status = if (downloadTotal > 0) {
                 "Downloading backup… $percent% · $downloaded of " +
-                    formatBackupBytes(totalBytes)
+                    formatBackupBytes(downloadTotal)
             } else {
                 "Downloading backup… $downloaded"
             }
@@ -625,19 +672,69 @@ private fun SettingsBackupSection(
             )
         }
 
-        error != null -> {
+        state.importBusy -> {
+            if (uploadTotal > 0) {
+                LinearProgressIndicator(
+                    progress = {
+                        if (state.importWaitingForApproval) {
+                            1f
+                        } else {
+                            state.importProgress
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Accent,
+                    trackColor = Hairline,
+                )
+            } else {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Accent,
+                    trackColor = Hairline,
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            val uploaded = formatBackupBytes(state.importBytes)
+            val status = when {
+                state.importWaitingForApproval -> "Waiting for approval on PC…"
+                uploadTotal > 0 -> {
+                    val percent = (state.importProgress * 100).roundToInt()
+                    "Uploading backup… $percent% · $uploaded of " +
+                        formatBackupBytes(uploadTotal)
+                }
+
+                else -> "Uploading backup… $uploaded"
+            }
             Text(
-                text = error,
+                text = status,
+                color = TextMuted,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+            )
+        }
+
+        importError != null -> {
+            Text(
+                text = importError,
                 color = StatusDanger,
                 fontSize = 11.sp,
                 lineHeight = 15.sp,
             )
         }
 
-        unavailableReason != null -> {
+        importSuccess -> {
             Text(
-                text = unavailableReason,
-                color = TextMuted,
+                text = "Deck imported. Reconnecting…",
+                color = StatusOk,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+            )
+        }
+
+        saveError != null -> {
+            Text(
+                text = saveError,
+                color = StatusDanger,
                 fontSize = 11.sp,
                 lineHeight = 15.sp,
             )
@@ -647,6 +744,15 @@ private fun SettingsBackupSection(
             Text(
                 text = "Saved $savedName to your phone.",
                 color = StatusOk,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+            )
+        }
+
+        unavailableReason != null -> {
+            Text(
+                text = unavailableReason,
+                color = TextMuted,
                 fontSize = 11.sp,
                 lineHeight = 15.sp,
             )
