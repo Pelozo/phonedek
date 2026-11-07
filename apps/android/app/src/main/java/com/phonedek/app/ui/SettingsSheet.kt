@@ -1,7 +1,10 @@
 package com.phonedek.app.ui
 
 import android.content.res.Configuration
+import android.net.Uri
 import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -24,9 +27,11 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -52,11 +57,26 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.phonedek.app.BuildConfig
 import com.phonedek.app.data.Pairing
+import com.phonedek.app.net.ConnectionStatus
 import com.phonedek.app.util.Diag
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import kotlin.math.roundToInt
 
 private val SheetShape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp)
 private val PanelShape = RoundedCornerShape(8.dp)
 private val ControlShape = RoundedCornerShape(4.dp)
+private val BackupNameFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmm", Locale.US)
+
+private fun backupFileName(): String =
+    "phonedek-backup-${LocalDateTime.now().format(BackupNameFormatter)}.zip"
+
+private fun formatBackupBytes(bytes: Long): String = when {
+    bytes < 1024 -> "$bytes B"
+    bytes < 1024 * 1024 -> String.format(Locale.US, "%.1f KB", bytes / 1024.0)
+    else -> String.format(Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0))
+}
 
 @Composable
 fun SettingsSheet(
@@ -68,6 +88,7 @@ fun SettingsSheet(
     onHideTopBarWhenConnected: (Boolean) -> Unit,
     onLockLandscape: (Boolean) -> Unit,
     onRotateContentInPortrait: (Boolean) -> Unit,
+    onSaveBackup: (Uri) -> Unit,
     confirmChangeOnOpen: Boolean = false,
 ) {
     val configuration = LocalConfiguration.current
@@ -87,6 +108,12 @@ fun SettingsSheet(
         Diag.clear()
         logs = Diag.snapshot()
     }
+    val backupLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri ->
+        if (uri != null) onSaveBackup(uri)
+    }
+    val launchBackup: () -> Unit = { backupLauncher.launch(backupFileName()) }
 
     if (useConsolePanel) {
         SettingsConsolePanel(
@@ -99,6 +126,7 @@ fun SettingsSheet(
             onHideTopBarWhenConnected = onHideTopBarWhenConnected,
             onLockLandscape = onLockLandscape,
             onRotateContentInPortrait = onRotateContentInPortrait,
+            onLaunchBackup = launchBackup,
             onRefreshLogs = refreshLogs,
             onCopyLogs = copyLogs,
             onClearLogs = clearLogs,
@@ -114,6 +142,7 @@ fun SettingsSheet(
             onHideTopBarWhenConnected = onHideTopBarWhenConnected,
             onLockLandscape = onLockLandscape,
             onRotateContentInPortrait = onRotateContentInPortrait,
+            onLaunchBackup = launchBackup,
             onRefreshLogs = refreshLogs,
             onCopyLogs = copyLogs,
             onClearLogs = clearLogs,
@@ -143,6 +172,7 @@ private fun SettingsBottomSheet(
     onHideTopBarWhenConnected: (Boolean) -> Unit,
     onLockLandscape: (Boolean) -> Unit,
     onRotateContentInPortrait: (Boolean) -> Unit,
+    onLaunchBackup: () -> Unit,
     onRefreshLogs: () -> Unit,
     onCopyLogs: () -> Unit,
     onClearLogs: () -> Unit,
@@ -195,6 +225,13 @@ private fun SettingsBottomSheet(
                 onCopyLogs = onCopyLogs,
                 onClearLogs = onClearLogs,
             )
+            Spacer(Modifier.height(20.dp))
+            HorizontalDivider(color = Hairline)
+            Spacer(Modifier.height(16.dp))
+            SettingsBackupSection(
+                state = state,
+                onLaunchBackup = onLaunchBackup,
+            )
             Spacer(Modifier.height(18.dp))
             SettingsMeta()
         }
@@ -212,6 +249,7 @@ private fun SettingsConsolePanel(
     onHideTopBarWhenConnected: (Boolean) -> Unit,
     onLockLandscape: (Boolean) -> Unit,
     onRotateContentInPortrait: (Boolean) -> Unit,
+    onLaunchBackup: () -> Unit,
     onRefreshLogs: () -> Unit,
     onCopyLogs: () -> Unit,
     onClearLogs: () -> Unit,
@@ -293,6 +331,13 @@ private fun SettingsConsolePanel(
                                 onRefreshLogs = onRefreshLogs,
                                 onCopyLogs = onCopyLogs,
                                 onClearLogs = onClearLogs,
+                            )
+                            Spacer(Modifier.height(20.dp))
+                            HorizontalDivider(color = Hairline)
+                            Spacer(Modifier.height(16.dp))
+                            SettingsBackupSection(
+                                state = state,
+                                onLaunchBackup = onLaunchBackup,
                             )
                             Spacer(Modifier.height(18.dp))
                             SettingsMeta()
@@ -477,6 +522,115 @@ private fun SettingsDiagnosticsSection(
             fontFamily = ConsoleMono,
             modifier = Modifier.padding(top = 14.dp),
         )
+    }
+}
+
+@Composable
+private fun SettingsBackupSection(
+    state: UiState,
+    onLaunchBackup: () -> Unit,
+) {
+    val unavailableReason = when {
+        state.pairing == null -> "Pair with a PC before saving a backup."
+        state.connection != ConnectionStatus.CONNECTED -> "Connect to your PC to save a backup."
+        else -> null
+    }
+    val error = state.backupError
+    val savedName = state.backupSavedName
+    val totalBytes = state.backupTotalBytes
+
+    ConsoleSectionLabel(index = "04", label = "BACKUP")
+    Spacer(Modifier.height(6.dp))
+    Text(
+        text = "Save this deck, its pages and media assets to your phone. " +
+            "Import the ZIP on another PhoneDeck PC via Settings → Import backup.",
+        color = TextMuted,
+        fontSize = 11.sp,
+        lineHeight = 16.sp,
+    )
+    Spacer(Modifier.height(12.dp))
+
+    Button(
+        onClick = onLaunchBackup,
+        enabled = unavailableReason == null && !state.backupBusy,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp),
+        shape = ControlShape,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Accent,
+            contentColor = AccentInk,
+            disabledContainerColor = Accent.copy(alpha = 0.35f),
+            disabledContentColor = AccentInk.copy(alpha = 0.65f),
+        ),
+    ) {
+        Text(
+            text = if (state.backupBusy) "Saving backup…" else "Save backup to phone…",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+
+    Spacer(Modifier.height(8.dp))
+    when {
+        state.backupBusy -> {
+            if (totalBytes > 0) {
+                LinearProgressIndicator(
+                    progress = { state.backupProgress },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Accent,
+                    trackColor = Hairline,
+                )
+            } else {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Accent,
+                    trackColor = Hairline,
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            val percent = (state.backupProgress * 100).roundToInt()
+            val downloaded = formatBackupBytes(state.backupBytes)
+            val status = if (totalBytes > 0) {
+                "Downloading backup… $percent% · $downloaded of " +
+                    formatBackupBytes(totalBytes)
+            } else {
+                "Downloading backup… $downloaded"
+            }
+            Text(
+                text = status,
+                color = TextMuted,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+            )
+        }
+
+        error != null -> {
+            Text(
+                text = error,
+                color = StatusDanger,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+            )
+        }
+
+        unavailableReason != null -> {
+            Text(
+                text = unavailableReason,
+                color = TextMuted,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+            )
+        }
+
+        savedName != null -> {
+            Text(
+                text = "Saved $savedName to your phone.",
+                color = StatusOk,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+            )
+        }
     }
 }
 

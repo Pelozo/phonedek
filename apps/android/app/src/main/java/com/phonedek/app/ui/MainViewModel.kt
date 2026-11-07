@@ -1,7 +1,10 @@
 package com.phonedek.app.ui
 
 import android.app.Application
+import android.content.ContentResolver
+import android.net.Uri
 import android.os.Build
+import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.phonedek.app.BuildConfig
@@ -15,6 +18,7 @@ import com.phonedek.app.data.DeviceInfo
 import com.phonedek.app.data.Pairing
 import com.phonedek.app.data.PairingDraft
 import com.phonedek.app.data.PrefsRepository
+import com.phonedek.app.net.BackupResult
 import com.phonedek.app.net.ConnectionStatus
 import com.phonedek.app.net.DeckConnection
 import com.phonedek.app.net.FetchResult
@@ -23,6 +27,8 @@ import com.phonedek.app.net.createHttpClient
 import com.phonedek.app.net.createWebSocketClient
 import com.phonedek.app.util.Diag
 import com.phonedek.app.util.parseEndpoint
+import java.io.IOException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -51,6 +57,12 @@ data class UiState(
     val pairingBusy: Boolean = false,
     val pairingError: String? = null,
     val pairingDraft: PairingDraft? = null,
+    val backupBusy: Boolean = false,
+    val backupProgress: Float = 0f,
+    val backupBytes: Long = 0,
+    val backupTotalBytes: Long = -1,
+    val backupError: String? = null,
+    val backupSavedName: String? = null,
 )
 
 sealed interface UiEvent {
@@ -87,6 +99,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var lastProfileId: String? = null
     private var pairJob: Job? = null
     private var fetchJob: Job? = null
+    private var backupJob: Job? = null
     private var protocolWarningShown = false
     private var authWarningShown = false
 
@@ -301,6 +314,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun forgetServer() {
         pairJob?.cancel()
         fetchJob?.cancel()
+        backupJob?.cancel()
+        backupJob = null
         connection.stop()
         lastRawConfig = null
         lastPageId = null
@@ -344,6 +359,144 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(rotateContentInPortrait = enabled) }
         viewModelScope.launch { runCatching { prefs.setRotateContentInPortrait(enabled) } }
     }
+
+    /**
+     * Streams the desktop's ZIP backup into the SAF document chosen by the user.
+     * Partial documents are deleted when the download or write fails.
+     */
+    fun saveBackup(uri: Uri) {
+        val snapshot = _state.value
+        if (snapshot.backupBusy) return
+        val pairing = snapshot.pairing
+        if (pairing == null) {
+            reportBackupFailure("Pair with a PC before saving a backup.")
+            return
+        }
+        if (snapshot.connection != ConnectionStatus.CONNECTED) {
+            reportBackupFailure("Connect to your PC to save a backup.")
+            return
+        }
+
+        _state.update {
+            it.copy(
+                backupBusy = true,
+                backupProgress = 0f,
+                backupBytes = 0,
+                backupTotalBytes = -1,
+                backupError = null,
+                backupSavedName = null,
+            )
+        }
+
+        backupJob = viewModelScope.launch {
+            val resolver = getApplication<Application>().contentResolver
+            var failure: String? = null
+            var savedName: String? = null
+            try {
+                withContext(Dispatchers.IO) {
+                    val displayName = queryBackupName(resolver, uri)
+                    val output = resolver.openOutputStream(uri)
+                    if (output == null) {
+                        failure = "Could not open the selected file."
+                        return@withContext
+                    }
+                    output.use { stream ->
+                        when (
+                            val result = http.downloadBackup(
+                                host = pairing.host,
+                                port = pairing.port,
+                                token = pairing.token,
+                                outputStream = stream,
+                                onProgress = { downloaded, total ->
+                                    _state.update { current ->
+                                        current.copy(
+                                            backupBytes = downloaded,
+                                            backupTotalBytes = total,
+                                            backupProgress = if (total > 0) {
+                                                (downloaded.toFloat() / total)
+                                                    .coerceIn(0f, 1f)
+                                            } else {
+                                                0f
+                                            },
+                                        )
+                                    }
+                                },
+                            )
+                        ) {
+                            is BackupResult.Success -> {
+                                savedName = displayName
+                                    ?: uri.lastPathSegment
+                                    ?: "backup.zip"
+                            }
+
+                            is BackupResult.Failure -> failure = result.message
+                        }
+                    }
+                }
+            } catch (error: CancellationException) {
+                _state.update { it.copy(backupBusy = false) }
+                throw error
+            } catch (error: SecurityException) {
+                failure = "The selected location isn't writable. Choose another folder."
+            } catch (error: IOException) {
+                failure = if (
+                    error.message?.contains("ENOSPC", ignoreCase = true) == true ||
+                    error.message?.contains("no space", ignoreCase = true) == true
+                ) {
+                    "Not enough space to save the backup."
+                } else {
+                    "Could not write the backup. Check free space and try again."
+                }
+            } catch (error: Exception) {
+                failure = "Backup failed: ${error.message ?: "unknown error"}"
+            }
+
+            if (failure != null) {
+                // SAF may leave a zero/partial document behind. Remove it so a
+                // failed download never looks like a valid backup.
+                runCatching { resolver.delete(uri, null, null) }
+            }
+            val message = failure
+                ?: "Backup saved to ${savedName ?: "your phone"}."
+            _state.update {
+                it.copy(
+                    backupBusy = false,
+                    backupError = failure,
+                    backupSavedName = savedName,
+                )
+            }
+            emit(message)
+        }
+    }
+
+    private fun reportBackupFailure(message: String) {
+        _state.update {
+            it.copy(
+                backupBusy = false,
+                backupError = message,
+                backupSavedName = null,
+            )
+        }
+        emit(message)
+    }
+
+    private fun queryBackupName(resolver: ContentResolver, uri: Uri): String? =
+        runCatching {
+            resolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (index >= 0) cursor.getString(index) else null
+                } else {
+                    null
+                }
+            }
+        }.getOrNull()?.takeIf { it.isNotBlank() }
 
     /**
      * Called when a horizontal swipe settles on [pageId]. Uses the same
@@ -556,6 +709,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        backupJob?.cancel()
         connection.stop()
         super.onCleared()
     }
