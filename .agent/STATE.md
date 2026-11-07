@@ -66,3 +66,18 @@
   PowerShell `[ushort]` Unicode cast fix. Helper validated with PowerShell 7 on Linux:
   starts, Add-Type compiles, text reaches the Win32 call, scroll math is correct.
 - 62 Vitest tests pass; typecheck/build pass. Android pager + hide-bar work delegated.
+
+
+## 2026-11-07 23:15
+
+- v0.1.3 published: https://github.com/Pelozo/phonedek/releases/tag/v0.1.3
+  Assets: Setup.exe, .exe.blockmap, latest.yml, debug APK, SHA256SUMS. Latest release.
+  First updater-enabled Windows build; CI verified latest.yml/app-update.yml/blockmap.
+- Macro `[ushort]` fix + expanded recorder shipped in 0.1.3; 69 tests pass.
+- Android swipe/hide-top-bar shipped in 0.1.3; APK versionCode 4.
+- macOS implementation subagent active (`ses_e4c3ebd82ffeOcGqUDRxR1GyvR`): Swift
+  CGEvent helper, MacKeySender, platform helper path, mac packaging/CI. Do not edit
+  `apps/desktop` while it works.
+- Next: when macOS agent finishes, run desktop gates + CI (macos job), commit, then
+  release v0.1.4 (macOS + Windows/Android). v0.1.4 will also be the first real
+  auto-update test from 0.1.3. Keep latest.yml/blockmap in every Windows release.
