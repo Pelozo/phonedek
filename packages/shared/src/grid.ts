@@ -1,4 +1,5 @@
 import type {
+  CellSpan,
   DeckButton,
   DeckConfig,
   DeckPage,
@@ -9,6 +10,106 @@ import type {
 } from './types'
 import { createEmptyPage, createEmptyProfile } from './defaults'
 import { newId } from './ids'
+
+export interface ButtonFootprint {
+  slot: number
+  row: number
+  column: number
+  columns: number
+  rows: number
+  /** Row-major cell indices covered by the button, anchor first. */
+  cells: number[]
+}
+
+const DEFAULT_SPAN: CellSpan = { columns: 1, rows: 1 }
+
+function normalizeSpanValue(value: number): number {
+  return Math.max(1, Math.min(10, Math.round(value)))
+}
+
+/** Effective footprint of a button. Omitted spans are 1x1; invalid values are clamped. */
+export function buttonSpan(button: DeckButton): CellSpan {
+  if (!button.span) return { ...DEFAULT_SPAN }
+  return {
+    columns: normalizeSpanValue(button.span.columns),
+    rows: normalizeSpanValue(button.span.rows),
+  }
+}
+
+/** Footprint for an anchor and span, or null when any covered cell is outside the grid. */
+function footprintAt(slot: number, span: CellSpan, grid: GridSettings): ButtonFootprint | null {
+  const columns = Math.round(grid.columns)
+  const rows = Math.round(grid.rows)
+  if (!Number.isInteger(slot) || columns < 1 || rows < 1) return null
+  if (slot < 0 || slot >= columns * rows) return null
+
+  const spanColumns = normalizeSpanValue(span.columns)
+  const spanRows = normalizeSpanValue(span.rows)
+  const row = Math.floor(slot / columns)
+  const column = slot % columns
+  if (column + spanColumns > columns || row + spanRows > rows) return null
+
+  const cells: number[] = []
+  for (let rowOffset = 0; rowOffset < spanRows; rowOffset += 1) {
+    for (let columnOffset = 0; columnOffset < spanColumns; columnOffset += 1) {
+      cells.push((row + rowOffset) * columns + (column + columnOffset))
+    }
+  }
+  return { slot, row, column, columns: spanColumns, rows: spanRows, cells }
+}
+
+/** A button's footprint, or null when its span overflows the grid. */
+export function buttonFootprint(button: DeckButton, grid: GridSettings): ButtonFootprint | null {
+  return footprintAt(button.slot, buttonSpan(button), grid)
+}
+
+/** Every cell covered by any valid button footprint. */
+export function occupiedCells(buttons: readonly DeckButton[], grid: GridSettings): Set<number> {
+  const cells = new Set<number>()
+  for (const button of buttons) {
+    const footprint = buttonFootprint(button, grid)
+    if (!footprint) continue
+    for (const cell of footprint.cells) cells.add(cell)
+  }
+  return cells
+}
+
+/** True when a span at `slot` fits in the grid and does not touch another footprint. */
+export function canPlaceButton(
+  buttons: readonly DeckButton[],
+  slot: number,
+  span: CellSpan,
+  grid: GridSettings,
+  ignoreButtonId?: string,
+): boolean {
+  const footprint = footprintAt(slot, span, grid)
+  if (!footprint) return false
+  const occupied = occupiedCells(
+    ignoreButtonId === undefined ? buttons : buttons.filter((button) => button.id !== ignoreButtonId),
+    grid,
+  )
+  return footprint.cells.every((cell) => !occupied.has(cell))
+}
+
+/**
+ * Keep buttons whose complete footprint fits and does not overlap an earlier
+ * kept button. Order is preserved; earlier (lower slot) tiles win collisions.
+ */
+function pruneButtonsForGrid(buttons: readonly DeckButton[], grid: GridSettings): DeckButton[] {
+  const order = buttons
+    .map((button, index) => ({ button, index }))
+    .sort((a, b) => a.button.slot - b.button.slot || a.index - b.index)
+  const occupied = new Set<number>()
+  const keep = new Set<number>()
+  for (const { button, index } of order) {
+    const footprint = buttonFootprint(button, grid)
+    if (!footprint) continue
+    if (footprint.cells.some((cell) => occupied.has(cell))) continue
+    for (const cell of footprint.cells) occupied.add(cell)
+    keep.add(index)
+  }
+  return buttons.filter((_, index) => keep.has(index))
+}
 
 export function capacity(grid: GridSettings): number {
   return grid.columns * grid.rows
@@ -138,19 +239,15 @@ export function resizeGrid(
 ): DeckConfig {
   const cols = Math.max(1, Math.min(10, Math.round(columns)))
   const rws = Math.max(1, Math.min(10, Math.round(rows)))
-  const limit = cols * rws
   const next = mapProfile(config, profileId, (profile) => ({
     ...profile,
     grid: { ...profile.grid, columns: cols, rows: rws },
-    pages: profile.pages.map((page) =>
+    pages: profile.pages.map((page) => {
       // Pages with their own grid are unaffected by the profile default.
-      page.grid
-        ? page
-        : {
-            ...page,
-            buttons: page.buttons.filter((button) => button.slot < limit),
-          },
-    ),
+      if (page.grid) return page
+      const grid = { ...profile.grid, columns: cols, rows: rws }
+      return { ...page, buttons: pruneButtonsForGrid(page.buttons, grid) }
+    }),
   }))
   return touch(next, now)
 }
@@ -167,11 +264,10 @@ export function resizePageGrid(
   now: Date = new Date(),
 ): DeckConfig {
   const normalized = normalizeGrid(grid)
-  const limit = capacity(normalized)
   const next = mapPage(config, profileId, pageId, (page) => ({
     ...page,
     grid: normalized,
-    buttons: page.buttons.filter((button) => button.slot < limit),
+    buttons: pruneButtonsForGrid(page.buttons, normalized),
   }))
   return touch(next, now)
 }
@@ -188,13 +284,12 @@ export function clearPageGrid(
 ): DeckConfig {
   const profile = getProfile(config, profileId)
   if (!profile) return config
-  const limit = capacity(profile.grid)
   const next = mapPage(config, profileId, pageId, (page) => {
     const rest = { ...page }
     delete rest.grid
     return {
       ...rest,
-      buttons: rest.buttons.filter((button) => button.slot < limit),
+      buttons: pruneButtonsForGrid(rest.buttons, profile.grid),
     }
   })
   return touch(next, now)
@@ -211,10 +306,18 @@ export function addButton(
   if (!profile) throw new Error('Unknown profile')
   const page = getPage(profile, pageId)
   if (!page) throw new Error('Unknown page')
-  if (button.slot < 0 || button.slot >= pageCapacity(profile, page)) {
+  const grid = pageGrid(profile, page)
+  const span = buttonSpan(button)
+  if (button.slot < 0 || button.slot >= capacity(grid)) {
     throw new Error('Slot is outside the grid')
   }
+  if (!buttonFootprint(button, grid)) {
+    throw new Error(`Button footprint (${span.columns}x${span.rows}) is outside the grid`)
+  }
   if (page.buttons.some((existing) => existing.slot === button.slot)) throw new Error('Slot is already occupied')
+  if (!canPlaceButton(page.buttons, button.slot, span, grid)) {
+    throw new Error('Button overlaps an existing button')
+  }
 
   const next = mapPage(config, profileId, pageId, (current) => ({
     ...current,
@@ -254,7 +357,7 @@ export function updateButton(
   return touch(next, now)
 }
 
-/** Move a button to another slot, swapping with any button already there. */
+/** Move a button to another anchor, swapping with a single occupant when possible. */
 export function moveButton(
   config: DeckConfig,
   profileId: string,
@@ -267,35 +370,80 @@ export function moveButton(
   if (!profile) throw new Error('Unknown profile')
   const currentPage = getPage(profile, pageId)
   if (!currentPage) throw new Error('Unknown page')
-  if (targetSlot < 0 || targetSlot >= pageCapacity(profile, currentPage)) throw new Error('Slot is outside the grid')
-  const next = mapPage(config, profileId, pageId, (page) => {
-    const moving = page.buttons.find((button) => button.id === buttonId)
-    if (!moving) throw new Error('Unknown button')
-    const occupant = page.buttons.find((button) => button.slot === targetSlot)
-    return {
-      ...page,
-      buttons: page.buttons
-        .map((button) => {
-          if (button.id === moving.id) return { ...button, slot: targetSlot }
-          if (occupant && button.id === occupant.id) return { ...button, slot: moving.slot }
-          return button
-        })
-        .sort((a, b) => a.slot - b.slot),
+  const moving = currentPage.buttons.find((button) => button.id === buttonId)
+  if (!moving) throw new Error('Unknown button')
+
+  const grid = pageGrid(profile, currentPage)
+  const span = buttonSpan(moving)
+  const target = footprintAt(targetSlot, span, grid)
+  if (!target) {
+    if (targetSlot < 0 || targetSlot >= capacity(grid)) throw new Error('Slot is outside the grid')
+    throw new Error(`Button footprint (${span.columns}x${span.rows}) is outside the grid`)
+  }
+  if (targetSlot === moving.slot) return config
+
+  const others = currentPage.buttons.filter((button) => button.id !== moving.id)
+  const targetCells = new Set(target.cells)
+  const blockers = others.filter((button) =>
+    buttonFootprint(button, grid)?.cells.some((cell) => targetCells.has(cell)),
+  )
+  if (blockers.length > 1) {
+    throw new Error(`Cannot move button: the target area overlaps ${blockers.length} buttons`)
+  }
+
+  // Preserve the editor's existing swap behavior for a single occupant. The
+  // final layout is validated below, so a swap that cannot fit is rejected
+  // instead of corrupting the grid.
+  const proposed = others.map((button) =>
+    blockers[0] && button.id === blockers[0].id ? { ...button, slot: moving.slot } : button,
+  )
+  proposed.push({ ...moving, slot: targetSlot })
+
+  const occupied = new Set<number>()
+  for (const button of proposed) {
+    const footprint = buttonFootprint(button, grid)
+    if (!footprint) {
+      throw new Error(`Cannot move button: "${button.label}" does not fit at slot ${button.slot}`)
     }
-  })
+    if (footprint.cells.some((cell) => occupied.has(cell))) {
+      throw new Error('Cannot move button: the destination overlaps another button')
+    }
+    for (const cell of footprint.cells) occupied.add(cell)
+  }
+
+  const next = mapPage(config, profileId, pageId, (page) => ({
+    ...page,
+    buttons: proposed.sort((a, b) => a.slot - b.slot),
+  }))
   return touch(next, now)
 }
 
-/** Remove gaps by assigning slots 0..n in current slot order. */
+/**
+ * Remove gaps by assigning slots 0..n in current slot order.
+ *
+ * Guard: if any button spans more than one cell, compaction is skipped. A naive
+ * row-major rewrite would move anchors independently of their footprints and
+ * could create overlaps; span-aware packing is intentionally deferred to the
+ * editor phase. The page is returned untouched so controls and spans stay valid.
+ */
 export function compactPage(
   config: DeckConfig,
   profileId: string,
   pageId: string,
   now: Date = new Date(),
 ): DeckConfig {
-  const next = mapPage(config, profileId, pageId, (page) => ({
-    ...page,
-    buttons: buttonsBySlot(page).map((button, index) => ({ ...button, slot: index })),
+  const profile = getProfile(config, profileId)
+  const page = profile ? getPage(profile, pageId) : undefined
+  if (!profile || !page) return config
+  const hasSpanningTile = page.buttons.some((button) => {
+    const span = buttonSpan(button)
+    return span.columns !== 1 || span.rows !== 1
+  })
+  if (hasSpanningTile) return config
+
+  const next = mapPage(config, profileId, pageId, (current) => ({
+    ...current,
+    buttons: buttonsBySlot(current).map((button, index) => ({ ...button, slot: index })),
   }))
   return touch(next, now)
 }
@@ -427,7 +575,7 @@ export function resolvePageId(profile: DeckProfile, currentPageId: string, actio
 }
 
 export function nextFreeSlot(page: DeckPage, grid: GridSettings): number | null {
-  const used = new Set(page.buttons.map((button) => button.slot))
+  const used = occupiedCells(page.buttons, grid)
   for (let slot = 0; slot < capacity(grid); slot += 1) {
     if (!used.has(slot)) return slot
   }

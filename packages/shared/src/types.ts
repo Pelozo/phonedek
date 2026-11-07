@@ -208,9 +208,55 @@ export type Action =
   | DelayAction
   | PageAction
 
+/** Footprint of a button measured in grid cells. */
+export interface CellSpan {
+  /** 1..10 cells wide. */
+  columns: number
+  /** 1..10 cells tall. MVP renderers may only honour rows = 1. */
+  rows: number
+}
+
+/**
+ * What a continuous control drives.
+ *
+ * The MVP only supports *relative* bindings: a slider/dial emits deltas and the
+ * desktop turns them into repeated media-volume steps or mouse-wheel scrolls.
+ * Absolute values (level, position, arbitrary targets) are a later phase.
+ */
+export type ControlBinding =
+  | {
+      type: 'volume'
+      mode: 'relative'
+      /** Percent per full slider travel or dial tick. 1..25, default 2. */
+      stepPercent?: number
+    }
+  | {
+      type: 'scroll'
+      axis: 'vertical' | 'horizontal'
+      /** Reverse the wheel direction. */
+      invert?: boolean
+    }
+
+/** Continuous control rendered instead of a tap-only tile. */
+export interface ControlSpec {
+  kind: 'slider' | 'dial'
+  /** Slider direction; dials may ignore it. */
+  axis?: 'horizontal' | 'vertical'
+  emit: 'value' | 'delta'
+  binding: ControlBinding
+  /** Slider/dial display range. Runtime values are never stored in the config. */
+  min?: number
+  max?: number
+  step?: number
+  initial?: number
+  unit?: string
+  /** Defaults to true in renderers when omitted. */
+  haptics?: boolean
+}
+
 export interface DeckButton {
   id: string
-  /** Zero-based index in the profile grid. */
+  /** Zero-based anchor index (top-left cell) in the profile grid. */
   slot: number
   label: string
   sublabel?: string
@@ -222,6 +268,10 @@ export interface DeckButton {
   background?: Background
   textColor?: HexColor
   actions: Action[]
+  /** Optional continuous control rendered instead of a tap-only tile. */
+  control?: ControlSpec
+  /** Optional footprint; omitted = 1x1. */
+  span?: CellSpan
 }
 
 export interface DeckPage {

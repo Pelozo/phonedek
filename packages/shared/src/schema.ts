@@ -179,6 +179,69 @@ export const ThemeSchema = z.object({
   buttonRadius: z.number().int().min(0).max(120),
 })
 
+export const CellSpanSchema = z.object({
+  columns: z.number().int().min(1).max(10),
+  rows: z.number().int().min(1).max(10),
+})
+
+const controlAxis = z.enum(['horizontal', 'vertical']).optional()
+
+export const ControlBindingSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('volume'),
+    mode: z.literal('relative'),
+    stepPercent: z.number().int().min(1).max(25).optional(),
+  }),
+  z.object({
+    type: z.literal('scroll'),
+    axis: z.enum(['vertical', 'horizontal']),
+    invert: z.boolean().optional(),
+  }),
+])
+
+const controlFields = {
+  axis: controlAxis,
+  emit: z.enum(['value', 'delta']),
+  binding: ControlBindingSchema,
+  min: z.number().finite().optional(),
+  max: z.number().finite().optional(),
+  step: z.number().finite().gt(0, 'step must be greater than 0').optional(),
+  initial: z.number().finite().optional(),
+  unit: z.string().min(1).max(16).optional(),
+  haptics: z.boolean().optional(),
+}
+
+export const ControlSpecSchema = z
+  .discriminatedUnion('kind', [
+    z.object({ kind: z.literal('slider'), ...controlFields }),
+    z.object({ kind: z.literal('dial'), ...controlFields }),
+  ])
+  .superRefine((control, ctx) => {
+    if (control.min !== undefined && control.max !== undefined && control.min >= control.max) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['max'],
+        message: 'max must be greater than min',
+      })
+    }
+    if (control.initial !== undefined) {
+      if (control.min !== undefined && control.initial < control.min) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['initial'],
+          message: 'initial must be within min and max',
+        })
+      }
+      if (control.max !== undefined && control.initial > control.max) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['initial'],
+          message: 'initial must be within min and max',
+        })
+      }
+    }
+  })
+
 export const ButtonSchema = z.object({
   id,
   slot: z.number().int().min(0).max(99),
@@ -189,6 +252,8 @@ export const ButtonSchema = z.object({
   background: BackgroundSchema.optional(),
   textColor: hexColor.optional(),
   actions: z.array(ActionSchema).max(16),
+  control: ControlSpecSchema.optional(),
+  span: CellSpanSchema.optional(),
 })
 
 export const PageSchema = z.object({
@@ -235,6 +300,7 @@ export const DeckConfigSchema = z
         const pageCapacity = effectiveGrid.columns * effectiveGrid.rows
         const slots = new Set<number>()
         const buttonIds = new Set<string>()
+        const cellOwners = new Map<number, typeof page.buttons[number]>()
         for (const button of page.buttons) {
           if (button.slot >= pageCapacity) {
             ctx.addIssue({
@@ -250,6 +316,40 @@ export const DeckConfigSchema = z
             ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Duplicate button id in page ${page.name}: ${button.id}` })
           }
           buttonIds.add(button.id)
+
+          // `slot` is the top-left anchor in a row-major grid. Validate the whole
+          // footprint, not just the anchor, so spanning tiles cannot overflow or
+          // overlap each other.
+          if (button.slot >= 0 && button.slot < pageCapacity) {
+            const span = button.span ?? { columns: 1, rows: 1 }
+            const row = Math.floor(button.slot / effectiveGrid.columns)
+            const column = button.slot % effectiveGrid.columns
+            const fits =
+              column + span.columns <= effectiveGrid.columns && row + span.rows <= effectiveGrid.rows
+            if (!fits) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Button "${button.label}" at slot ${button.slot} with a ${span.columns}x${span.rows} span extends outside the ${effectiveGrid.columns}x${effectiveGrid.rows} grid`,
+              })
+            } else {
+              let overlapped = false
+              for (let rowOffset = 0; rowOffset < span.rows && !overlapped; rowOffset += 1) {
+                for (let columnOffset = 0; columnOffset < span.columns; columnOffset += 1) {
+                  const cell = (row + rowOffset) * effectiveGrid.columns + (column + columnOffset)
+                  const owner = cellOwners.get(cell)
+                  if (owner && owner !== button) {
+                    ctx.addIssue({
+                      code: z.ZodIssueCode.custom,
+                      message: `Buttons "${owner.label}" and "${button.label}" overlap at cell ${cell} in page ${page.name}`,
+                    })
+                    overlapped = true
+                    break
+                  }
+                  cellOwners.set(cell, button)
+                }
+              }
+            }
+          }
 
           for (const action of button.actions) {
             if (action.type === 'page' && action.direction === 'goto' && !action.pageId) {
