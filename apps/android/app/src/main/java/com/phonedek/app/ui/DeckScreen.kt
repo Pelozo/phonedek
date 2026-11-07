@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -17,6 +18,7 @@ import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -34,15 +36,19 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -56,10 +62,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -87,7 +97,11 @@ private val ControlShape = RoundedCornerShape(4.dp)
 @Composable
 fun DeckScreen(state: UiState, viewModel: MainViewModel) {
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var settingsChangeServerOnOpen by rememberSaveable { mutableStateOf(false) }
+    var showDiagnostics by rememberSaveable { mutableStateOf(false) }
     var chromeRevealed by rememberSaveable { mutableStateOf(false) }
+    var bannerHeightPx by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
 
     val config = state.config
     val profile = config?.profiles?.firstOrNull { it.id == state.activeProfileId }
@@ -107,8 +121,15 @@ fun DeckScreen(state: UiState, viewModel: MainViewModel) {
     val canHideChrome = state.hideTopBarWhenConnected &&
         state.connection == ConnectionStatus.CONNECTED
     val hideTopBar = canHideChrome && !chromeRevealed
+    val hasDeck = profile != null && pages.isNotEmpty()
+    val showConnectionBanner = hasDeck && (
+        state.connection == ConnectionStatus.OFFLINE ||
+            state.connection == ConnectionStatus.RECONNECTING
+        )
+    val chromeInset = if (hideTopBar) 0.dp else TopBarHeight
+    val bannerHeight = with(density) { bannerHeightPx.toDp() }
     val topInset by animateDpAsState(
-        targetValue = if (hideTopBar) 0.dp else TopBarHeight,
+        targetValue = chromeInset + if (showConnectionBanner) bannerHeight else 0.dp,
         label = "deck-top-inset",
     )
 
@@ -124,6 +145,15 @@ fun DeckScreen(state: UiState, viewModel: MainViewModel) {
             delay(8_000)
             chromeRevealed = false
         }
+    }
+
+    val openSettings: () -> Unit = {
+        settingsChangeServerOnOpen = false
+        showSettings = true
+    }
+    val changeServer: () -> Unit = {
+        settingsChangeServerOnOpen = true
+        showSettings = true
     }
 
     Box(
@@ -161,7 +191,10 @@ fun DeckScreen(state: UiState, viewModel: MainViewModel) {
             DeckEmptyState(
                 state = state,
                 topInset = topInset,
-                onOpenSettings = { showSettings = true },
+                onRetry = viewModel::reconnect,
+                onOpenSettings = openSettings,
+                onChangeServer = changeServer,
+                onShowDiagnostics = { showDiagnostics = true },
             )
         }
 
@@ -175,27 +208,62 @@ fun DeckScreen(state: UiState, viewModel: MainViewModel) {
                 state = state,
                 profile = profile,
                 page = page,
-                onOpenSettings = { showSettings = true },
+                onOpenSettings = openSettings,
             )
         }
 
+        AnimatedVisibility(
+            visible = showConnectionBanner,
+            modifier = Modifier.align(Alignment.TopCenter),
+            enter = fadeIn(),
+            exit = fadeOut(),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .windowInsetsPadding(
+                        WindowInsets.safeDrawing.only(
+                            WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
+                        ),
+                    )
+                    .padding(top = chromeInset),
+            ) {
+                ConnectionBanner(
+                    state = state,
+                    onRetry = viewModel::reconnect,
+                    onOpenSettings = openSettings,
+                    onChangeServer = changeServer,
+                    modifier = Modifier.onSizeChanged { bannerHeightPx = it.height },
+                )
+            }
+        }
     }
 
     if (showSettings) {
         SettingsSheet(
             state = state,
-            onDismiss = { showSettings = false },
+            onDismiss = {
+                showSettings = false
+                settingsChangeServerOnOpen = false
+            },
             onReconnect = {
                 showSettings = false
+                settingsChangeServerOnOpen = false
                 viewModel.reconnect()
             },
             onChangeServer = {
                 showSettings = false
+                settingsChangeServerOnOpen = false
                 viewModel.forgetServer()
             },
             onKeepScreenOn = viewModel::setKeepScreenOn,
             onHideTopBarWhenConnected = viewModel::setHideTopBarWhenConnected,
+            confirmChangeOnOpen = settingsChangeServerOnOpen,
         )
+    }
+
+    if (showDiagnostics) {
+        DiagnosticsDialog(onDismiss = { showDiagnostics = false })
     }
 }
 
@@ -318,6 +386,163 @@ private fun DeckTopBar(
                 .height(1.dp)
                 .background(Hairline),
         )
+    }
+}
+
+@Composable
+private fun ConnectionBanner(
+    state: UiState,
+    onRetry: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onChangeServer: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val offline = state.connection == ConnectionStatus.OFFLINE
+    val ledColor = if (offline) StatusDanger else StatusWarn
+    val title = when (state.connection) {
+        ConnectionStatus.OFFLINE -> "PC UNREACHABLE"
+        ConnectionStatus.RECONNECTING -> "CONNECTION LOST"
+        ConnectionStatus.CONNECTING -> "CONNECTING"
+        ConnectionStatus.CONNECTED -> "CONNECTED"
+    }
+    val pairing = state.pairing
+    val server = pairing?.let { "${it.serverName} · ${it.host}:${it.port}" }
+    val reason = state.pairingError?.takeIf { it.isNotBlank() }?.let { "Last error · $it" }
+        ?: when (state.connection) {
+            ConnectionStatus.OFFLINE ->
+                "The desktop app isn't responding. Retry or check the PC."
+            ConnectionStatus.RECONNECTING ->
+                "The connection dropped. PhoneDeck is retrying automatically."
+            ConnectionStatus.CONNECTING ->
+                "Waiting for the desktop app to accept the connection."
+            ConnectionStatus.CONNECTED -> ""
+        }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(Panel)
+            .semantics { liveRegion = LiveRegionMode.Polite },
+    ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ConsoleLed(color = ledColor, size = 6.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = title,
+                    color = TextPrimary,
+                    fontFamily = ConsoleMono,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                )
+                if (server != null) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = server,
+                        color = TextMuted,
+                        fontFamily = ConsoleMono,
+                        fontSize = 9.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = reason,
+                color = TextSecondary,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ConnectionActionButton(
+                    label = "Retry",
+                    onClick = onRetry,
+                    modifier = Modifier.weight(1f),
+                    primary = true,
+                )
+                ConnectionActionButton(
+                    label = "Settings",
+                    onClick = onOpenSettings,
+                    modifier = Modifier.weight(1f),
+                )
+                if (pairing != null) {
+                    ConnectionActionButton(
+                        label = "Change server",
+                        onClick = onChangeServer,
+                        modifier = Modifier.weight(1f),
+                        danger = true,
+                    )
+                }
+            }
+        }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(Hairline),
+        )
+    }
+}
+
+@Composable
+private fun ConnectionActionButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    primary: Boolean = false,
+    danger: Boolean = false,
+) {
+    val contentPadding = PaddingValues(horizontal = 8.dp)
+    if (primary) {
+        Button(
+            onClick = onClick,
+            modifier = modifier.height(48.dp),
+            shape = ControlShape,
+            contentPadding = contentPadding,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Accent,
+                contentColor = AccentInk,
+            ),
+        ) {
+            Text(
+                text = label,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    } else {
+        OutlinedButton(
+            onClick = onClick,
+            modifier = modifier.height(48.dp),
+            shape = ControlShape,
+            border = BorderStroke(
+                1.dp,
+                if (danger) StatusDanger.copy(alpha = 0.55f) else HairlineStrong,
+            ),
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = if (danger) StatusDanger else TextSecondary,
+            ),
+            contentPadding = contentPadding,
+        ) {
+            Text(
+                text = label,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -592,18 +817,44 @@ private fun DeckGrid(
 private fun DeckEmptyState(
     state: UiState,
     topInset: Dp,
+    onRetry: () -> Unit,
     onOpenSettings: () -> Unit,
+    onChangeServer: () -> Unit,
+    onShowDiagnostics: () -> Unit,
 ) {
     val waiting = state.connection == ConnectionStatus.CONNECTING ||
         state.connection == ConnectionStatus.RECONNECTING
+    val offline = state.connection == ConnectionStatus.OFFLINE
+    val pairing = state.pairing
+    val title = when {
+        waiting -> "Connecting to your PC…"
+        offline -> "PC unreachable"
+        else -> "No deck loaded"
+    }
+    val eyebrow = when {
+        waiting -> "LINK / CONNECTING"
+        offline -> "LINK / OFFLINE"
+        else -> "LINK / EMPTY DECK"
+    }
+    val serverLabel = pairing?.let { "${it.serverName} at ${it.host}:${it.port}" }
+    val reason = state.pairingError?.takeIf { it.isNotBlank() } ?: when {
+        waiting -> "Waiting for ${pairing?.serverName ?: "your PC"} to send the deck."
+        offline -> "The phone can't reach ${serverLabel ?: "the desktop app"}."
+        else -> "The PC is connected, but no deck pages were received."
+    }
+    val ledColor = when {
+        waiting -> StatusWarn
+        offline -> StatusDanger
+        else -> Accent
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .safeDrawingPadding()
             .padding(top = topInset)
-            .padding(32.dp),
-        verticalArrangement = Arrangement.Center,
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 28.dp, vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
@@ -617,14 +868,14 @@ private fun DeckEmptyState(
                 Modifier
                     .size(10.dp)
                     .background(
-                        color = if (waiting) StatusWarn else Accent,
+                        color = ledColor,
                         shape = RoundedCornerShape(1.dp),
                     ),
             )
         }
         Spacer(Modifier.height(12.dp))
         Text(
-            text = if (waiting) "LINK / ACQUIRING" else "LINK / NO DECK",
+            text = eyebrow,
             color = TextMuted,
             fontFamily = ConsoleMono,
             fontSize = 9.sp,
@@ -632,41 +883,132 @@ private fun DeckEmptyState(
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = if (waiting) "Waiting for your PC…" else "No deck loaded",
+            text = title,
             color = TextPrimary,
-            fontSize = 18.sp,
+            fontSize = 20.sp,
             fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            text = if (waiting) {
-                "The first config will appear as soon as the connection is ready."
-            } else {
-                "Open PhoneDeck on your PC, check that both devices are on the same Wi-Fi, then try again."
-            },
+            text = reason,
             color = TextMuted,
             fontSize = 13.sp,
+            lineHeight = 18.sp,
             textAlign = TextAlign.Center,
         )
         if (waiting) {
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(16.dp))
             CircularProgressIndicator(
                 color = Accent,
                 strokeWidth = 2.dp,
                 modifier = Modifier.size(18.dp),
             )
-        } else {
-            Spacer(Modifier.height(20.dp))
-            Button(
+        }
+        if (state.connection != ConnectionStatus.CONNECTED) {
+            Spacer(Modifier.height(22.dp))
+            SetupChecklist()
+        }
+        Spacer(Modifier.height(22.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ConnectionActionButton(
+                label = "Retry",
+                onClick = onRetry,
+                modifier = Modifier.weight(1f),
+                primary = true,
+            )
+            ConnectionActionButton(
+                label = "Open settings",
                 onClick = onOpenSettings,
-                shape = ControlShape,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Accent,
-                    contentColor = AccentInk,
-                ),
-            ) {
-                Text("Open settings")
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (pairing != null) {
+                ConnectionActionButton(
+                    label = "Change server",
+                    onClick = onChangeServer,
+                    modifier = Modifier.weight(1f),
+                    danger = true,
+                )
             }
+            ConnectionActionButton(
+                label = "Diagnostics / logs",
+                onClick = onShowDiagnostics,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SetupChecklist() {
+    Column(Modifier.fillMaxWidth()) {
+        ConsoleSectionLabel(index = "00", label = "SETUP CHECKLIST")
+        Spacer(Modifier.height(2.dp))
+        SetupStep(
+            index = "01",
+            title = "Same Wi-Fi",
+            body = "Phone and PC are on the same Wi-Fi network.",
+        )
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
+        SetupStep(
+            index = "02",
+            title = "Server running",
+            body = "PhoneDeck is open on the PC and the deck is loaded.",
+        )
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
+        SetupStep(
+            index = "03",
+            title = "PIN current",
+            body = "Use the 4-digit PIN shown on the PC; re-pair if it changed.",
+        )
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline))
+        SetupStep(
+            index = "04",
+            title = "Firewall",
+            body = "Allow PhoneDeck through the PC firewall on a private network.",
+        )
+    }
+}
+
+@Composable
+private fun SetupStep(index: String, title: String, body: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            text = index,
+            color = TextFaint,
+            fontFamily = ConsoleMono,
+            fontSize = 9.sp,
+            letterSpacing = 0.8.sp,
+            modifier = Modifier.width(22.dp),
+        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                color = TextPrimary,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(1.dp))
+            Text(
+                text = body,
+                color = TextMuted,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+            )
         }
     }
 }

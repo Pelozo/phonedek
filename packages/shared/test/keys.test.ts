@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   formatCombo,
   isModifier,
+  isScreenshotShortcut,
   isValidKeyName,
   keyFromEvent,
   normalizeCombo,
@@ -31,6 +32,16 @@ describe('key names', () => {
   it('recognizes modifiers', () => {
     expect(isModifier('CTRL')).toBe(true)
     expect(isModifier('C')).toBe(false)
+  })
+
+  it('detects the Win+Shift+S screenshot intent', () => {
+    expect(isScreenshotShortcut(['WIN', 'SHIFT', 'S'])).toBe(true)
+    expect(isScreenshotShortcut(['S', 'shift', 'win'])).toBe(true)
+    expect(isScreenshotShortcut(['CMD', 'SHIFT', 'S'])).toBe(true)
+    expect(isScreenshotShortcut(['WIN', 'SHIFT', 'S', 'A'])).toBe(false)
+    expect(isScreenshotShortcut(['CTRL', 'SHIFT', 'S'])).toBe(false)
+    expect(isScreenshotShortcut(['WIN', 'S'])).toBe(false)
+    expect(isScreenshotShortcut(['banana'])).toBe(false)
   })
 
   it('formats keycaps', () => {

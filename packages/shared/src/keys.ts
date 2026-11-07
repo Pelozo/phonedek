@@ -148,6 +148,26 @@ export function normalizeCombo(keys: readonly string[]): string[] {
   return [...mods, ...rest]
 }
 
+/**
+ * True for the Windows Snipping Tool chord (Win+Shift+S), regardless of key
+ * order or aliases. The desktop executor uses this intent on macOS to take a
+ * full screenshot instead of sending Cmd+Shift+S ("Save As…").
+ */
+export function isScreenshotShortcut(keys: readonly string[]): boolean {
+  let combo: string[]
+  try {
+    combo = normalizeCombo(keys)
+  } catch {
+    return false
+  }
+  return (
+    combo.length === 3 &&
+    combo.includes('WIN') &&
+    combo.includes('SHIFT') &&
+    combo.includes('S')
+  )
+}
+
 const LABELS: Record<string, string> = {
   CTRL: 'Ctrl',
   ALT: 'Alt',

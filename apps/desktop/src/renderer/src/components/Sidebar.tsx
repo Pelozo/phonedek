@@ -3,15 +3,24 @@ import type { DeckConfig, DeckPage, DeckProfile } from '@phonedek/shared'
 import {
   addPage,
   addProfile,
+  capacity,
   deletePage,
   deleteProfile,
   duplicatePage,
   duplicateProfile,
+  resizeGrid,
   updatePageMeta,
   updateProfileMeta,
 } from '@phonedek/shared'
 import type { ServerInfoView, SettingsView } from '../../../shared/api'
 import { Icon } from './Icons'
+
+const GRID_PRESETS = [
+  { columns: 3, rows: 3 },
+  { columns: 4, rows: 4 },
+  { columns: 5, rows: 3 },
+  { columns: 8, rows: 4 },
+]
 
 function InlineName({
   value,
@@ -129,6 +138,39 @@ export function Sidebar({
     if (nextProfile) onSelectPage(nextProfile.defaultPageId)
   }
 
+  const usedButtons = profile.pages.reduce((count, item) => count + item.buttons.length, 0)
+
+  const applyGrid = (columns: number, rows: number): void => {
+    const nextColumns = Math.max(1, Math.min(10, Math.round(columns)))
+    const nextRows = Math.max(1, Math.min(10, Math.round(rows)))
+    if (nextColumns === profile.grid.columns && nextRows === profile.grid.rows) return
+
+    const limit = nextColumns * nextRows
+    const losses = profile.pages
+      .map((item) => ({
+        name: item.name,
+        count: item.buttons.filter((button) => button.slot >= limit).length,
+      }))
+      .filter((item) => item.count > 0)
+    const removed = losses.reduce((sum, item) => sum + item.count, 0)
+
+    if (removed > 0) {
+      const where = losses.map((item) => `${item.name} (${item.count})`).join(', ')
+      const confirmed = window.confirm(
+        `Resize the grid to ${nextColumns} × ${nextRows}? This removes ${removed} button${removed === 1 ? '' : 's'} that no longer fit: ${where}. This cannot be undone.`,
+      )
+      if (!confirmed) return
+    }
+
+    onChangeConfig(resizeGrid(config, profile.id, nextColumns, nextRows))
+    onToast(
+      removed > 0
+        ? `Grid set to ${nextColumns} × ${nextRows} · ${removed} button${removed === 1 ? '' : 's'} removed`
+        : `Grid set to ${nextColumns} × ${nextRows}`,
+      removed > 0 ? 'info' : 'success',
+    )
+  }
+
   const status = server.error ? 'error' : server.running ? 'online' : 'offline'
 
   return (
@@ -195,20 +237,84 @@ export function Sidebar({
               onCommit={(name) => onChangeConfig(updateProfileMeta(config, profile.id, { name }))}
             />
           </label>
-          <div className="grid-summary">
-            <div>
-              <span>Grid</span>
-              <strong>
-                {profile.grid.columns} × {profile.grid.rows}
-              </strong>
+          <div className="grid-control">
+            <div className="grid-steppers">
+              <div className="grid-stepper" role="group" aria-label={`Columns: ${profile.grid.columns}`}>
+                <span className="grid-stepper-label">Columns</span>
+                <div className="grid-stepper-controls">
+                  <button
+                    type="button"
+                    onClick={() => applyGrid(profile.grid.columns - 1, profile.grid.rows)}
+                    disabled={profile.grid.columns <= 1}
+                    aria-label="Decrease columns"
+                  >
+                    −
+                  </button>
+                  <span className="grid-stepper-value" aria-live="polite">
+                    {profile.grid.columns}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => applyGrid(profile.grid.columns + 1, profile.grid.rows)}
+                    disabled={profile.grid.columns >= 10}
+                    aria-label="Increase columns"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+              <div className="grid-stepper" role="group" aria-label={`Rows: ${profile.grid.rows}`}>
+                <span className="grid-stepper-label">Rows</span>
+                <div className="grid-stepper-controls">
+                  <button
+                    type="button"
+                    onClick={() => applyGrid(profile.grid.columns, profile.grid.rows - 1)}
+                    disabled={profile.grid.rows <= 1}
+                    aria-label="Decrease rows"
+                  >
+                    −
+                  </button>
+                  <span className="grid-stepper-value" aria-live="polite">
+                    {profile.grid.rows}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => applyGrid(profile.grid.columns, profile.grid.rows + 1)}
+                    disabled={profile.grid.rows >= 10}
+                    aria-label="Increase rows"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
             </div>
-            <div>
-              <span>Capacity</span>
-              <strong>{profile.grid.columns * profile.grid.rows}</strong>
+
+            <div className="grid-presets" role="group" aria-label="Grid size presets">
+              {GRID_PRESETS.map((preset) => {
+                const active =
+                  preset.columns === profile.grid.columns && preset.rows === profile.grid.rows
+                return (
+                  <button
+                    key={`${preset.columns}x${preset.rows}`}
+                    type="button"
+                    className={`grid-preset${active ? ' active' : ''}`}
+                    aria-pressed={active}
+                    title={`Set grid to ${preset.columns} × ${preset.rows}`}
+                    onClick={() => applyGrid(preset.columns, preset.rows)}
+                  >
+                    {preset.columns}×{preset.rows}
+                  </button>
+                )
+              })}
             </div>
-            <div>
-              <span>Used</span>
-              <strong>{profile.pages.reduce((count, item) => count + item.buttons.length, 0)}</strong>
+
+            <div className="grid-readout">
+              <span>
+                Page <strong>{page.buttons.length}/{capacity(profile.grid)}</strong>
+              </span>
+              <span>
+                Profile <strong>{usedButtons}</strong>
+              </span>
             </div>
           </div>
         </section>

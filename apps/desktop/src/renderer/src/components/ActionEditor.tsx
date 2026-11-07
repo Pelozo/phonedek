@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { describeAction, formatCombo } from '@phonedek/shared'
-import type { Action, DeckPage, MediaKey } from '@phonedek/shared'
+import type { Action, DeckPage, MacroAction, MacroStep, MediaKey } from '@phonedek/shared'
 import { Icon, type IconName } from './Icons'
 import { NumberField } from './Primitives'
 import { Keycaps, ShortcutDialog } from './ShortcutDialog'
@@ -60,6 +60,52 @@ function parseArgs(input: string): string[] {
   return result
 }
 
+/** Rough playback time used for the collapsed macro summary. */
+function estimateStepMs(step: MacroStep): number {
+  switch (step.type) {
+    case 'hotkey':
+      return (step.holdMs ?? 35) + 15
+    case 'text':
+      return step.text.length * Math.max(step.perCharMs ?? 4, 1)
+    case 'delay':
+      return step.ms
+    case 'media':
+    case 'mouse':
+      return 20
+    case 'launch':
+      return 350
+    case 'url':
+    case 'command':
+      return 120
+  }
+}
+
+function estimateMacroMs(action: MacroAction): number {
+  const repeat = action.repeat ?? 1
+  const base = action.steps.reduce((total, step) => total + estimateStepMs(step), 0)
+  const pauses = Math.max(0, repeat - 1) * (action.repeatDelayMs ?? 0)
+  return base * repeat + pauses
+}
+
+function formatDuration(ms: number): string {
+  if (ms <= 0) return '0s'
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  if (ms < 60_000) {
+    const seconds = ms / 1000
+    return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`
+  }
+  const minutes = Math.floor(ms / 60_000)
+  const seconds = Math.round((ms % 60_000) / 1000)
+  return `${minutes}m ${seconds}s`
+}
+
+function macroSummary(action: MacroAction): string {
+  const repeat = action.repeat ?? 1
+  const steps = `${action.steps.length} step${action.steps.length === 1 ? '' : 's'}`
+  if (action.steps.length === 0) return `No steps · ${repeat}×`
+  return `${steps} · ${repeat}× · ~${formatDuration(estimateMacroMs(action))}`
+}
+
 export function ActionEditor({
   action,
   index,
@@ -83,6 +129,13 @@ export function ActionEditor({
 }) {
   const [shortcutOpen, setShortcutOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [macroOpen, setMacroOpen] = useState(false)
+  const [macroRecording, setMacroRecording] = useState(false)
+  const macroBodyId = useId()
+
+  useEffect(() => {
+    if (macroRecording && !macroOpen) setMacroOpen(true)
+  }, [macroRecording, macroOpen])
 
   const chooseApp = async (): Promise<void> => {
     setBusy(true)
@@ -109,10 +162,28 @@ export function ActionEditor({
         <span className="action-icon">
           <Icon name={ACTION_ICONS[action.type]} size={16} />
         </span>
-        <div className="action-title">
-          <strong>{ACTION_TITLES[action.type]}</strong>
-          <small>{describeAction(action)}</small>
-        </div>
+        {action.type === 'macro' ? (
+          <button
+            type="button"
+            className="action-toggle"
+            aria-expanded={macroOpen}
+            aria-controls={macroOpen ? macroBodyId : undefined}
+            disabled={macroRecording}
+            title={macroRecording ? 'Recording in progress' : macroOpen ? 'Collapse macro' : 'Expand macro'}
+            onClick={() => setMacroOpen((value) => !value)}
+          >
+            <span className="action-title">
+              <strong>{ACTION_TITLES[action.type]}</strong>
+              <small>{macroRecording ? 'Recording in progress…' : macroSummary(action)}</small>
+            </span>
+            <Icon name={macroOpen ? 'chevron-down' : 'chevron-right'} size={15} />
+          </button>
+        ) : (
+          <div className="action-title">
+            <strong>{ACTION_TITLES[action.type]}</strong>
+            <small>{describeAction(action)}</small>
+          </div>
+        )}
         <div className="action-tools">
           <button
             type="button"
@@ -134,8 +205,9 @@ export function ActionEditor({
         </div>
       </header>
 
-      <div className="action-body">
-        {action.type === 'hotkey' && (
+      {(action.type !== 'macro' || macroOpen) && (
+        <div className="action-body" id={action.type === 'macro' ? macroBodyId : undefined}>
+          {action.type === 'hotkey' && (
           <div className="stack">
             <div className="row between">
               <Keycaps keys={action.keys} />
@@ -181,6 +253,7 @@ export function ActionEditor({
             repeatDelayMs={action.repeatDelayMs}
             onChange={(steps) => onUpdate({ ...action, steps })}
             onChangeMeta={(patch) => onUpdate({ ...action, ...patch })}
+            onRecordingChange={setMacroRecording}
           />
         )}
 
@@ -322,7 +395,8 @@ export function ActionEditor({
             )}
           </div>
         )}
-      </div>
+        </div>
+      )}
 
       {shortcutOpen && action.type === 'hotkey' && (
         <ShortcutDialog

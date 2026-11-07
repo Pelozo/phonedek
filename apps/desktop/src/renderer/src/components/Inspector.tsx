@@ -5,7 +5,6 @@ import {
   compactPage,
   describeAction,
   removeButton,
-  resizeGrid,
   updateButton,
   updateGrid,
   updatePageMeta,
@@ -178,21 +177,14 @@ export function Inspector({
             <div className="section-heading">
               <h3>Grid &amp; sizing</h3>
             </div>
-            <div className="two-col">
-              <NumberField
-                label="Columns"
-                value={profile.grid.columns}
-                min={1}
-                max={10}
-                onChange={(columns) => resizeWithWarning(columns, profile.grid.rows)}
-              />
-              <NumberField
-                label="Rows"
-                value={profile.grid.rows}
-                min={1}
-                max={10}
-                onChange={(rows) => resizeWithWarning(profile.grid.columns, rows)}
-              />
+            <div className="preview-strip">
+              <Icon name="grid" size={16} />
+              <span>
+                <strong className="mono">
+                  {profile.grid.columns} × {profile.grid.rows}
+                </strong>{' '}
+                grid · change size in the sidebar’s 02 Deck section.
+              </span>
             </div>
             <div className="two-col">
               <NumberField
@@ -261,17 +253,6 @@ export function Inspector({
         </div>
       </aside>
     )
-
-    function resizeWithWarning(columns: number, rows: number): void {
-      const limit = columns * rows
-      const dropped = profile.pages.reduce(
-        (count, item) => count + item.buttons.filter((candidate) => candidate.slot >= limit).length,
-        0,
-      )
-      if (dropped > 0 && !window.confirm(`${dropped} button(s) no longer fit and will be removed. Continue?`)) return
-      onChangeConfig(resizeGrid(config, profile.id, columns, rows))
-      onSelectButton(null)
-    }
   }
 
   const update = (patch: Partial<Omit<DeckButton, 'id' | 'slot'>>): void => {
@@ -350,7 +331,7 @@ export function Inspector({
                 aria-label="Custom emoji icon"
                 onChange={(event) => update({ icon: event.target.value || undefined })}
               />
-              <span className="hint">Pick a category below or paste any emoji.</span>
+              <span className="hint">Search below or paste any emoji.</span>
             </div>
             <IconPicker key={button.id} value={button.icon} onChange={(icon) => update({ icon: icon || undefined })} />
           </div>

@@ -35,6 +35,7 @@ export type IconName =
   | 'mouse'
   | 'clock'
   | 'layers'
+  | 'search'
   | 'arrow-up'
   | 'arrow-down'
   | 'undo'
@@ -76,6 +77,7 @@ const paths: Record<IconName, string> = {
   mouse: 'M7 3h10v18H7zM12 3v7M9 7h6',
   clock: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2',
   layers: 'm12 3 9 5-9 5-9-5zM3 13l9 5 9-5M3 18l9 5 9-5',
+  search: 'M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM20 20l-4.2-4.2',
   'arrow-up': 'M12 19V5M6 11l6-6 6 6',
   'arrow-down': 'M12 5v14M6 13l6 6 6-6',
   undo: 'M9 7H4v5M4 12a8 8 0 1 0 2.3-5.7L4 9',

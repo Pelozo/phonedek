@@ -1,10 +1,15 @@
-import { actionsToPlan } from '@phonedek/shared'
+import { actionsToPlan, isScreenshotShortcut } from '@phonedek/shared'
 import type { Action, KeyboardPlanStep, PressResult } from '@phonedek/shared'
 import type { HostActions } from './host-actions'
 import type { KeySender } from './key-sender'
 import type { Logger } from './logger'
 
 const KEYBOARD_KINDS = new Set(['keys', 'text', 'delay', 'media', 'mouse'])
+
+export interface ExecutorOptions {
+  /** Host platform; defaults to the running process. Injected in tests. */
+  platform?: NodeJS.Platform
+}
 
 /**
  * Executes button action lists on the desktop. Runs are serialized so two
@@ -15,11 +20,13 @@ export class ActionExecutor {
   private readonly keys: KeySender
   private readonly host: HostActions
   private readonly logger?: Logger
+  private readonly platform: NodeJS.Platform
 
-  constructor(keys: KeySender, host: HostActions, logger?: Logger) {
+  constructor(keys: KeySender, host: HostActions, logger?: Logger, options: ExecutorOptions = {}) {
     this.keys = keys
     this.host = host
     this.logger = logger
+    this.platform = options.platform ?? process.platform
   }
 
   execute(actions: readonly Action[], label = 'button'): Promise<PressResult> {
@@ -56,6 +63,19 @@ export class ActionExecutor {
             break
           default:
             if (KEYBOARD_KINDS.has(step.kind)) {
+              // On macOS WIN maps to Command, so Win+Shift+S would send
+              // Cmd+Shift+S ("Save As…"). Treat it as the screenshot intent
+              // and capture the full screen instead.
+              if (
+                this.platform === 'darwin' &&
+                step.kind === 'keys' &&
+                step.action === 'press' &&
+                isScreenshotShortcut(step.keys)
+              ) {
+                await this.host.screenshot()
+                this.logger?.info(`Captured the screen for "${label}"`)
+                break
+              }
               await this.keys.send(step as KeyboardPlanStep)
             }
             break

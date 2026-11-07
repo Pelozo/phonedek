@@ -92,12 +92,14 @@ export function MacroEditor({
   repeatDelayMs = 0,
   onChange,
   onChangeMeta,
+  onRecordingChange,
 }: {
   steps: MacroStep[]
   repeat?: number
   repeatDelayMs?: number
   onChange: (steps: MacroStep[]) => void
   onChangeMeta: (patch: { repeat?: number; repeatDelayMs?: number }) => void
+  onRecordingChange?: (recording: boolean) => void
 }) {
   const [recordOpen, setRecordOpen] = useState(false)
   const [shortcutIndex, setShortcutIndex] = useState<number | null>(null)
@@ -459,6 +461,7 @@ export function MacroEditor({
         <MacroRecordDialog
           onClose={() => setRecordOpen(false)}
           onSave={(recorded) => onChange([...steps, ...recorded])}
+          onRecordingChange={onRecordingChange}
         />
       )}
       {shortcutIndex !== null && steps[shortcutIndex]?.type === 'hotkey' && (

@@ -164,7 +164,7 @@ function mainPage(): DeckPage {
       starter('btn-screenshot', {
         slot: 6,
         label: 'Screenshot',
-        sublabel: 'Win + Shift + S',
+        sublabel: 'Full screen',
         icon: '📸',
         background: gradient('#0369a1', '#0ea5e9'),
         actions: [hotkey('WIN', 'SHIFT', 'S')],

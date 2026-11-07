@@ -7,9 +7,11 @@ import { Icon } from './Icons'
 export function MacroRecordDialog({
   onSave,
   onClose,
+  onRecordingChange,
 }: {
   onSave: (steps: MacroStep[]) => void
   onClose: () => void
+  onRecordingChange?: (recording: boolean) => void
 }) {
   const recorder = useRef<MacroRecorder | null>(null)
   const [recording, setRecording] = useState(false)
@@ -20,6 +22,13 @@ export function MacroRecordDialog({
   const [elapsed, setElapsed] = useState(0)
   const elapsedBase = useRef(0)
   const resumedAt = useRef(0)
+
+  useEffect(() => {
+    onRecordingChange?.(recording)
+    return () => {
+      if (recording) onRecordingChange?.(false)
+    }
+  }, [recording, onRecordingChange])
 
   useEffect(() => {
     if (!recording || paused) return

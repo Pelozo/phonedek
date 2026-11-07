@@ -6,14 +6,22 @@ export interface HostActions {
   launch(path: string, args: string[]): Promise<void>
   openUrl(url: string): Promise<void>
   runCommand(command: string, cwd: string | undefined, hidden: boolean): Promise<void>
+  /** Capture the full screen on macOS (no shutter sound). */
+  screenshot(): Promise<void>
 }
 
 export interface HostActionOptions {
   platform?: NodeJS.Platform
   openPath?: (path: string) => Promise<string>
   openExternal?: (url: string) => Promise<void>
+  /** Test seam for the macOS screenshot command. */
+  captureScreen?: () => Promise<void>
   logger?: Logger
 }
+
+export const MAC_SCREENSHOT_COMMAND = '/usr/sbin/screencapture'
+/** `-x` = silent, full screen. */
+export const MAC_SCREENSHOT_ARGS: readonly string[] = ['-x']
 
 function spawnDetached(
   command: string,
@@ -36,6 +44,30 @@ function spawnDetached(
       spawned = true
       child.unref()
       resolve()
+    })
+  })
+}
+
+/**
+ * Run a short-lived process and wait for its exit status, surfacing stderr in
+ * the rejection so the caller (and the phone) sees a useful error.
+ */
+function runToCompletion(command: string, args: readonly string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let stderr = ''
+    const child = spawn(command, args, {
+      stdio: ['ignore', 'ignore', 'pipe'],
+      windowsHide: true,
+    })
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderr = (stderr + chunk.toString('utf8')).slice(-2000)
+    })
+    child.once('error', (error) => {
+      reject(new Error(`Could not start ${command}: ${error.message}`))
+    })
+    child.once('exit', (code) => {
+      if (code === 0) resolve()
+      else reject(new Error(`${command} exited with ${code ?? 'unknown'}${stderr.trim() ? `: ${stderr.trim()}` : ''}`))
     })
   })
 }
@@ -118,6 +150,26 @@ export function createHostActions(options: HostActionOptions = {}): HostActions 
         await spawnDetached('/bin/sh', ['-c', command], { cwd, hidden })
       }
       logger?.info(`Ran command: ${command.slice(0, 140)}`)
+    },
+
+    async screenshot() {
+      if (platform !== 'darwin') {
+        throw new Error('Full-screen screenshot is only implemented on macOS')
+      }
+      try {
+        if (options.captureScreen) {
+          await options.captureScreen()
+        } else {
+          await runToCompletion(MAC_SCREENSHOT_COMMAND, MAC_SCREENSHOT_ARGS)
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        throw new Error(
+          `macOS screenshot failed: ${message}. If macOS blocked the capture, allow Screen Recording ` +
+            'for PhoneDeck in System Settings → Privacy & Security.',
+        )
+      }
+      logger?.info('Captured the full screen with screencapture')
     },
   }
 }

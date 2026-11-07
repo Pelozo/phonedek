@@ -28,6 +28,9 @@ function fakeHost(log: string[]): HostActions {
     async runCommand(command) {
       log.push(`command:${command}`)
     },
+    async screenshot() {
+      log.push('screenshot')
+    },
   }
 }
 
@@ -73,6 +76,61 @@ describe('ActionExecutor', () => {
     const executor = new ActionExecutor(fakeKeys(log), fakeHost(log))
     await expect(executor.execute([], 'empty')).resolves.toEqual({ ok: true })
     expect(log).toEqual([])
+  })
+
+  it('captures the full screen on macOS for the Win+Shift+S intent', async () => {
+    const log: string[] = []
+    const executor = new ActionExecutor(fakeKeys(log), fakeHost(log), undefined, { platform: 'darwin' })
+    await expect(
+      executor.execute([{ type: 'hotkey', keys: ['WIN', 'SHIFT', 'S'] }], 'shot'),
+    ).resolves.toEqual({ ok: true })
+    expect(log).toEqual(['screenshot'])
+  })
+
+  it('replaces the intent inside a macro on macOS', async () => {
+    const log: string[] = []
+    const executor = new ActionExecutor(fakeKeys(log), fakeHost(log), undefined, { platform: 'darwin' })
+    await executor.execute(
+      [
+        { type: 'macro', steps: [{ type: 'hotkey', keys: ['WIN', 'SHIFT', 'S'] }, { type: 'delay', ms: 10 }] },
+      ],
+      'macro shot',
+    )
+    expect(log).toEqual(['screenshot', 'delay:10'])
+  })
+
+  it('still sends Win+Shift+S on Windows', async () => {
+    const log: string[] = []
+    const executor = new ActionExecutor(fakeKeys(log), fakeHost(log), undefined, { platform: 'win32' })
+    await expect(
+      executor.execute([{ type: 'hotkey', keys: ['WIN', 'SHIFT', 'S'] }], 'shot'),
+    ).resolves.toEqual({ ok: true })
+    expect(log).toEqual(['keys:SHIFT+WIN+S'])
+  })
+
+  it('does not remap other chords on macOS', async () => {
+    const log: string[] = []
+    const executor = new ActionExecutor(fakeKeys(log), fakeHost(log), undefined, { platform: 'darwin' })
+    await executor.execute([{ type: 'hotkey', keys: ['CTRL', 'SHIFT', 'S'] }], 'save as')
+    expect(log).toEqual(['keys:CTRL+SHIFT+S'])
+  })
+
+  it('returns a useful error when the macOS capture fails and keeps the queue alive', async () => {
+    const log: string[] = []
+    const host: HostActions = {
+      ...fakeHost(log),
+      async screenshot() {
+        throw new Error('screencapture exited with 1: Screen Recording permission denied')
+      },
+    }
+    const executor = new ActionExecutor(fakeKeys(log), host, undefined, { platform: 'darwin' })
+    const failed = await executor.execute([{ type: 'hotkey', keys: ['WIN', 'SHIFT', 'S'] }], 'shot')
+    expect(failed.ok).toBe(false)
+    expect(failed.error).toMatch(/permission denied/)
+
+    const after = await executor.execute([{ type: 'hotkey', keys: ['WIN', 'D'] }], 'good')
+    expect(after.ok).toBe(true)
+    expect(log).toContain('keys:WIN+D')
   })
 
   it('serializes overlapping presses', async () => {
