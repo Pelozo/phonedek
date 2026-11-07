@@ -1846,6 +1846,207 @@ input[type="range"]::-webkit-slider-thumb {
   z-index: 2;
 }
 
+/* Continuous-control editor preview. Non-interactive; the phone owns input. */
+.control-preview {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.control-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding-right: 2px;
+}
+
+.control-name {
+  font-weight: 650;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.control-sublabel {
+  font-size: 0.68em;
+  opacity: 0.7;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.control-badge {
+  position: absolute;
+  right: 6px;
+  bottom: 5px;
+  z-index: 2;
+  padding: 0 4px;
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.38);
+  color: inherit;
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  line-height: 1.5;
+}
+
+.control-slider {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 34px;
+  height: 20px;
+}
+
+.control-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 4px;
+  transform: translateY(-50%);
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0.28;
+}
+
+.control-thumb {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(0, 0, 0, 0.45);
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.16);
+}
+
+.control-preview.vertical .control-slider {
+  flex: 0 0 20px;
+  width: 20px;
+  height: 100%;
+  min-height: 40px;
+}
+
+.control-preview.vertical .control-track {
+  left: 50%;
+  right: auto;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  height: auto;
+  transform: translateX(-50%);
+}
+
+.control-preview.vertical .control-thumb {
+  left: 50%;
+  top: auto;
+  transform: translate(-50%, 50%);
+}
+
+.control-dial {
+  position: relative;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+}
+
+.control-dial-ring {
+  position: absolute;
+  inset: 0;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  opacity: 0.33;
+}
+
+.control-dial-needle {
+  position: absolute;
+  left: 50%;
+  bottom: 50%;
+  width: 2px;
+  height: 42%;
+  transform-origin: 50% 100%;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.control-dial-hub {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.75;
+}
+
+.control-preview-shell {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-deep);
+  overflow: hidden;
+}
+
+.inspector-control-preview {
+  height: 64px;
+  color: var(--text);
+}
+
+.inspector-control-preview .control-badge {
+  color: var(--text-soft);
+}
+
+.control-readout {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.control-readout > span {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+.control-readout strong {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-deep);
+  color: var(--text-soft);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.control-range {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
 .deck-hint {
   display: flex;
   align-items: center;

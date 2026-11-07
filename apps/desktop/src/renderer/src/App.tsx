@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   addButton,
+  canPlaceButton,
   createEmptyButton,
   nextFreeSlotForPage,
+  occupiedCells,
   pageCapacity,
   pageGrid,
 } from '@phonedek/shared'
-import type { DeckConfig } from '@phonedek/shared'
+import type { ControlSpec, DeckButton, DeckConfig } from '@phonedek/shared'
 import type { AppState, ServerInfoView, UpdateStatus, PermissionStatus } from '../../shared/api'
 import { isUpdateNoticeVisible, updateIndicatorLabel } from '../../shared/update-status'
 import { DeckCanvas } from './components/DeckCanvas'
 import { Icon } from './components/Icons'
 import { Inspector } from './components/Inspector'
+import { PopMenu } from './components/Menu'
 import { PairDialog } from './components/PairDialog'
 import { PermissionBanner } from './components/PermissionBanner'
 import { ConfirmProvider } from './components/Primitives'
@@ -287,6 +290,62 @@ function AppContent() {
     }
   }
 
+  const addNewControl = (kind: 'volume' | 'scroll'): void => {
+    if (!config || !profile || !page) return
+    const grid = pageGrid(profile, page)
+    const span = kind === 'volume' ? { columns: 3, rows: 1 } : { columns: 2, rows: 1 }
+    let slot: number | null = null
+    for (let candidate = 0; candidate < grid.columns * grid.rows; candidate += 1) {
+      if (canPlaceButton(page.buttons, candidate, span, grid)) {
+        slot = candidate
+        break
+      }
+    }
+    if (slot === null) {
+      showToast(
+        `No ${span.columns}×${span.rows} space left on this page. Resize the grid or remove a button first.`,
+        'error',
+      )
+      return
+    }
+
+    const control: ControlSpec =
+      kind === 'volume'
+        ? {
+            kind: 'slider',
+            axis: 'horizontal',
+            emit: 'delta',
+            binding: { type: 'volume', mode: 'relative', stepPercent: 2 },
+            min: 0,
+            max: 100,
+            step: 2,
+            initial: 50,
+            unit: '%',
+            haptics: true,
+          }
+        : {
+            kind: 'dial',
+            emit: 'delta',
+            binding: { type: 'scroll', axis: 'vertical' },
+            step: 1,
+            haptics: true,
+          }
+    const button: DeckButton = {
+      ...createEmptyButton(slot, kind === 'volume' ? 'Volume' : 'Scroll'),
+      icon: kind === 'volume' ? '🔊' : '🖱️',
+      span,
+      control,
+    }
+    try {
+      const next = addButton(config, profile.id, page.id, button)
+      setConfig(next)
+      setSelectedButtonId(button.id)
+      showToast(kind === 'volume' ? 'Volume slider added' : 'Scroll wheel added', 'success')
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error')
+    }
+  }
+
   const handleConfigImported = (next: DeckConfig): void => {
     skipSave.current = true
     setConfig(next)
@@ -329,6 +388,7 @@ function AppContent() {
   const saveLabel = saveStatus === 'saving' ? 'Saving…' : saveStatus === 'error' ? 'Unsaved' : 'Saved'
   const activeGrid = pageGrid(profile, page)
   const activeCapacity = pageCapacity(profile, page)
+  const usedCells = occupiedCells(page.buttons, activeGrid).size
 
   return (
     <HostPlatformProvider platform={server.platform}>
@@ -357,7 +417,7 @@ function AppContent() {
               {activeGrid.columns} × {activeGrid.rows}
             </span>
             <span className="slot-pill">
-              {page.buttons.length}/{activeCapacity} slots
+              {usedCells}/{activeCapacity} cells
             </span>
           </div>
 
@@ -380,6 +440,29 @@ function AppContent() {
             <button type="button" className="button secondary" onClick={addNewButton}>
               <Icon name="plus" size={16} /> Add button
             </button>
+            <PopMenu
+              align="right"
+              width={250}
+              trigger={
+                <button type="button" className="button secondary" title="Add a continuous control">
+                  <Icon name="sliders" size={16} /> Add control
+                </button>
+              }
+              items={[
+                {
+                  label: 'Volume slider',
+                  icon: 'music',
+                  description: '3 × 1 · relative volume',
+                  onClick: () => addNewControl('volume'),
+                },
+                {
+                  label: 'Scroll wheel',
+                  icon: 'mouse',
+                  description: '2 × 1 · vertical scroll',
+                  onClick: () => addNewControl('scroll'),
+                },
+              ]}
+            />
             <button type="button" className="button primary" onClick={() => setPairOpen(true)}>
               <span className={`dot ${server.running ? 'online' : 'offline'}`} />
               Pair phone

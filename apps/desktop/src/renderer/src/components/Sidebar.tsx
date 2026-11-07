@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
-import type { DeckConfig, DeckPage, DeckProfile } from '@phonedek/shared'
+import type { DeckButton, DeckConfig, DeckPage, DeckProfile, GridSettings } from '@phonedek/shared'
 import {
   addPage,
   addProfile,
+  buttonFootprint,
   clearPageGrid,
   deletePage,
   deleteProfile,
   duplicatePage,
   duplicateProfile,
+  occupiedCells,
   pageCapacity,
   pageGrid,
   resizeGrid,
@@ -26,6 +28,21 @@ const GRID_PRESETS = [
   { columns: 5, rows: 3 },
   { columns: 8, rows: 4 },
 ]
+
+/** Mirrors the shared grid pruner so confirmations count span loss as well. */
+function countLostButtons(buttons: readonly DeckButton[], grid: GridSettings): number {
+  const occupied = new Set<number>()
+  let lost = 0
+  for (const button of [...buttons].sort((a, b) => a.slot - b.slot)) {
+    const footprint = buttonFootprint(button, grid)
+    if (!footprint || footprint.cells.some((cell) => occupied.has(cell))) {
+      lost += 1
+      continue
+    }
+    for (const cell of footprint.cells) occupied.add(cell)
+  }
+  return lost
+}
 
 function GridSizeControls({
   columns,
@@ -245,16 +262,20 @@ export function Sidebar({
     if (nextProfile) onSelectPage(nextProfile.defaultPageId)
   }
 
-  const usedButtons = profile.pages.reduce((count, item) => count + item.buttons.length, 0)
+  const usedButtons = profile.pages.reduce(
+    (count, item) => count + occupiedCells(item.buttons, pageGrid(profile, item)).size,
+    0,
+  )
   const activePageGrid = pageGrid(profile, page)
+  const usedPageCells = occupiedCells(page.buttons, activePageGrid).size
 
   const applyPageGrid = async (columns: number, rows: number): Promise<void> => {
     const nextColumns = Math.max(1, Math.min(10, Math.round(columns)))
     const nextRows = Math.max(1, Math.min(10, Math.round(rows)))
     if (nextColumns === activePageGrid.columns && nextRows === activePageGrid.rows) return
 
-    const limit = nextColumns * nextRows
-    const removed = page.buttons.filter((button) => button.slot >= limit).length
+    const nextGrid: GridSettings = { ...activePageGrid, columns: nextColumns, rows: nextRows }
+    const removed = countLostButtons(page.buttons, nextGrid)
     if (removed > 0) {
       const confirmed = await confirm({
         title: 'Resize page grid',
@@ -289,12 +310,12 @@ export function Sidebar({
     const nextRows = Math.max(1, Math.min(10, Math.round(rows)))
     if (nextColumns === profile.grid.columns && nextRows === profile.grid.rows) return
 
-    const limit = nextColumns * nextRows
+    const nextGrid: GridSettings = { ...profile.grid, columns: nextColumns, rows: nextRows }
     const losses = profile.pages
       .filter((item) => !item.grid)
       .map((item) => ({
         name: item.name,
-        count: item.buttons.filter((button) => button.slot >= limit).length,
+        count: countLostButtons(item.buttons, nextGrid),
       }))
       .filter((item) => item.count > 0)
     const removed = losses.reduce((sum, item) => sum + item.count, 0)
@@ -326,8 +347,7 @@ export function Sidebar({
 
   const inheritProfileGrid = async (): Promise<void> => {
     if (!page.grid) return
-    const limit = profile.grid.columns * profile.grid.rows
-    const removed = page.buttons.filter((button) => button.slot >= limit).length
+    const removed = countLostButtons(page.buttons, profile.grid)
     if (removed > 0) {
       const confirmed = await confirm({
         title: 'Use profile grid',
@@ -434,7 +454,7 @@ export function Sidebar({
             />
             <div className="grid-readout">
               <span>
-                Page <strong>{page.buttons.length}/{pageCapacity(profile, page)}</strong>
+                Page <strong>{usedPageCells}/{pageCapacity(profile, page)}</strong>
               </span>
               <span>
                 Profile <strong>{usedButtons}</strong>

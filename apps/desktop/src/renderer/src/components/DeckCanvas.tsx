@@ -1,10 +1,26 @@
 import { useState, type CSSProperties, type DragEvent } from 'react'
-import { addButton, createEmptyButton, moveButton, pageCapacity, pageGrid } from '@phonedek/shared'
-import type { DeckConfig, DeckPage, DeckProfile } from '@phonedek/shared'
+import {
+  addButton,
+  buttonFootprint,
+  buttonSpan,
+  canPlaceButton,
+  createEmptyButton,
+  moveButton,
+  occupiedCells,
+  pageCapacity,
+  pageGrid,
+} from '@phonedek/shared'
+import type { DeckButton, DeckConfig, DeckPage, DeckProfile } from '@phonedek/shared'
 import type { ServerInfoView } from '../../../shared/api'
 import { backgroundStyle, buttonBackground, isVideoBackground, textColorFor } from '../lib/ui'
+import { ControlPreview } from './ControlPreview'
 import { DeckMedia } from './DeckMedia'
 import { Icon } from './Icons'
+
+function isSingleCell(button: DeckButton): boolean {
+  const span = buttonSpan(button)
+  return span.columns === 1 && span.rows === 1
+}
 
 export function DeckCanvas({
   config,
@@ -30,9 +46,14 @@ export function DeckCanvas({
   const grid = pageGrid(profile, page)
   const slots = pageCapacity(profile, page)
   const bySlot = new Map(page.buttons.map((button) => [button.slot, button]))
+  const occupied = occupiedCells(page.buttons, grid)
   const deckNumber = String(Math.max(1, config.profiles.findIndex((item) => item.id === profile.id) + 1)).padStart(2, '0')
 
   const addAt = (slot: number): void => {
+    if (!canPlaceButton(page.buttons, slot, { columns: 1, rows: 1 }, grid)) {
+      onToast('That cell is covered by a control. Pick a free cell.', 'info')
+      return
+    }
     const button = createEmptyButton(slot)
     try {
       const next = addButton(config, profile.id, page.id, button)
@@ -48,8 +69,19 @@ export function DeckCanvas({
     setOverSlot(null)
     const id = dragging ?? event.dataTransfer.getData('text/phonedek-button')
     setDragging(null)
+    const target = bySlot.get(slot)
+    const source = id ? page.buttons.find((button) => button.id === id) : undefined
+
+    if (source && !isSingleCell(source)) {
+      onToast('Spanning controls can’t be dragged yet. Move the tiles around them or change the span.', 'info')
+      return
+    }
+    if (target && !isSingleCell(target)) {
+      onToast('That area is covered by a control. Drop onto a free cell instead.', 'info')
+      return
+    }
     if (!id) {
-      if (!bySlot.has(slot)) addAt(slot)
+      if (!target && !occupied.has(slot)) addAt(slot)
       return
     }
     try {
@@ -82,7 +114,7 @@ export function DeckCanvas({
           <span className="deck-sep" aria-hidden="true" />
           <span>Deck {deckNumber}</span>
           <span className="deck-meta">
-            {grid.columns}×{grid.rows} · {page.buttons.length}/{slots}
+            {grid.columns}×{grid.rows} · {occupied.size}/{slots}
           </span>
         </div>
         <div className="deck-frame">
@@ -91,12 +123,16 @@ export function DeckCanvas({
             {Array.from({ length: slots }, (_, slot) => {
               const button = bySlot.get(slot)
               if (!button) {
+                if (occupied.has(slot)) return null
+                const column = slot % grid.columns
+                const row = Math.floor(slot / grid.columns)
                 return (
                   <button
                     // eslint-disable-next-line react/no-array-index-key
                     key={`empty-${slot}`}
                     type="button"
                     className={`deck-slot empty${overSlot === slot ? ' drag-over' : ''}`}
+                    style={{ gridColumn: `${column + 1}`, gridRow: `${row + 1}` }}
                     onClick={() => addAt(slot)}
                     onDragOver={(event) => {
                       event.preventDefault()
@@ -112,6 +148,12 @@ export function DeckCanvas({
                 )
               }
 
+              const footprint = buttonFootprint(button, grid)
+              const column = footprint?.column ?? slot % grid.columns
+              const row = footprint?.row ?? Math.floor(slot / grid.columns)
+              const spanColumns = footprint?.columns ?? 1
+              const spanRows = footprint?.rows ?? 1
+              const spanning = spanColumns > 1 || spanRows > 1
               const isSelected = button.id === selectedButtonId
               const background = buttonBackground(button, page, profile, server)
               const resolvedBackground = button.background ?? profile.theme.buttonBackground
@@ -119,8 +161,10 @@ export function DeckCanvas({
               return (
                 <div
                   key={button.id}
-                  className={`deck-slot${isSelected ? ' selected' : ''}${dragging === button.id ? ' dragging' : ''}${overSlot === slot ? ' drag-over' : ''}`}
+                  className={`deck-slot${isSelected ? ' selected' : ''}${dragging === button.id ? ' dragging' : ''}${overSlot === slot ? ' drag-over' : ''}${spanning ? ' spanning' : ''}${button.control ? ' has-control' : ''}`}
                   style={{
+                    gridColumn: `${column + 1} / span ${spanColumns}`,
+                    gridRow: `${row + 1} / span ${spanRows}`,
                     ...background,
                     borderRadius: `${profile.theme.buttonRadius}px`,
                     color: textColorFor(button, profile),
@@ -128,6 +172,11 @@ export function DeckCanvas({
                   }}
                   draggable
                   onDragStart={(event) => {
+                    if (spanning) {
+                      event.preventDefault()
+                      onToast('Spanning controls can’t be dragged yet. Change the span or move the surrounding tiles.', 'info')
+                      return
+                    }
                     event.dataTransfer.setData('text/phonedek-button', button.id)
                     event.dataTransfer.effectAllowed = 'move'
                     setDragging(button.id)
@@ -149,18 +198,27 @@ export function DeckCanvas({
                   }}
                 >
                   {buttonVideo && <DeckMedia media={buttonVideo} server={server} className="deck-button-media" />}
-                  <div className="deck-button-content">
-                    {button.iconMedia ? (
-                      <span className="deck-icon deck-icon-media">
-                        <DeckMedia media={button.iconMedia} server={server} fallback={button.icon || '＋'} />
-                      </span>
-                    ) : button.icon ? (
-                      <span className="deck-icon">{button.icon}</span>
-                    ) : null}
-                    <span className="deck-label">{button.label || 'Untitled'}</span>
-                    {button.sublabel && <span className="deck-sublabel">{button.sublabel}</span>}
-                  </div>
-                  {button.actions.length === 0 && (
+                  {button.control ? (
+                    <ControlPreview
+                      control={button.control}
+                      label={button.label}
+                      sublabel={button.sublabel}
+                      className="deck-control-preview"
+                    />
+                  ) : (
+                    <div className="deck-button-content">
+                      {button.iconMedia ? (
+                        <span className="deck-icon deck-icon-media">
+                          <DeckMedia media={button.iconMedia} server={server} fallback={button.icon || '＋'} />
+                        </span>
+                      ) : button.icon ? (
+                        <span className="deck-icon">{button.icon}</span>
+                      ) : null}
+                      <span className="deck-label">{button.label || 'Untitled'}</span>
+                      {button.sublabel && <span className="deck-sublabel">{button.sublabel}</span>}
+                    </div>
+                  )}
+                  {!button.control && button.actions.length === 0 && (
                     <span className="deck-warning" title="This button has no actions">
                       !
                     </span>
@@ -173,7 +231,7 @@ export function DeckCanvas({
         </div>
       </div>
       <div className="deck-hint">
-        <Icon name="drag" size={13} /> Drag to rearrange · click an empty cell to add a button · Esc returns to page settings
+        <Icon name="drag" size={13} /> Drag 1×1 tiles to rearrange · click an empty cell to add a button · spanning controls stay put
       </div>
     </div>
   )
