@@ -134,7 +134,7 @@ export function MacroRecordDialog({
                 </button>
               )}
               <button className="button danger" onClick={stop}>
-                <Icon name="pause" size={16} /> Stop recording
+                <Icon name="stop" size={16} /> Stop recording
               </button>
             </>
           )}

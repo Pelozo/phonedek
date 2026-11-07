@@ -422,6 +422,10 @@ export function MacroEditor({
 
                 {step.type === 'command' && (
                   <div className="stack">
+                    <div className="warning">
+                      <Icon name="terminal" size={16} />
+                      Commands run with your Windows user account. Only add commands you trust.
+                    </div>
                     <label className="field">
                       <span>Command</span>
                       <textarea

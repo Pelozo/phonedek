@@ -47,3 +47,22 @@
 - Known limitations: macro recorder captures keys only while the PhoneDeck window is focused;
   Windows UIPI blocks input into elevated apps unless PhoneDeck is elevated; config export is
   JSON-only (images stay in `%APPDATA%\PhoneDeck\assets`); no TLS (LAN only).
+
+
+## In-flight (2026-11-07)
+
+- Working tree has v0.1.3 changes (macro overhaul, 4-digit PIN, Android swipe) and a
+  **partial in-app updater** (electron-updater, UpdateStatus API/preload/IPC/main service).
+- Two background subagents:
+  1. `ses_e4c6aa074ffe6z0kwEiUp2cfkf` — finish Windows in-app auto-update
+     (`apps/desktop/src/main/updater.ts`, Settings UI, docs/UPDATES.md, CI latest.yml/blockmap).
+  2. `ses_e4c66ceb8ffemT2t2OkadhHrvE` — fix Android swipe chrome color bleed + hide-top-bar
+     option (`apps/android` only).
+- Do not edit their files concurrently. When both finish: run gates, commit all, CI, publish
+  v0.1.3 with installer + APK + latest.yml + blockmap + checksums. v0.1.3 is the first
+  updater-enabled build; future versions can auto-update.
+- Macro recorder overhaul is done: repeat, pause/resume/undo, text grouping/capture delays,
+  press/hold/release keys, mouse move/scroll/double-click, launch/URL/command steps, and the
+  PowerShell `[ushort]` Unicode cast fix. Helper validated with PowerShell 7 on Linux:
+  starts, Add-Type compiles, text reaches the Win32 call, scroll math is correct.
+- 62 Vitest tests pass; typecheck/build pass. Android pager + hide-bar work delegated.
