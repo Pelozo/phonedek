@@ -9,6 +9,8 @@ export interface AppSettings {
   token: string
   discovery: boolean
   launchAtLogin: boolean
+  /** Keep the deck server alive in the system tray when the window is closed. */
+  minimizeToTray: boolean
   /** Optional LAN address to advertise in the QR code. Empty = auto. */
   pairHost: string
 }
@@ -24,6 +26,7 @@ export function defaultSettings(): AppSettings {
     token: createToken(),
     discovery: true,
     launchAtLogin: false,
+    minimizeToTray: false,
     pairHost: '',
   }
 }
@@ -49,6 +52,8 @@ function sanitize(input: Partial<AppSettings> | null | undefined): AppSettings {
     token,
     discovery: typeof input.discovery === 'boolean' ? input.discovery : defaults.discovery,
     launchAtLogin: typeof input.launchAtLogin === 'boolean' ? input.launchAtLogin : defaults.launchAtLogin,
+    minimizeToTray:
+      typeof input.minimizeToTray === 'boolean' ? input.minimizeToTray : defaults.minimizeToTray,
     pairHost,
   }
 }

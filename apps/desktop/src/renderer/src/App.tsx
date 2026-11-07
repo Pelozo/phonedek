@@ -95,9 +95,11 @@ function AppContent() {
       setSelectedPageId(profile?.defaultPageId ?? next.profiles[0]?.defaultPageId ?? '')
       setSelectedButtonId(null)
     })
+    const offPair = window.phonedek.onOpenPair(() => setPairOpen(true))
     return () => {
       offServer()
       offConfig()
+      offPair()
     }
   }, [])
 

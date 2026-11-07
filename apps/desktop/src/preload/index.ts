@@ -23,6 +23,8 @@ const api: PhoneDeckApi = {
   rotateToken: (): Promise<OperationResult> => ipcRenderer.invoke(IPC.rotateToken),
   setDiscovery: (enabled: boolean): Promise<OperationResult> => ipcRenderer.invoke(IPC.setDiscovery, enabled),
   setLaunchAtLogin: (enabled: boolean): Promise<OperationResult> => ipcRenderer.invoke(IPC.setLaunchAtLogin, enabled),
+  setMinimizeToTray: (enabled: boolean): Promise<OperationResult> =>
+    ipcRenderer.invoke(IPC.setMinimizeToTray, enabled),
   setPairHost: (host: string): Promise<OperationResult> => ipcRenderer.invoke(IPC.setPairHost, host),
   setPhoneBrightness: (clientId: string, level: number | null): Promise<OperationResult> =>
     ipcRenderer.invoke(IPC.setPhoneBrightness, clientId, level),
@@ -54,6 +56,11 @@ const api: PhoneDeckApi = {
     const handler = (_event: unknown, config: DeckConfig): void => listener(config)
     ipcRenderer.on(IPC.configChangedEvent, handler)
     return () => ipcRenderer.removeListener(IPC.configChangedEvent, handler)
+  },
+  onOpenPair: (listener: () => void): (() => void) => {
+    const handler = (): void => listener()
+    ipcRenderer.on(IPC.openPairEvent, handler)
+    return () => ipcRenderer.removeListener(IPC.openPairEvent, handler)
   },
 }
 

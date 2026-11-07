@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, shell, systemPreferences, Tray } from 'electron'
 import type { MenuItemConstructorOptions, OpenDialogOptions, SaveDialogOptions } from 'electron'
 import { existsSync } from 'node:fs'
 import { basename, join } from 'node:path'
@@ -37,6 +37,7 @@ app.setName('PhoneDeck')
 const APP_VERSION = '0.1.4'
 
 let mainWindow: BrowserWindow | null = null
+let tray: Tray | null = null
 let logger: Logger
 let store: ConfigStore
 let settings: SettingsStore
@@ -50,6 +51,7 @@ let updater: UpdateService
 let serverError: string | null = null
 let pairCache: { key: string; value: PairView } | null = null
 let shuttingDown = false
+let isQuitting = false
 let bootstrapped = false
 
 const ACCESSIBILITY_SETTINGS_URL =
@@ -165,6 +167,7 @@ async function buildServerInfo(): Promise<ServerInfoView> {
       port: currentSettings.port,
       discovery: currentSettings.discovery,
       launchAtLogin: currentSettings.launchAtLogin,
+      minimizeToTray: currentSettings.minimizeToTray,
       pairHost: currentSettings.pairHost,
     },
     clients: server?.getClients() ?? [],
@@ -184,12 +187,95 @@ async function buildState(): Promise<AppState> {
       port: settings.get().port,
       discovery: settings.get().discovery,
       launchAtLogin: settings.get().launchAtLogin,
+      minimizeToTray: settings.get().minimizeToTray,
       pairHost: settings.get().pairHost,
     },
   }
 }
 
+function trayIconPath(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'tray-icon.png')
+    : join(app.getAppPath(), 'build', 'icon.png')
+}
+
+function showMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    if (bootstrapped) createWindow()
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+  updateTrayMenu()
+}
+
+function hideMainWindow(): void {
+  mainWindow?.hide()
+  updateTrayMenu()
+}
+
+function connectedPhoneLabel(): string {
+  const clients = server?.getClients() ?? []
+  if (clients.length === 0) return 'No phones connected'
+  return `${clients.length} phone${clients.length === 1 ? '' : 's'} connected`
+}
+
+function updateTrayMenu(): void {
+  if (!tray) return
+  const visible = mainWindow?.isVisible() ?? false
+  const template: MenuItemConstructorOptions[] = [
+    { label: 'Show PhoneDeck', click: () => showMainWindow() },
+  ]
+  if (visible) template.push({ label: 'Hide', click: () => hideMainWindow() })
+  template.push(
+    {
+      label: 'Pair phone',
+      click: () => {
+        showMainWindow()
+        mainWindow?.webContents.send(IPC.openPairEvent)
+      },
+    },
+    { type: 'separator' },
+    { label: connectedPhoneLabel(), enabled: false },
+    { type: 'separator' },
+    {
+      label: 'Quit PhoneDeck',
+      click: () => {
+        isQuitting = true
+        app.quit()
+      },
+    },
+  )
+  tray.setContextMenu(Menu.buildFromTemplate(template))
+}
+
+function createTray(): void {
+  if (tray) return
+  const iconPath = trayIconPath()
+  if (!existsSync(iconPath)) {
+    logger?.warn(`Tray icon not found at ${iconPath}; continuing without a tray icon`)
+    return
+  }
+  try {
+    let image = nativeImage.createFromPath(iconPath)
+    if (image.isEmpty()) {
+      logger?.warn(`Tray icon at ${iconPath} could not be decoded; continuing without a tray icon`)
+      return
+    }
+    if (process.platform === 'darwin') image = image.resize({ width: 18, height: 18 })
+    tray = new Tray(image)
+    tray.setToolTip('PhoneDeck')
+    tray.on('click', () => showMainWindow())
+    updateTrayMenu()
+  } catch (error) {
+    logger?.warn(`Could not create the tray icon: ${(error as Error).message}`)
+    tray = null
+  }
+}
+
 async function pushServerInfo(): Promise<void> {
+  updateTrayMenu()
   if (!mainWindow || mainWindow.isDestroyed()) return
   try {
     mainWindow.webContents.send(IPC.serverInfoEvent, await buildServerInfo())
@@ -366,6 +452,16 @@ function registerIpc(): void {
     return { ok: true, state: await buildState() }
   })
 
+  ipcMain.handle(IPC.setMinimizeToTray, async (_event, enabled: unknown): Promise<OperationResult> => {
+    if (typeof enabled !== 'boolean') {
+      return { ok: false, error: 'Tray preference must be true or false', state: await buildState() }
+    }
+    settings.update({ minimizeToTray: enabled })
+    updateTrayMenu()
+    await pushServerInfo()
+    return { ok: true, state: await buildState() }
+  })
+
   ipcMain.handle(IPC.exportConfig, async (): Promise<OperationResult> => {
     const result = await showSave({
       title: 'Export PhoneDeck backup',
@@ -524,9 +620,22 @@ function createWindow(): void {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show()
+    updateTrayMenu()
+  })
+  mainWindow.on('show', () => updateTrayMenu())
+  mainWindow.on('hide', () => updateTrayMenu())
+  mainWindow.on('close', (event) => {
+    if (isQuitting) return
+    // Only the tray preference changes close semantics. Minimizing (including
+    // the OS minimize button) never hides the window.
+    if (settings?.get().minimizeToTray) {
+      event.preventDefault()
+      mainWindow?.hide()
+    }
   })
   mainWindow.on('closed', () => {
     mainWindow = null
+    updateTrayMenu()
   })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -657,6 +766,7 @@ async function bootstrap(): Promise<void> {
   updater.init()
 
   createWindow()
+  createTray()
   bootstrapped = true
   updater.checkOnStartup()
 }
@@ -668,7 +778,9 @@ if (!gotLock) {
   app.on('second-instance', () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore()
+      if (!mainWindow.isVisible()) mainWindow.show()
       mainWindow.focus()
+      updateTrayMenu()
       return
     }
     if (bootstrapped) createWindow()
@@ -696,6 +808,7 @@ if (!gotLock) {
   })
 
   app.on('before-quit', (event) => {
+    isQuitting = true
     if (shuttingDown) return
     event.preventDefault()
     shuttingDown = true
@@ -708,6 +821,8 @@ if (!gotLock) {
       } catch (error) {
         logger?.error('Shutdown failed', error)
       } finally {
+        tray?.destroy()
+        tray = null
         app.quit()
       }
     })()

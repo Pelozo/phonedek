@@ -29,6 +29,7 @@ export interface SettingsView {
   port: number
   discovery: boolean
   launchAtLogin: boolean
+  minimizeToTray: boolean
   pairHost: string
 }
 
@@ -100,6 +101,7 @@ export interface PhoneDeckApi {
   rotateToken(): Promise<OperationResult>
   setDiscovery(enabled: boolean): Promise<OperationResult>
   setLaunchAtLogin(enabled: boolean): Promise<OperationResult>
+  setMinimizeToTray(enabled: boolean): Promise<OperationResult>
   setPairHost(host: string): Promise<OperationResult>
   setPhoneBrightness(clientId: string, level: number | null): Promise<OperationResult>
   exportConfig(): Promise<OperationResult>
@@ -118,6 +120,7 @@ export interface PhoneDeckApi {
   onUpdateStatus(listener: (status: UpdateStatus) => void): () => void
   onServerInfo(listener: (info: ServerInfoView) => void): () => void
   onConfigChanged(listener: (config: DeckConfig) => void): () => void
+  onOpenPair(listener: () => void): () => void
 }
 
 export const IPC = {
@@ -130,6 +133,7 @@ export const IPC = {
   rotateToken: 'phonedek:rotate-token',
   setDiscovery: 'phonedek:set-discovery',
   setLaunchAtLogin: 'phonedek:set-launch-at-login',
+  setMinimizeToTray: 'phonedek:set-minimize-to-tray',
   setPairHost: 'phonedek:set-pair-host',
   setPhoneBrightness: 'phonedek:set-phone-brightness',
   exportConfig: 'phonedek:export-config',
@@ -148,4 +152,5 @@ export const IPC = {
   updateStatusEvent: 'phonedek:update-status',
   serverInfoEvent: 'phonedek:server-info',
   configChangedEvent: 'phonedek:config-changed',
+  openPairEvent: 'phonedek:open-pair',
 } as const

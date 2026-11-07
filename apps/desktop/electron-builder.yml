@@ -20,6 +20,8 @@ win:
   extraResources:
     - from: resources/keyboard-helper.ps1
       to: keyboard-helper.ps1
+    - from: build/icon.png
+      to: tray-icon.png
 publish:
   provider: github
   owner: Pelozo
@@ -38,6 +40,9 @@ linux:
     - AppImage
   category: Utility
   icon: build/icon.png
+  extraResources:
+    - from: build/icon.png
+      to: tray-icon.png
 mac:
   # Apple Silicon first. Universal builds can be produced locally with
   # scripts/build-mac-helper.sh universal and `electron-builder --mac --universal`,
@@ -62,5 +67,7 @@ mac:
   extraResources:
     - from: resources/mac/keyboard-helper
       to: keyboard-helper
+    - from: build/icon.png
+      to: tray-icon.png
   extendInfo:
     NSLocalNetworkUsageDescription: PhoneDeck uses your local network to connect to the Android remote app and discover this desktop.

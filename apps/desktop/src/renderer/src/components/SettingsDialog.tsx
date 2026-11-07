@@ -179,6 +179,17 @@ export function SettingsDialog({
     }
   }
 
+  const toggleTray = async (enabled: boolean): Promise<void> => {
+    setBusy(true)
+    try {
+      const result = await window.phonedek.setMinimizeToTray(enabled)
+      if (result.state) onServerUpdate(result.state.server)
+      if (!result.ok) onToast(result.error ?? 'Could not update tray preference', 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const exportConfig = async (): Promise<void> => {
     setBusy(true)
     try {
@@ -298,6 +309,17 @@ export function SettingsDialog({
           description="The deck keeps working after you sign in."
           checked={settings.launchAtLogin}
           onChange={(enabled) => void toggleLogin(enabled)}
+          disabled={busy}
+        />
+      </div>
+
+      <div className="settings-section">
+        <h3>Window</h3>
+        <Toggle
+          label="Keep PhoneDeck in the tray"
+          description="Closing the window keeps the deck server running. Use the tray menu to show or quit PhoneDeck."
+          checked={settings.minimizeToTray}
+          onChange={(enabled) => void toggleTray(enabled)}
           disabled={busy}
         />
       </div>
