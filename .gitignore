@@ -12,6 +12,7 @@ Thumbs.db
 
 # Android
 apps/android/.gradle/
+apps/android/.kotlin/
 apps/android/local.properties
 apps/android/**/build/
 apps/android/.idea/

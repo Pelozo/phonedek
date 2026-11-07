@@ -34,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -299,37 +300,62 @@ private fun DeckPager(
         // settles. Programmatic scrolls never touch this, so a canceled
         // animation cannot write an intermediate page back into app state.
         var userScroll by remember { mutableStateOf(false) }
+        // Page index the pager is currently animating toward because app state
+        // changed (button action / server navigate). While set, only a settle
+        // on the state's target is accepted.
+        var programmaticTarget by remember { mutableStateOf<Int?>(null) }
+
+        val latestPages by rememberUpdatedState(pages)
+        val latestActivePageId by rememberUpdatedState(activePageId)
 
         LaunchedEffect(pagerState) {
             pagerState.interactionSource.interactions.collect { interaction ->
                 when (interaction) {
-                    is DragInteraction.Start -> userScroll = true
+                    is DragInteraction.Start -> {
+                        userScroll = true
+                        programmaticTarget = null // user takes over the animation
+                    }
+
                     is DragInteraction.Cancel -> userScroll = false
                     is DragInteraction.Stop -> Unit // fling still settling
                 }
             }
         }
 
-        // Swipe (or fling) settled on a page: persist it through the same
-        // ViewModel path used by page actions.
+        // Reconcile pager settles with app state. A user drag always wins;
+        // a programmatic animation may only settle on the page state already
+        // selected; any other settle (accessibility/semantics scroll) is
+        // applied normally.
         LaunchedEffect(pagerState) {
             snapshotFlow { pagerState.settledPage }
                 .distinctUntilChanged()
                 .collect { index ->
+                    val settled = latestPages.getOrNull(index) ?: return@collect
+                    val statePageId = latestActivePageId
                     if (userScroll) {
                         userScroll = false
-                        pages.getOrNull(index)?.let { onPageSettled(it.id) }
+                        programmaticTarget = null
+                        onPageSettled(settled.id)
+                    } else if (programmaticTarget != null) {
+                        if (statePageId == null || settled.id == statePageId) {
+                            programmaticTarget = null
+                            onPageSettled(settled.id)
+                        }
+                    } else {
+                        onPageSettled(settled.id)
                     }
                 }
         }
 
         // State changed from a button action or a server navigate message:
-        // animate the pager instead of silently swapping the page. State is
-        // authoritative here, so drop any pending user-scroll settle above.
+        // animate the pager instead of silently swapping the page.
         LaunchedEffect(activePageId, pageIds) {
             userScroll = false
             val target = resolvePageIndex(pages, activePageId, profile.defaultPageId)
-            if (target != pagerState.currentPage) {
+            if (target == pagerState.currentPage) {
+                programmaticTarget = null
+            } else {
+                programmaticTarget = target
                 pagerState.animateScrollToPage(target)
             }
         }

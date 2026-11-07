@@ -143,6 +143,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     init {
+        Diag.i("PhoneDeck ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE}) starting")
         viewModelScope.launch { loadInitialState() }
     }
 

@@ -57,7 +57,7 @@ Production build + installer:
 ```powershell
 npm run build
 npm run dist:win
-# apps/desktop/release/PhoneDeck-0.1.2-Setup.exe
+# apps/desktop/release/PhoneDeck-0.1.3-Setup.exe
 ```
 
 Requirements: Node.js 22+, Windows 10/11. No Visual Studio/native addons are required.

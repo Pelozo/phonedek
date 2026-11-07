@@ -50,6 +50,33 @@ describe('config schema', () => {
     if (!result.ok) expect(result.errors.join(' ')).toMatch(/without a page/)
   })
 
+  it('accepts advanced macro steps and repeat settings', () => {
+    const config = createDefaultConfig()
+    config.profiles[0]!.pages[0]!.buttons[0]!.actions = [
+      {
+        type: 'macro',
+        repeat: 3,
+        repeatDelayMs: 250,
+        steps: [
+          { type: 'hotkey', keys: ['SHIFT'], action: 'down' },
+          { type: 'mouse', button: 'left', action: 'move', x: 50, y: 60 },
+          { type: 'mouse', button: 'left', action: 'click' },
+          { type: 'mouse', button: 'left', action: 'scroll', direction: 'down', amount: 2 },
+          { type: 'hotkey', keys: ['SHIFT'], action: 'up' },
+          { type: 'launch', path: 'notepad.exe', args: [] },
+          { type: 'url', url: 'https://example.com' },
+          { type: 'command', command: 'echo hi', hidden: true },
+        ],
+      },
+    ]
+    expect(validateConfig(config).ok).toBe(true)
+
+    config.profiles[0]!.pages[0]!.buttons[0]!.actions = [
+      { type: 'macro', repeat: 0, steps: [{ type: 'delay', ms: 1 }] },
+    ]
+    expect(validateConfig(config).ok).toBe(false)
+  })
+
   it('parses and returns a deep object', () => {
     const config = parseConfig(createDefaultConfig())
     expect(config.profiles[0]!.pages.length).toBe(2)

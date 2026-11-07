@@ -41,7 +41,7 @@ function defaultStep(type: MacroStep['type']): MacroStep {
     case 'launch':
       return { type: 'launch', path: 'notepad.exe', args: [] }
     case 'url':
-      return { type: 'url', url: 'https://' }
+      return { type: 'url', url: 'https://example.com' }
     case 'command':
       return { type: 'command', command: 'echo Hello from PhoneDeck', hidden: true }
   }

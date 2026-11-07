@@ -29,7 +29,7 @@ import type {
 
 app.setName('PhoneDeck')
 
-const APP_VERSION = '0.1.2'
+const APP_VERSION = '0.1.3'
 
 let mainWindow: BrowserWindow | null = null
 let logger: Logger
