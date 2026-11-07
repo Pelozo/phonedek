@@ -13,15 +13,26 @@ export function MacroRecordDialog({
 }) {
   const recorder = useRef<MacroRecorder | null>(null)
   const [recording, setRecording] = useState(false)
+  const [paused, setPaused] = useState(false)
+  const [captureDelays, setCaptureDelays] = useState(true)
+  const [coalesceText, setCoalesceText] = useState(true)
   const [steps, setSteps] = useState<MacroStep[]>([])
   const [elapsed, setElapsed] = useState(0)
-  const startedAt = useRef(0)
+  const elapsedBase = useRef(0)
+  const resumedAt = useRef(0)
 
   useEffect(() => {
-    if (!recording) return
-    const timer = setInterval(() => setElapsed(Date.now() - startedAt.current), 100)
+    if (!recording || paused) return
+    const timer = setInterval(() => setElapsed(elapsedBase.current + (Date.now() - resumedAt.current)), 100)
     return () => clearInterval(timer)
-  }, [recording])
+  }, [recording, paused])
+
+  const stop = (): void => {
+    if (!recorder.current) return
+    setSteps(recorder.current.finish())
+    setRecording(false)
+    setPaused(false)
+  }
 
   useEffect(() => {
     if (!recording) return
@@ -31,7 +42,7 @@ export function MacroRecordDialog({
       const key = keyFromEvent(event)
       if (!key || !recorder.current) return
       recorder.current.record({ kind: 'down', key, time: Date.now() })
-      setSteps(recorder.current.getSteps())
+      setSteps(recorder.current.getPreviewSteps())
     }
     const onUp = (event: KeyboardEvent): void => {
       event.preventDefault()
@@ -39,7 +50,7 @@ export function MacroRecordDialog({
       const key = keyFromEvent(event)
       if (!key || !recorder.current) return
       recorder.current.record({ kind: 'up', key, time: Date.now() })
-      setSteps(recorder.current.getSteps())
+      setSteps(recorder.current.getPreviewSteps())
     }
     const onBlur = (): void => stop()
     window.addEventListener('keydown', onDown, true)
@@ -54,24 +65,39 @@ export function MacroRecordDialog({
   }, [recording])
 
   const start = (): void => {
-    recorder.current = new MacroRecorder()
-    startedAt.current = Date.now()
-    setElapsed(0)
+    recorder.current = new MacroRecorder({ captureDelays, coalesceText })
     setSteps([])
+    setPaused(false)
     setRecording(true)
+    setElapsed(0)
+    elapsedBase.current = 0
+    resumedAt.current = Date.now()
   }
 
-  const stop = (): void => {
+  const pause = (): void => {
     if (!recorder.current) return
-    const finished = recorder.current.finish()
-    setSteps(finished)
-    setRecording(false)
+    recorder.current.pause(Date.now())
+    elapsedBase.current += Date.now() - resumedAt.current
+    setElapsed(elapsedBase.current)
+    setSteps(recorder.current.getPreviewSteps())
+    setPaused(true)
+  }
+
+  const resume = (): void => {
+    if (!recorder.current) return
+    recorder.current.resume(Date.now())
+    resumedAt.current = Date.now()
+    setPaused(false)
+  }
+
+  const undo = (): void => {
+    if (!recorder.current) return
+    setSteps(recorder.current.undoLast())
   }
 
   const save = (): void => {
     if (recording) {
-      const finished = recorder.current?.finish() ?? []
-      onSave(finished)
+      onSave(recorder.current?.finish() ?? [])
     } else {
       onSave(steps)
     }
@@ -84,7 +110,7 @@ export function MacroRecordDialog({
   return (
     <Modal
       title="Record a macro"
-      subtitle="Type or press shortcuts here. PhoneDeck records chords, text and pauses between them."
+      subtitle="Press keys or type here. Chords, text, pauses and added steps are all editable afterwards."
       onClose={onClose}
       closeOnEscape={false}
       wide
@@ -93,11 +119,26 @@ export function MacroRecordDialog({
           <button className="button ghost" onClick={onClose}>
             Cancel
           </button>
-          {recording ? (
-            <button className="button danger" onClick={stop}>
-              <Icon name="pause" size={16} /> Stop recording
-            </button>
-          ) : (
+          {recording && (
+            <>
+              <button className="button ghost" onClick={undo} disabled={steps.length === 0}>
+                <Icon name="undo" size={16} /> Undo last
+              </button>
+              {paused ? (
+                <button className="button secondary" onClick={resume}>
+                  <Icon name="play" size={16} /> Resume
+                </button>
+              ) : (
+                <button className="button secondary" onClick={pause}>
+                  <Icon name="pause" size={16} /> Pause
+                </button>
+              )}
+              <button className="button danger" onClick={stop}>
+                <Icon name="pause" size={16} /> Stop recording
+              </button>
+            </>
+          )}
+          {!recording && (
             <button className="button secondary" onClick={start}>
               <Icon name="record" size={16} /> {steps.length ? 'Record again' : 'Start recording'}
             </button>
@@ -108,10 +149,32 @@ export function MacroRecordDialog({
         </>
       }
     >
-      <div className={`record-banner${recording ? ' recording' : ''}`}>
+      <div className={`record-banner${recording && !paused ? ' recording' : ''}`}>
         <span className="record-dot" />
-        <strong>{recording ? 'Recording' : steps.length ? 'Recording stopped' : 'Ready to record'}</strong>
+        <strong>{recording ? (paused ? 'Paused' : 'Recording') : steps.length ? 'Recording stopped' : 'Ready to record'}</strong>
         <span className="record-time">{timeLabel}</span>
+      </div>
+
+      <div className="record-options">
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={captureDelays}
+            disabled={recording}
+            onChange={(event) => setCaptureDelays(event.target.checked)}
+          />
+          Capture pauses as delay steps
+        </label>
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={coalesceText}
+            disabled={recording}
+            onChange={(event) => setCoalesceText(event.target.checked)}
+          />
+          Group typing into text steps
+        </label>
+        <span className="hint">Turn text grouping off for game inputs that need individual key presses.</span>
       </div>
 
       <div className="record-steps">
@@ -132,8 +195,8 @@ export function MacroRecordDialog({
       </div>
 
       <p className="hint">
-        Keys are captured while this window is focused. Pauses longer than 140 ms become timed delays (capped at 2 s).
-        Typing is grouped into text steps; shortcuts become key chords.
+        Keys are captured while this window is focused. Pauses longer than 140 ms become delays (capped at 2 s).
+        Use Pause/Resume to skip a section, and Undo to remove the last step.
       </p>
     </Modal>
   )

@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -26,11 +29,14 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,10 +48,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.phonedek.app.data.DeckButton
 import com.phonedek.app.data.DeckPage
 import com.phonedek.app.data.DeckProfile
+import com.phonedek.app.data.Pairing
 import com.phonedek.app.data.ProfileTheme
 import com.phonedek.app.net.ConnectionStatus
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 @Composable
 fun DeckScreen(state: UiState, viewModel: MainViewModel) {
@@ -55,9 +64,8 @@ fun DeckScreen(state: UiState, viewModel: MainViewModel) {
     val profile = config?.profiles?.firstOrNull { it.id == state.activeProfileId }
         ?: config?.profiles?.firstOrNull { it.id == config.defaultProfileId }
         ?: config?.profiles?.firstOrNull()
-    val page = profile?.pages?.firstOrNull { it.id == state.activePageId }
-        ?: profile?.pages?.firstOrNull { it.id == profile.defaultPageId }
-        ?: profile?.pages?.firstOrNull()
+    val pages = profile?.pages.orEmpty()
+    val page = pages.getOrNull(resolvePageIndex(pages, state.activePageId, profile?.defaultPageId))
 
     val theme = profile?.theme ?: ProfileTheme()
     val pageBackground = page?.background ?: theme.background
@@ -81,11 +89,12 @@ fun DeckScreen(state: UiState, viewModel: MainViewModel) {
             )
 
             Box(Modifier.fillMaxWidth().weight(1f)) {
-                if (profile != null && page != null) {
-                    DeckGrid(
+                if (profile != null && pages.isNotEmpty()) {
+                    DeckPager(
                         profile = profile,
-                        page = page,
+                        activePageId = state.activePageId,
                         pairing = state.pairing,
+                        onPageSettled = { pageId -> viewModel.onPageSelected(profile.id, pageId) },
                         onPress = viewModel::onButtonPressed,
                     )
                 } else {
@@ -263,12 +272,115 @@ private fun StatusPill(
     }
 }
 
+/**
+ * Swipeable deck pages. The pager state is recreated whenever the profile or
+ * the set of page ids changes, which keeps deletions/profile switches on a
+ * valid page without racing the state->pager sync. Stable page ids keep the
+ * state alive for ordinary next/prev/goto navigation.
+ */
+@Composable
+private fun DeckPager(
+    profile: DeckProfile,
+    activePageId: String?,
+    pairing: Pairing?,
+    onPageSettled: (String) -> Unit,
+    onPress: (DeckButton) -> Unit,
+) {
+    val pages = profile.pages
+    val pageIds = pages.map { it.id }
+
+    key(profile.id, pageIds) {
+        val pagerState = rememberPagerState(
+            initialPage = resolvePageIndex(pages, activePageId, profile.defaultPageId),
+            pageCount = { pages.size },
+        )
+
+        // True from the moment the user starts dragging until the page
+        // settles. Programmatic scrolls never touch this, so a canceled
+        // animation cannot write an intermediate page back into app state.
+        var userScroll by remember { mutableStateOf(false) }
+
+        LaunchedEffect(pagerState) {
+            pagerState.interactionSource.interactions.collect { interaction ->
+                when (interaction) {
+                    is DragInteraction.Start -> userScroll = true
+                    is DragInteraction.Cancel -> userScroll = false
+                    is DragInteraction.Stop -> Unit // fling still settling
+                }
+            }
+        }
+
+        // Swipe (or fling) settled on a page: persist it through the same
+        // ViewModel path used by page actions.
+        LaunchedEffect(pagerState) {
+            snapshotFlow { pagerState.settledPage }
+                .distinctUntilChanged()
+                .collect { index ->
+                    if (userScroll) {
+                        userScroll = false
+                        pages.getOrNull(index)?.let { onPageSettled(it.id) }
+                    }
+                }
+        }
+
+        // State changed from a button action or a server navigate message:
+        // animate the pager instead of silently swapping the page. State is
+        // authoritative here, so drop any pending user-scroll settle above.
+        LaunchedEffect(activePageId, pageIds) {
+            userScroll = false
+            val target = resolvePageIndex(pages, activePageId, profile.defaultPageId)
+            if (target != pagerState.currentPage) {
+                pagerState.animateScrollToPage(target)
+            }
+        }
+
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize(),
+            beyondViewportPageCount = 1,
+            // A single-page deck must not swallow horizontal drags.
+            userScrollEnabled = pages.size > 1,
+            key = { index -> pages.getOrNull(index)?.id ?: index },
+        ) { index ->
+            val current = pages.getOrNull(index) ?: return@HorizontalPager
+            DeckPageContent(
+                profile = profile,
+                page = current,
+                pairing = pairing,
+                onPress = onPress,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DeckPageContent(
+    profile: DeckProfile,
+    page: DeckPage,
+    pairing: Pairing?,
+    onPress: (DeckButton) -> Unit,
+) {
+    val spec = remember(page.background, profile.theme.background, pairing) {
+        backgroundSpec(page.background ?: profile.theme.background, pairing, Navy950)
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        BackgroundLayer(spec, Modifier.fillMaxSize())
+        DeckGrid(
+            profile = profile,
+            page = page,
+            pairing = pairing,
+            onPress = onPress,
+        )
+    }
+}
+
 @Composable
 private fun DeckGrid(
     profile: DeckProfile,
     page: DeckPage,
-    pairing: com.phonedek.app.data.Pairing?,
-    onPress: (com.phonedek.app.data.DeckButton) -> Unit,
+    pairing: Pairing?,
+    onPress: (DeckButton) -> Unit,
 ) {
     val grid = profile.grid
     val bySlot = remember(page.buttons) { page.buttons.associateBy { it.slot } }

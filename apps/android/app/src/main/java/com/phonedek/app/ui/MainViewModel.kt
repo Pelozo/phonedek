@@ -320,6 +320,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { runCatching { prefs.setKeepScreenOn(enabled) } }
     }
 
+    /**
+     * Called when a horizontal swipe settles on [pageId]. Uses the same
+     * persistence path as page actions so the last page survives restarts.
+     */
+    fun onPageSelected(profileId: String, pageId: String) {
+        val current = _state.value
+        if (current.activeProfileId != profileId) return
+        val profile = current.config?.profiles?.firstOrNull { it.id == profileId } ?: return
+        // A pager that was disposed during a profile/config change can still
+        // deliver one last settle; never write a stale page or profile.
+        if (profile.pages.none { it.id == pageId }) return
+        setActivePage(profileId, pageId)
+    }
+
     fun onButtonPressed(button: DeckButton) {
         val snapshot = _state.value
         val profile = snapshot.config?.profiles?.firstOrNull {

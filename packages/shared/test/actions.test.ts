@@ -33,6 +33,49 @@ describe('action plans', () => {
     expect(plan[2]).toMatchObject({ kind: 'page', direction: 'next' })
   })
 
+  it('expands macro repeats and host steps in order', () => {
+    const plan = actionsToPlan([
+      {
+        type: 'macro',
+        repeat: 3,
+        repeatDelayMs: 25,
+        steps: [
+          { type: 'hotkey', keys: ['A'], action: 'down' },
+          { type: 'delay', ms: 10 },
+          { type: 'hotkey', keys: ['A'], action: 'up' },
+          { type: 'launch', path: 'C:\\Tools\\app.exe', args: [] },
+          { type: 'url', url: 'https://example.com' },
+          { type: 'command', command: 'echo hi' },
+        ],
+      },
+    ])
+    expect(plan.map((step) => step.kind)).toEqual([
+      'keys', 'delay', 'keys', 'launch', 'url', 'command',
+      'delay',
+      'keys', 'delay', 'keys', 'launch', 'url', 'command',
+      'delay',
+      'keys', 'delay', 'keys', 'launch', 'url', 'command',
+    ])
+    expect(plan[0]).toMatchObject({ keys: ['A'], action: 'down' })
+    expect(plan[2]).toMatchObject({ keys: ['A'], action: 'up' })
+  })
+
+  it('maps extended mouse actions', () => {
+    const plan = actionsToPlan([
+      {
+        type: 'macro',
+        steps: [
+          { type: 'mouse', button: 'left', action: 'scroll', direction: 'up', amount: 3 },
+          { type: 'mouse', button: 'right', action: 'doubleclick' },
+          { type: 'mouse', button: 'left', action: 'move', x: 10, y: 20 },
+        ],
+      },
+    ])
+    expect(plan[0]).toMatchObject({ kind: 'mouse', action: 'scroll', direction: 'up', amount: 3 })
+    expect(plan[1]).toMatchObject({ kind: 'mouse', action: 'doubleclick' })
+    expect(plan[2]).toMatchObject({ kind: 'mouse', action: 'move', x: 10, y: 20 })
+  })
+
   it('separates page actions', () => {
     const actions: Action[] = [
       { type: 'hotkey', keys: ['WIN', 'D'] },
@@ -89,6 +132,35 @@ describe('macro recorder', () => {
     recorder.record({ kind: 'down', key: 'ENTER', time: 60 })
     recorder.record({ kind: 'up', key: 'ENTER', time: 70 })
     expect(recorder.finish()).toEqual([{ type: 'text', text: 'a b\n' }])
+  })
+
+  it('can skip delays and text coalescing', () => {
+    const recorder = new MacroRecorder({ captureDelays: false, coalesceText: false })
+    recorder.record({ kind: 'down', key: 'A', time: 0 })
+    recorder.record({ kind: 'up', key: 'A', time: 20 })
+    recorder.record({ kind: 'down', key: 'B', time: 900 })
+    recorder.record({ kind: 'up', key: 'B', time: 920 })
+    expect(recorder.finish()).toEqual([
+      { type: 'hotkey', keys: ['A'] },
+      { type: 'hotkey', keys: ['B'] },
+    ])
+  })
+
+  it('supports pause/resume and undo', () => {
+    const recorder = new MacroRecorder()
+    recorder.record({ kind: 'down', key: 'A', time: 0 })
+    recorder.record({ kind: 'up', key: 'A', time: 20 })
+    recorder.pause(30)
+    recorder.record({ kind: 'down', key: 'B', time: 40 })
+    recorder.record({ kind: 'up', key: 'B', time: 60 })
+    expect(recorder.getSteps()).toEqual([{ type: 'text', text: 'a' }])
+    recorder.resume(100)
+    recorder.record({ kind: 'down', key: 'C', time: 120 })
+    recorder.record({ kind: 'up', key: 'C', time: 140 })
+    expect(recorder.undoLast()).toEqual([{ type: 'text', text: 'a' }])
+    recorder.record({ kind: 'down', key: 'D', time: 160 })
+    recorder.record({ kind: 'up', key: 'D', time: 180 })
+    expect(recorder.finish()).toEqual([{ type: 'text', text: 'a' }, { type: 'text', text: 'd' }])
   })
 
   it('ignores modifier-only presses', () => {

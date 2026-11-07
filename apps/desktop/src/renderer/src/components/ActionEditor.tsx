@@ -175,7 +175,13 @@ export function ActionEditor({
         )}
 
         {action.type === 'macro' && (
-          <MacroEditor steps={action.steps} onChange={(steps) => onUpdate({ ...action, steps })} />
+          <MacroEditor
+            steps={action.steps}
+            repeat={action.repeat}
+            repeatDelayMs={action.repeatDelayMs}
+            onChange={(steps) => onUpdate({ ...action, steps })}
+            onChangeMeta={(patch) => onUpdate({ ...action, ...patch })}
+          />
         )}
 
         {action.type === 'launch' && (

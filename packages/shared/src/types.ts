@@ -69,14 +69,16 @@ export type MediaKey =
   | 'mute'
 
 export type MouseButton = 'left' | 'right' | 'middle'
-export type MouseAction = 'click' | 'down' | 'up'
+export type MouseAction = 'click' | 'doubleclick' | 'down' | 'up' | 'move' | 'scroll'
 
 export interface HotkeyStep {
   type: 'hotkey'
   /** Keys pressed together, e.g. ["CTRL", "SHIFT", "ESC"]. */
   keys: string[]
-  /** How long to hold the chord, in milliseconds. */
+  /** How long to hold a `press` chord, in milliseconds. */
   holdMs?: number
+  /** press = down+up, down/up = keep held / release (for drags and held modifiers). */
+  action?: 'press' | 'down' | 'up'
 }
 
 export interface TextStep {
@@ -102,9 +104,21 @@ export interface MouseStep {
   action: MouseAction
   x?: number
   y?: number
+  /** Scroll direction; only used when action is "scroll". */
+  direction?: 'up' | 'down' | 'left' | 'right'
+  /** Scroll notches (default 1). */
+  amount?: number
 }
 
-export type MacroStep = HotkeyStep | TextStep | DelayStep | MediaStep | MouseStep
+export type MacroStep =
+  | HotkeyStep
+  | TextStep
+  | DelayStep
+  | MediaStep
+  | MouseStep
+  | LaunchAction
+  | UrlAction
+  | CommandAction
 
 export interface HotkeyAction extends HotkeyStep {
   type: 'hotkey'
@@ -117,6 +131,10 @@ export interface TextAction extends TextStep {
 export interface MacroAction {
   type: 'macro'
   steps: MacroStep[]
+  /** Run the whole step list 1..50 times. */
+  repeat?: number
+  /** Pause between repeats, in milliseconds. */
+  repeatDelayMs?: number
 }
 
 export interface LaunchAction {
@@ -213,6 +231,7 @@ export interface KeyPlanStep {
   kind: 'keys'
   keys: string[]
   holdMs: number
+  action: 'press' | 'down' | 'up'
 }
 
 export interface TextPlanStep {
@@ -237,6 +256,8 @@ export interface MousePlanStep {
   action: MouseAction
   x?: number
   y?: number
+  direction?: 'up' | 'down' | 'left' | 'right'
+  amount?: number
 }
 
 export interface LaunchPlanStep {

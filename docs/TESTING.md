@@ -18,6 +18,8 @@ Report issues with `%APPDATA%\PhoneDeck\phonedek.log`, the Windows version and t
 - [ ] Drag a button to another slot; drag onto an occupied slot to swap.
 - [ ] Add a shortcut action (record Ctrl+Shift+S), a text action, a URL action, a media action.
 - [ ] Add a macro action → Record → type `hello`, press Ctrl+C, wait, Stop → Add steps.
+- [ ] In the recorder toggle **Capture pauses** and **Group typing**, use Pause/Resume and Undo, then save.
+- [ ] Edit a macro: set repeat ×2, add a mouse scroll and a launch/URL step, reorder/duplicate steps.
 - [ ] Press **Test** on the button; Notepad receives the shortcut/text (focus Notepad first if needed).
 - [ ] **Run all actions on this PC** returns a success toast, or a useful error.
 - [ ] Export backup (ZIP), delete a profile, import the backup → layout and images return.

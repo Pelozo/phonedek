@@ -1747,6 +1747,26 @@ input[type="range"]::-webkit-slider-thumb {
   gap: 8px;
 }
 
+.macro-repeat-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  background: rgba(2, 6, 23, 0.18);
+}
+
+.record-options {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.016);
+}
+
 .macro-toolbar {
   display: flex;
   align-items: center;

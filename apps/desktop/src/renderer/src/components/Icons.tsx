@@ -37,6 +37,7 @@ export type IconName =
   | 'layers'
   | 'arrow-up'
   | 'arrow-down'
+  | 'undo'
 
 const paths: Record<IconName, string> = {
   plus: 'M12 5v14M5 12h14',
@@ -76,6 +77,7 @@ const paths: Record<IconName, string> = {
   layers: 'm12 3 9 5-9 5-9-5zM3 13l9 5 9-5M3 18l9 5 9-5',
   'arrow-up': 'M12 19V5M6 11l6-6 6 6',
   'arrow-down': 'M12 5v14M6 13l6 6 6-6',
+  undo: 'M9 7H4v5M4 12a8 8 0 1 0 2.3-5.7L4 9',
 }
 
 export function Icon({

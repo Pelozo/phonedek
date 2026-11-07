@@ -260,8 +260,11 @@ const LINUX_MEDIA: Record<MediaKey, string> = {
 const LINUX_MOUSE: Record<MouseButton, string> = { left: '1', middle: '2', right: '3' }
 const LINUX_MOUSE_ACTION: Record<MouseAction, string> = {
   click: 'click',
+  doubleclick: 'click',
   down: 'mousedown',
   up: 'mouseup',
+  move: 'mousemove',
+  scroll: 'click',
 }
 
 export class LinuxKeySender implements KeySender {
@@ -279,8 +282,14 @@ export class LinuxKeySender implements KeySender {
   async send(step: KeyboardPlanStep): Promise<void> {
     switch (step.kind) {
       case 'keys': {
-        const combo = step.keys.map((key) => LINUX_KEYS[key] ?? key).join('+')
-        await this.run(['key', '--clearmodifiers', '--delay', '12', combo])
+        const keys = step.keys.map((key) => LINUX_KEYS[key] ?? key)
+        if (step.action === 'down') {
+          for (const key of keys) await this.run(['keydown', key])
+        } else if (step.action === 'up') {
+          for (const key of [...keys].reverse()) await this.run(['keyup', key])
+        } else {
+          await this.run(['key', '--clearmodifiers', '--delay', '12', keys.join('+')])
+        }
         break
       }
       case 'text':
@@ -295,6 +304,17 @@ export class LinuxKeySender implements KeySender {
       case 'mouse': {
         if (step.x !== undefined && step.y !== undefined) {
           await this.run(['mousemove', String(step.x), String(step.y)])
+        }
+        if (step.action === 'move') break
+        if (step.action === 'scroll') {
+          const direction = step.direction ?? 'down'
+          const button = direction === 'up' ? '4' : direction === 'down' ? '5' : direction === 'left' ? '6' : '7'
+          await this.run(['click', '--repeat', String(Math.max(1, Math.min(100, step.amount ?? 1))), button])
+          break
+        }
+        if (step.action === 'doubleclick') {
+          await this.run(['click', '--repeat', '2', LINUX_MOUSE[step.button]])
+          break
         }
         await this.run([LINUX_MOUSE_ACTION[step.action], LINUX_MOUSE[step.button]])
         break

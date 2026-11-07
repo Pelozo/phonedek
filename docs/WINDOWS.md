@@ -62,6 +62,16 @@ npm run dist:win
 
 Requirements: Node.js 22+, Windows 10/11. No Visual Studio/native addons are required.
 
+## Macro recorder
+
+- Start at **Add action → Macro → Record**.
+- **Capture pauses** turns human pauses into delay steps; **Group typing** turns plain text into one text step (disable it for games that need individual key presses).
+- **Pause/Resume** skips a section, **Undo last** removes the most recent step.
+- After recording, steps are fully editable: reorder, duplicate, change delays, add mouse moves/scrolls, launch apps, URLs or commands.
+- **Repeat macro** runs the step list up to 50 times with an optional gap.
+- Key steps can **press & release**, **hold down**, or **release** — useful for drags and held modifiers. A hold-down step must be followed by a release step, or the key stays held.
+- Recording captures keys while the PhoneDeck window is focused.
+
 ## Keyboard helper
 
 PhoneDeck launches `resources/keyboard-helper.ps1` using the system PowerShell (`-ExecutionPolicy Bypass`). It:

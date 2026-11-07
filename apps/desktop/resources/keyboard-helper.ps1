@@ -139,12 +139,28 @@ function Send-Text([string]$Text, [int]$PerCharMs) {
         if ($char -eq "`r") { continue }
         if ($char -eq "`n") { Send-Chord @('ENTER') 25; continue }
         if ($char -eq "`t") { Send-Chord @('TAB') 25; continue }
-        [PhoneDeckNative]::UnicodeChar([ushort][int]$char)
+        [PhoneDeckNative]::UnicodeChar([System.UInt16][int]$char)
         if ($delay -gt 0) { Start-Sleep -Milliseconds $delay }
     }
 }
 
-function Send-Mouse([string]$Button, [string]$Action, $X, $Y) {
+function Send-Mouse([string]$Button, [string]$Action, $X, $Y, [string]$Direction, $Amount) {
+    $mode = $Action.ToLowerInvariant()
+    if ($mode -eq 'move') {
+        if ($null -eq $X -or $null -eq $Y) { throw "Mouse move needs X and Y coordinates" }
+        [void][PhoneDeckNative]::SetCursorPos([int]$X, [int]$Y)
+        return
+    }
+    if ($mode -eq 'scroll') {
+        $notches = [Math]::Max(1, [Math]::Min(100, [int]$Amount))
+        $delta = 120 * $notches
+        $dir = if ($Direction) { $Direction.ToLowerInvariant() } else { 'down' }
+        if ($dir -eq 'down' -or $dir -eq 'left') { $delta = -$delta }
+        $flag = if ($dir -eq 'left' -or $dir -eq 'right') { 0x01000 } else { 0x0800 }
+        [PhoneDeckNative]::mouse_event([System.UInt32]$flag, 0, 0, [System.UInt32](([System.Int64]$delta) -band 0xFFFFFFFF), [UIntPtr]::Zero)
+        return
+    }
+
     if ($null -ne $X -and $null -ne $Y) {
         [void][PhoneDeckNative]::SetCursorPos([int]$X, [int]$Y)
     }
@@ -152,8 +168,17 @@ function Send-Mouse([string]$Button, [string]$Action, $X, $Y) {
     $up = @{ 'left' = 0x0004; 'right' = 0x0010; 'middle' = 0x0040 }
     $buttonKey = $Button.ToLowerInvariant()
     if (-not $down.ContainsKey($buttonKey)) { throw "Unknown mouse button: $Button" }
-    switch ($Action.ToLowerInvariant()) {
+    switch ($mode) {
         'click' {
+            [PhoneDeckNative]::mouse_event($down[$buttonKey], 0, 0, 0, [UIntPtr]::Zero)
+            Start-Sleep -Milliseconds 20
+            [PhoneDeckNative]::mouse_event($up[$buttonKey], 0, 0, 0, [UIntPtr]::Zero)
+        }
+        'doubleclick' {
+            [PhoneDeckNative]::mouse_event($down[$buttonKey], 0, 0, 0, [UIntPtr]::Zero)
+            Start-Sleep -Milliseconds 20
+            [PhoneDeckNative]::mouse_event($up[$buttonKey], 0, 0, 0, [UIntPtr]::Zero)
+            Start-Sleep -Milliseconds 50
             [PhoneDeckNative]::mouse_event($down[$buttonKey], 0, 0, 0, [UIntPtr]::Zero)
             Start-Sleep -Milliseconds 20
             [PhoneDeckNative]::mouse_event($up[$buttonKey], 0, 0, 0, [UIntPtr]::Zero)
@@ -166,7 +191,7 @@ function Send-Mouse([string]$Button, [string]$Action, $X, $Y) {
 
 function Invoke-Step($Step) {
     switch ($Step.kind) {
-        'keys' { Send-Chord $Step.keys ([int]$Step.holdMs) }
+        'keys' { Send-Chord $Step.keys ([int]$Step.holdMs) ([string]$Step.action) }
         'text' { Send-Text ([string]$Step.text) ([int]$Step.perCharMs) }
         'delay' { Start-Sleep -Milliseconds ([Math]::Max(0, [Math]::Min(60000, [int]$Step.ms))) }
         'media' {
@@ -178,7 +203,7 @@ function Invoke-Step($Step) {
             if (-not $key) { throw "Unknown media key: $($Step.key)" }
             Send-Chord @($key) 30
         }
-        'mouse' { Send-Mouse ([string]$Step.button) ([string]$Step.action) $Step.x $Step.y }
+        'mouse' { Send-Mouse ([string]$Step.button) ([string]$Step.action) $Step.x $Step.y ([string]$Step.direction) $Step.amount }
         default { throw "Unknown step kind: $($Step.kind)" }
     }
 }

@@ -46,7 +46,7 @@ No cloud, no account, no vendor lock-in: the phone talks directly to your PC ove
 ### Actions
 
 - **Shortcuts** — Ctrl+C, Win+Shift+S, Alt+Tab, media keys, F-keys, punctuation…
-- **Macros** — record chords, typing and pauses; edit every step, reorder, insert delays, mouse clicks.
+- **Macros** — record chords, typing and pauses with pause/resume/undo; choose whether pauses and text grouping are captured; repeat a macro 1–50× with a gap; edit/reorder/duplicate steps; mouse click, double-click, hold, release, move and scroll; launch/URL/command steps; keys can press, hold or release.
 - **Type text** — full Unicode text typed into the active window.
 - **Launch applications** — pick an `.exe`, `.lnk`, `.bat` or `.cmd`, with arguments.
 - **Open URLs** — http/https only.
@@ -115,6 +115,19 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
 Or open `apps/android` in Android Studio and run it.
+
+## Macro options
+
+Macros are built from ordered steps:
+
+- shortcut (press & release, hold down, or release)
+- type text
+- delay
+- media key
+- mouse click / double-click / hold / release / move / scroll
+- launch app, open URL, run command
+
+Recording options: capture pauses as delays, group typing into text steps (turn off for game inputs), pause/resume, undo the last step, repeat the macro up to 50× with a per-repeat delay.
 
 ## How actions execute
 

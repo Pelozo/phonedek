@@ -87,6 +87,9 @@ inline with a concrete message.
   visible and the app reports that the action was not sent.
 - Page actions (`next`, `prev`, `goto`) run locally and wrap around. A button
   that mixes page and non-page actions still sends one `press` for the rest.
+- Swipe left/right to move between pages like a pager. The active page is
+  saved, and page actions/server navigation animate the pager to the target.
+  Single-page decks do not intercept horizontal drags.
 - The status pill shows Connected (green), Connecting/Reconnecting (amber), or
   Offline (red). Tap or long-press the pill, or use the gear, to open settings.
 - Settings shows the server, reconnect, change server (forget pairing),
@@ -108,7 +111,8 @@ app/src/main/java/com/phonedek/app/
 ├── ui/
 │   ├── MainViewModel.kt     state, pairing, config ingestion, page navigation
 │   ├── PairingScreen.kt     manual form + live discovery
-│   ├── DeckScreen.kt        grid, page indicator, status pill, empty state
+│   ├── DeckScreen.kt        swipeable page pager, grid, indicator, status pill
+│   ├── PageIndex.kt         pure page-id -> pager-index fallback resolution
 │   ├── DeckButtonView.kt    responsive button rendering + press feedback
 │   ├── SettingsSheet.kt     bottom sheet
 │   ├── Backgrounds.kt       colors, CSS-angle gradients, PIN-auth images

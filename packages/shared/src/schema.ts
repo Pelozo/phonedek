@@ -56,50 +56,70 @@ const keys = z
 
 const holdMs = z.number().int().min(0).max(5000).optional()
 const perCharMs = z.number().int().min(0).max(1000).optional()
+const mediaKey = z.enum(['playpause', 'next', 'prev', 'stop', 'volumeup', 'volumedown', 'mute'])
+
+const hotkeySchema = z.object({
+  type: z.literal('hotkey'),
+  keys,
+  holdMs,
+  action: z.enum(['press', 'down', 'up']).optional(),
+})
+const textSchema = z.object({ type: z.literal('text'), text: z.string().max(10_000), perCharMs })
+const delaySchema = z.object({ type: z.literal('delay'), ms: z.number().int().min(0).max(60_000) })
+const mediaSchema = z.object({ type: z.literal('media'), key: mediaKey })
+const mouseSchema = z.object({
+  type: z.literal('mouse'),
+  button: z.enum(['left', 'right', 'middle']),
+  action: z.enum(['click', 'doubleclick', 'down', 'up', 'move', 'scroll']),
+  x: z.number().int().min(-100_000).max(100_000).optional(),
+  y: z.number().int().min(-100_000).max(100_000).optional(),
+  direction: z.enum(['up', 'down', 'left', 'right']).optional(),
+  amount: z.number().int().min(1).max(100).optional(),
+})
+const launchSchema = z.object({
+  type: z.literal('launch'),
+  path: z.string().min(1).max(4096),
+  args: z.array(z.string().max(2048)).max(32).optional(),
+})
+const urlSchema = z.object({ type: z.literal('url'), url: z.string().min(1).max(2048) })
+const commandSchema = z.object({
+  type: z.literal('command'),
+  command: z.string().min(1).max(4000),
+  cwd: z.string().max(4096).optional(),
+  hidden: z.boolean().optional(),
+})
+const pageSchema = z.object({
+  type: z.literal('page'),
+  direction: z.enum(['next', 'prev', 'goto']),
+  pageId: id.optional(),
+})
 
 export const MacroStepSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('hotkey'), keys, holdMs }),
-  z.object({ type: z.literal('text'), text: z.string().max(5000), perCharMs }),
-  z.object({ type: z.literal('delay'), ms: z.number().int().min(0).max(60_000) }),
-  z.object({
-    type: z.literal('media'),
-    key: z.enum(['playpause', 'next', 'prev', 'stop', 'volumeup', 'volumedown', 'mute']),
-  }),
-  z.object({
-    type: z.literal('mouse'),
-    button: z.enum(['left', 'right', 'middle']),
-    action: z.enum(['click', 'down', 'up']),
-    x: z.number().int().min(-100_000).max(100_000).optional(),
-    y: z.number().int().min(-100_000).max(100_000).optional(),
-  }),
+  hotkeySchema,
+  textSchema,
+  delaySchema,
+  mediaSchema,
+  mouseSchema,
+  launchSchema,
+  urlSchema,
+  commandSchema,
 ])
 
 export const ActionSchema = z.union([
-  z.object({ type: z.literal('hotkey'), keys, holdMs }),
-  z.object({ type: z.literal('text'), text: z.string().max(10_000), perCharMs }),
-  z.object({ type: z.literal('macro'), steps: z.array(MacroStepSchema).max(300) }),
+  hotkeySchema,
+  textSchema,
   z.object({
-    type: z.literal('launch'),
-    path: z.string().min(1).max(4096),
-    args: z.array(z.string().max(2048)).max(32).optional(),
+    type: z.literal('macro'),
+    steps: z.array(MacroStepSchema).max(300),
+    repeat: z.number().int().min(1).max(50).optional(),
+    repeatDelayMs: z.number().int().min(0).max(60_000).optional(),
   }),
-  z.object({ type: z.literal('url'), url: z.string().min(1).max(2048) }),
-  z.object({
-    type: z.literal('command'),
-    command: z.string().min(1).max(4000),
-    cwd: z.string().max(4096).optional(),
-    hidden: z.boolean().optional(),
-  }),
-  z.object({
-    type: z.literal('media'),
-    key: z.enum(['playpause', 'next', 'prev', 'stop', 'volumeup', 'volumedown', 'mute']),
-  }),
-  z.object({ type: z.literal('delay'), ms: z.number().int().min(0).max(60_000) }),
-  z.object({
-    type: z.literal('page'),
-    direction: z.enum(['next', 'prev', 'goto']),
-    pageId: id.optional(),
-  }),
+  launchSchema,
+  urlSchema,
+  commandSchema,
+  mediaSchema,
+  delaySchema,
+  pageSchema,
 ])
 
 export const GridSchema = z.object({
