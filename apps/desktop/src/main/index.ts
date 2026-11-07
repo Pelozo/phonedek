@@ -19,6 +19,7 @@ import { createPairInfo } from './qr'
 import { DeckServer, type PressContext } from './server'
 import { SettingsStore } from './settings-store'
 import { UpdateService } from './updater'
+import { isRunningAppSigned, resolveUpdatePolicy } from './update-policy'
 import { IPC } from '../shared/api'
 import type {
   AppState,
@@ -583,11 +584,24 @@ async function bootstrap(): Promise<void> {
   registerIpc()
   installApplicationMenu()
 
-  // Squirrel.Mac requires a Developer ID-signed, notarized app. This build is
-  // intentionally unsigned, so updates are manual (DMG + ZIP from Releases).
-  const updaterEnabled = app.isPackaged && process.platform === 'win32'
+  // Windows NSIS updates work unsigned. Squirrel.Mac requires a Developer ID
+  // signed (and notarized) app, so only enable macOS updates when the running
+  // executable actually carries that signature. Linux stays disabled.
+  const developerIdSigned =
+    app.isPackaged && process.platform === 'darwin' ? isRunningAppSigned(process.execPath) : false
+  const updatePolicy = resolveUpdatePolicy({
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    developerIdSigned,
+  })
+  logger.info(
+    updatePolicy.enabled
+      ? 'Auto-update policy: enabled'
+      : `Auto-update policy: disabled (${updatePolicy.reason ?? 'unknown'})`,
+  )
   updater = new UpdateService({
-    enabled: updaterEnabled,
+    enabled: updatePolicy.enabled,
+    disabledReason: updatePolicy.reason ?? undefined,
     currentVersion: app.getVersion(),
     platform: process.platform,
     getWindow: () => mainWindow,

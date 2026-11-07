@@ -1,9 +1,20 @@
 # Updates
 
-PhoneDeck can update the **installed Windows app** from public GitHub Releases.
-This is not the Android APK updater and it does not publish builds: it only
-checks the release feed, downloads the newest NSIS installer, and restarts into
-it.
+PhoneDeck can update the **installed Windows app** and **signed macOS app**
+from public GitHub Releases. This is not the Android APK updater and it does
+not publish builds: it only checks the release feed, downloads the newest
+installer/update, and restarts into it.
+
+## Platform support
+
+| Build | Auto-update | Behavior |
+| --- | --- | --- |
+| Windows, installed from the NSIS release | Enabled | Downloads `latest.yml` + Setup.exe and restarts into the installer. |
+| macOS, packaged and signed with a `Developer ID Application` certificate | Enabled | Uses the `latest-mac.yml` feed and Squirrel.Mac; requires a notarized release. |
+| macOS, packaged but unsigned/ad-hoc | Disabled | Shows the manual DMG/ZIP message; never contacts the feed. |
+| macOS, development/unpackaged | Disabled | Shows the normal development message. |
+| Linux (any) | Disabled | No packaged AppImage feed yet. |
+| Windows/Linux/macOS development builds | Disabled | Never contact the feed. |
 
 ## How it works
 
@@ -23,9 +34,12 @@ it.
 - Downgrades and pre-releases are disabled. A failed check can be retried; the
   raw error goes to `phonedek.log`.
 
-Development builds and Linux/macOS builds report **Automatic updates are
-unavailable** and never contact the feed. The feature runs only when
-`app.isPackaged && process.platform === 'win32'`.
+Development builds and Linux builds report **Automatic updates are
+unavailable** and never contact the feed. A packaged macOS build is enabled only
+when the running executable carries a `Developer ID Application` signature
+(checked with `codesign`); unsigned macOS builds keep the manual DMG/ZIP
+message. The Windows gate remains `app.isPackaged && process.platform ===
+'win32'`.
 
 ## First updater-enabled version
 
@@ -39,6 +53,28 @@ The updater cannot install itself into a build that does not contain it.
 Keep the version in the root `package.json`, `apps/desktop/package.json`, and the
 desktop `APP_VERSION` value in sync with the release tag. The updater compares
 the installed app version against `latest.yml`.
+
+### macOS signing and the first signed update
+
+- 0.1.4 and earlier macOS builds are unsigned and cannot auto-update. Users on
+  those builds must install the first signed release manually once (DMG or
+  ZIP); later signed releases can then update in-app.
+- A packaged build is not trusted just because it is packaged. At startup the
+  main process probes `/usr/bin/codesign -dv --verbose=2 <execPath>` and enables
+  macOS updates only when the output contains an
+  `Authority=Developer ID Application:` line. Missing/failed `codesign` means
+  unsigned, and the app shows the manual update message.
+- Squirrel.Mac also expects a notarized release and the correct
+  `latest-mac.yml`/ZIP assets. The probe checks the signature only;
+  notarization and stapling remain release-verification steps.
+- CI must have the Developer ID secrets (`CSC_LINK`, `CSC_KEY_PASSWORD`,
+  `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`) for the signed
+  macOS job. Without them CI produces an unsigned build that intentionally
+  stays on manual updates. This change does not modify CI or signing
+  configuration.
+- Suggested rollout: ship the first signed release (for example 0.2.0), have
+  existing Mac users install it manually once, then verify auto-update with the
+  next signed release.
 
 ## Publishing a release
 

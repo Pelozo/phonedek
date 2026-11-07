@@ -2,6 +2,27 @@ import type { UpdateState, UpdateStatus } from './api'
 
 export type UpdateTone = 'neutral' | 'info' | 'success' | 'error'
 
+/** Why in-app updates are disabled for this build. */
+export type UpdateDisabledReason = 'development' | 'unsigned-macos' | 'unsupported-platform'
+
+/**
+ * Why in-app updates are unavailable. Unsigned macOS builds cannot use
+ * Squirrel.Mac, which requires a Developer ID-signed and notarized app.
+ * Windows and Linux keep their platform-specific messages.
+ */
+export function disabledUpdateMessage(platform: string, reason?: UpdateDisabledReason): string {
+  if (platform === 'darwin') {
+    if (reason === 'development') {
+      return 'Automatic updates are only available in packaged builds. Development builds must be updated manually.'
+    }
+    return 'Automatic updates are disabled in this unsigned macOS build. Download the latest DMG from GitHub Releases and replace the app manually.'
+  }
+  if (platform === 'win32') {
+    return 'Only the installed Windows app can update itself. Install PhoneDeck from a published release to enable updates.'
+  }
+  return 'Automatic updates are unavailable on this platform. Development and Linux builds must be updated manually.'
+}
+
 export interface UpdateSummary {
   title: string
   detail: string
