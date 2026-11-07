@@ -62,7 +62,13 @@ class DeckConnection(
         fun onOpen()
         fun onServerHello(serverName: String, protocol: Int)
         fun onConfig(rawJson: String)
-        fun onPressResult(requestId: String, buttonId: String, ok: Boolean, error: String?)
+        fun onPressResult(
+            requestId: String,
+            buttonId: String,
+            ok: Boolean,
+            error: String?,
+            message: String?,
+        )
         fun onServerError(code: String, message: String)
         fun onNavigate(direction: String, pageId: String?)
         fun onPong()
@@ -300,11 +306,13 @@ class DeckConnection(
             }
 
             "pressResult" -> {
+                val result = parsePressResult(obj)
                 listener.onPressResult(
-                    requestId = obj.string("requestId").orEmpty(),
-                    buttonId = obj.string("buttonId").orEmpty(),
-                    ok = obj.bool("ok") ?: false,
-                    error = obj.string("error"),
+                    requestId = result.requestId,
+                    buttonId = result.buttonId,
+                    ok = result.ok,
+                    error = result.error,
+                    message = result.message,
                 )
             }
 
@@ -330,15 +338,6 @@ class DeckConnection(
         }
     }
 
-    private fun JsonObject.string(key: String): String? =
-        (this[key] as? JsonPrimitive)?.contentOrNull
-
-    private fun JsonObject.int(key: String): Int? =
-        (this[key] as? JsonPrimitive)?.intOrNull
-
-    private fun JsonObject.bool(key: String): Boolean? =
-        (this[key] as? JsonPrimitive)?.booleanOrNull
-
     private companion object {
         const val PING_INTERVAL_MS = 20_000L
         const val PONG_TIMEOUT_MS = 70_000L
@@ -346,3 +345,28 @@ class DeckConnection(
         const val MAX_MESSAGE_BYTES = 4 * 1024 * 1024
     }
 }
+
+internal data class PressResultPayload(
+    val requestId: String,
+    val buttonId: String,
+    val ok: Boolean,
+    val error: String?,
+    val message: String?,
+)
+
+internal fun parsePressResult(obj: JsonObject): PressResultPayload = PressResultPayload(
+    requestId = obj.string("requestId").orEmpty(),
+    buttonId = obj.string("buttonId").orEmpty(),
+    ok = obj.bool("ok") ?: false,
+    error = obj.string("error"),
+    message = obj.string("message"),
+)
+
+private fun JsonObject.string(key: String): String? =
+    (this[key] as? JsonPrimitive)?.contentOrNull
+
+private fun JsonObject.int(key: String): Int? =
+    (this[key] as? JsonPrimitive)?.intOrNull
+
+private fun JsonObject.bool(key: String): Boolean? =
+    (this[key] as? JsonPrimitive)?.booleanOrNull

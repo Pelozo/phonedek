@@ -3,6 +3,7 @@ package com.phonedek.app.ui
 import android.view.LayoutInflater
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -18,6 +19,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -38,6 +40,7 @@ import com.phonedek.app.data.BackgroundDto
 import com.phonedek.app.data.Pairing
 import com.phonedek.app.net.assetUrl
 import com.phonedek.app.util.Diag
+import kotlin.math.max
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
@@ -175,6 +178,7 @@ fun BackgroundLayer(
     isActive: Boolean = true,
 ) {
     val context = LocalContext.current
+    val contentRotation = LocalButtonContentRotation.current
     Box(modifier) {
         when (spec) {
             is BackgroundSpec.Solid -> {
@@ -202,12 +206,32 @@ fun BackgroundLayer(
                         .crossfade(180)
                         .build()
                 }
-                AsyncImage(
-                    model = request,
-                    contentDescription = null,
-                    contentScale = spec.fit,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                BoxWithConstraints(Modifier.fillMaxSize()) {
+                    val aspect = if (maxHeight > 0.dp) maxWidth / maxHeight else 1f
+                    // Rotating a wide image inside a wide tile exposes the
+                    // corners; zoom just enough to keep a crop-filled surface.
+                    val scale = if (
+                        contentRotation % 180f != 0f &&
+                        spec.fit == ContentScale.Crop &&
+                        aspect > 0f
+                    ) {
+                        max(aspect, 1f / aspect)
+                    } else {
+                        1f
+                    }
+                    AsyncImage(
+                        model = request,
+                        contentDescription = null,
+                        contentScale = spec.fit,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                rotationZ = contentRotation
+                                scaleX = scale
+                                scaleY = scale
+                            },
+                    )
+                }
             }
 
             is BackgroundSpec.Video -> {

@@ -709,7 +709,8 @@ private fun ChangeServerDialog(
         title = { ConsoleTitleRule("Change server?", color = StatusDanger) },
         text = {
             Text(
-                "The saved server and PIN will be removed from this phone. " +
+                "Save a backup first if you want to keep this deck. " +
+                    "The saved PC and cached deck will be removed from this phone. " +
                     "You will need the QR code or PIN to pair again.",
             )
         },

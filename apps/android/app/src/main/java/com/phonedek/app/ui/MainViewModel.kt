@@ -139,9 +139,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 buttonId: String,
                 ok: Boolean,
                 error: String?,
+                message: String?,
             ) {
                 if (!ok) {
                     emit(error?.takeIf { it.isNotBlank() } ?: "The desktop could not run that action.")
+                } else {
+                    // Success messages are optional; ordinary presses stay quiet.
+                    message?.trim()?.takeIf { it.isNotEmpty() }?.let(::emit)
                 }
             }
 
@@ -335,6 +339,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             connection = ConnectionStatus.OFFLINE,
         )
         viewModelScope.launch {
+            // Keep a private safety copy before forgetServer removes the cache.
+            runCatching { cache.archive("change-server") }
             runCatching { prefs.clearPairing() }
             cache.clear()
         }
