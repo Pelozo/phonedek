@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { Action, ConnectedClient, DeckConfig, PressResult } from '@phonedek/shared'
+import type { Action, AssetKind, ConnectedClient, DeckConfig, PressResult } from '@phonedek/shared'
 import { IPC } from '../shared/api'
 import type {
   AppState,
@@ -15,7 +15,7 @@ import type {
 const api: PhoneDeckApi = {
   getState: (): Promise<AppState> => ipcRenderer.invoke(IPC.getState),
   saveConfig: (config: DeckConfig): Promise<SaveConfigResult> => ipcRenderer.invoke(IPC.saveConfig, config),
-  importAsset: (): Promise<AssetPickResult> => ipcRenderer.invoke(IPC.importAsset),
+  importAsset: (kind?: AssetKind): Promise<AssetPickResult> => ipcRenderer.invoke(IPC.importAsset, kind),
   pickApplication: (): Promise<string | null> => ipcRenderer.invoke(IPC.pickApplication),
   testActions: (actions: Action[], label?: string): Promise<PressResult> =>
     ipcRenderer.invoke(IPC.testActions, actions, label),

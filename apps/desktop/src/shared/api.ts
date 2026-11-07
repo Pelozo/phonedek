@@ -1,4 +1,4 @@
-import type { Action, ConnectedClient, DeckConfig, PressResult } from '@phonedek/shared'
+import type { Action, AssetKind, ConnectedClient, DeckConfig, PressResult } from '@phonedek/shared'
 
 export interface PairView {
   host: string
@@ -93,7 +93,7 @@ export interface PermissionStatus {
 export interface PhoneDeckApi {
   getState(): Promise<AppState>
   saveConfig(config: DeckConfig): Promise<SaveConfigResult>
-  importAsset(): Promise<AssetPickResult>
+  importAsset(kind?: AssetKind): Promise<AssetPickResult>
   pickApplication(): Promise<string | null>
   testActions(actions: Action[], label?: string): Promise<PressResult>
   setPort(port: number): Promise<OperationResult>

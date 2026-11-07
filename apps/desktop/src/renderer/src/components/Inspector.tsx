@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Action, ActionPack, ActionPreset, DeckButton, DeckConfig, DeckPage, DeckProfile, MacroStep } from '@phonedek/shared'
+import type { Action, ActionPack, ActionPreset, DeckButton, DeckConfig, DeckPage, DeckProfile, MacroStep, MediaIcon } from '@phonedek/shared'
 import {
   capacity,
   compactPage,
@@ -15,6 +15,7 @@ import type { ServerInfoView } from '../../../shared/api'
 import { backgroundStyle, buttonBackground, textColorFor } from '../lib/ui'
 import { ActionEditor } from './ActionEditor'
 import { BackgroundEditor } from './BackgroundEditor'
+import { DeckMedia } from './DeckMedia'
 import { Icon } from './Icons'
 import { IconPicker } from './IconPicker'
 import { PopMenu } from './Menu'
@@ -69,6 +70,7 @@ export function Inspector({
   const [customText, setCustomText] = useState(button?.textColor !== undefined)
   const [pageCustomBackground, setPageCustomBackground] = useState(page.background !== undefined)
   const [presetsOpen, setPresetsOpen] = useState(false)
+  const [iconBusy, setIconBusy] = useState<'image' | 'video' | null>(null)
 
   useEffect(() => {
     setCustomBackground(button?.background !== undefined)
@@ -291,6 +293,41 @@ export function Inspector({
     onToast(`${pack.name} · ${preset.name} added`, 'success')
   }
 
+  const chooseIconMedia = async (kind: 'image' | 'video'): Promise<void> => {
+    setIconBusy(kind)
+    try {
+      const result = await window.phonedek.importAsset(kind)
+      if (result.ok && result.asset) {
+        const previous = button.iconMedia
+        const next: MediaIcon = {
+          type: kind,
+          asset: result.asset,
+          fit: previous?.fit ?? 'cover',
+          ...(kind === 'video'
+            ? {
+                loop: previous?.loop ?? true,
+                muted: previous?.muted ?? true,
+              }
+            : {}),
+        }
+        update({ iconMedia: next })
+      } else if (result.error) {
+        onToast(result.error, 'error')
+      }
+    } finally {
+      setIconBusy(null)
+    }
+  }
+
+  const updateIconMedia = (patch: Partial<MediaIcon>): void => {
+    if (!button.iconMedia) return
+    update({ iconMedia: { ...button.iconMedia, ...patch } })
+  }
+
+  const removeIconMedia = (): void => {
+    update({ iconMedia: undefined })
+  }
+
   const deleteButton = (): void => {
     if (!window.confirm(`Delete the “${button.label || 'Untitled'}” button?`)) return
     onChangeConfig(removeButton(config, profile.id, page.id, button.id))
@@ -302,7 +339,11 @@ export function Inspector({
       <div className="inspector-header">
         <div className="inspector-heading">
           <span className="button-avatar" style={buttonBackground(button, page, profile, server)}>
-            {button.icon || '＋'}
+            {button.iconMedia ? (
+              <DeckMedia media={button.iconMedia} server={server} fallback={button.icon || '＋'} />
+            ) : (
+              button.icon || '＋'
+            )}
           </span>
           <div>
             <span className="eyebrow">Button · slot {button.slot + 1}</span>
@@ -350,7 +391,108 @@ export function Inspector({
               />
               <span className="hint">Search below or paste any emoji.</span>
             </div>
-            <IconPicker key={button.id} value={button.icon} onChange={(icon) => update({ icon: icon || undefined })} />
+            <IconPicker
+              key={button.id}
+              value={button.icon}
+              onChange={(icon) => update(icon ? { icon } : { icon: undefined, iconMedia: undefined })}
+            />
+          </div>
+
+          <div className="icon-media-block">
+            <div className="section-title">
+              <span>Media icon</span>
+              {button.iconMedia && <span className="tag">media</span>}
+            </div>
+
+            {button.iconMedia ? (
+              <>
+                <div className="icon-media-current">
+                  <div className="icon-media-preview">
+                    <DeckMedia media={button.iconMedia} server={server} fallback={button.icon || '＋'} />
+                  </div>
+                  <div className="icon-media-meta">
+                    <strong>{button.iconMedia.type === 'video' ? 'Video icon' : 'Image / GIF icon'}</strong>
+                    <small className="mono">{button.iconMedia.asset}</small>
+                  </div>
+                </div>
+
+                <div className="icon-media-actions">
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    onClick={() => void chooseIconMedia('image')}
+                    disabled={iconBusy !== null}
+                  >
+                    <Icon name="image" size={14} />
+                    {iconBusy === 'image' ? 'Importing…' : 'Replace image/GIF'}
+                  </button>
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    onClick={() => void chooseIconMedia('video')}
+                    disabled={iconBusy !== null}
+                  >
+                    <Icon name="video" size={14} />
+                    {iconBusy === 'video' ? 'Importing…' : 'Replace video'}
+                  </button>
+                  <button type="button" className="button danger ghost small" onClick={removeIconMedia}>
+                    Remove
+                  </button>
+                </div>
+
+                <div className="icon-media-controls">
+                  <label className="field icon-media-fit">
+                    <span>Fit</span>
+                    <select
+                      value={button.iconMedia.fit}
+                      onChange={(event) =>
+                        updateIconMedia({ fit: event.target.value as 'cover' | 'contain' })
+                      }
+                    >
+                      <option value="cover">Cover</option>
+                      <option value="contain">Contain</option>
+                    </select>
+                  </label>
+                  {button.iconMedia.type === 'video' && (
+                    <div className="icon-media-toggles">
+                      <Toggle
+                        label="Loop"
+                        checked={button.iconMedia.loop !== false}
+                        onChange={(loop) => updateIconMedia({ loop })}
+                      />
+                      <Toggle
+                        label="Muted"
+                        checked={button.iconMedia.muted !== false}
+                        onChange={(muted) => updateIconMedia({ muted })}
+                      />
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="icon-media-actions">
+                <button
+                  type="button"
+                  className="button secondary small"
+                  onClick={() => void chooseIconMedia('image')}
+                  disabled={iconBusy !== null}
+                >
+                  <Icon name="image" size={14} />
+                  {iconBusy === 'image' ? 'Importing…' : 'Choose image/GIF'}
+                </button>
+                <button
+                  type="button"
+                  className="button secondary small"
+                  onClick={() => void chooseIconMedia('video')}
+                  disabled={iconBusy !== null}
+                >
+                  <Icon name="video" size={14} />
+                  {iconBusy === 'video' ? 'Importing…' : 'Choose video'}
+                </button>
+              </div>
+            )}
+
+            <p className="hint">GIFs animate; MP4/H.264 is the most compatible video. The emoji stays as the fallback.</p>
           </div>
         </section>
 

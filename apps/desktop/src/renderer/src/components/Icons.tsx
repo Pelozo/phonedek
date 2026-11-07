@@ -16,6 +16,7 @@ export type IconName =
   | 'check'
   | 'grid'
   | 'image'
+  | 'video'
   | 'keyboard'
   | 'text'
   | 'bolt'
@@ -58,6 +59,7 @@ const paths: Record<IconName, string> = {
   check: 'm5 13 4 4L19 7',
   grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
   image: 'M4 5h16v14H4zM4 15l4-4 4 4 3-3 5 5M9 9h.01',
+  video: 'M3 6h12v12H3zM15 10l6-3v10l-6-3z',
   keyboard: 'M3 6h18v12H3zM7 10h.01M11 10h.01M15 10h.01M7 14h10',
   text: 'M5 6h14M12 6v12M8 18h8',
   bolt: 'm13 2-9 12h7l-1 8 9-12h-7z',

@@ -16,17 +16,22 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
@@ -36,10 +41,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.phonedek.app.data.DeckButton
-import com.phonedek.app.data.DeckProfile
+import com.phonedek.app.data.MediaIconDto
 import com.phonedek.app.data.Pairing
 import com.phonedek.app.data.ProfileTheme
+import com.phonedek.app.net.assetUrl
 
 // Deck fills are user content. Keep the historical default so existing decks
 // render exactly as before even though the surrounding chrome is now ink/orange.
@@ -51,10 +59,21 @@ fun DeckButtonView(
     theme: ProfileTheme,
     pairing: Pairing?,
     onPress: () -> Unit,
+    isActive: Boolean = true,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val haptics = LocalHapticFeedback.current
+
+    val media = button.iconMedia
+    val mediaUrl = remember(media?.asset, pairing?.host, pairing?.port, pairing?.token) {
+        media?.asset?.takeIf { it.isNotBlank() }?.let { asset ->
+            pairing?.let { assetUrl(it.host, it.port, asset) }
+        }
+    }
+    var mediaFailed by remember(media?.type, media?.asset, mediaUrl, pairing?.token) {
+        mutableStateOf(false)
+    }
 
     val background = button.background ?: theme.buttonBackground
     val fallback = parseHexColor(
@@ -102,7 +121,7 @@ fun DeckButtonView(
             }
             .semantics { contentDescription = description },
     ) {
-        BackgroundLayer(spec, Modifier.fillMaxSize())
+        BackgroundLayer(spec, Modifier.fillMaxSize(), isActive = isActive)
 
         BoxWithConstraints(
             modifier = Modifier
@@ -113,26 +132,39 @@ fun DeckButtonView(
             val labelSize = with(density) {
                 minOf(theme.fontSize.dp, maxHeight * 0.16f).toSp()
             }
-            val iconSize = with(density) {
-                minOf(maxHeight * 0.34f, 38.dp).toSp()
-            }
+            val iconExtent = minOf(maxHeight * 0.34f, 38.dp)
+            val iconSize = with(density) { iconExtent.toSp() }
             val sublabelSize = labelSize * 0.8f
+            val mediaFit = if (media?.fit == "contain") ContentScale.Fit else ContentScale.Crop
 
             Column(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                button.icon?.takeIf { it.isNotBlank() }?.let { icon ->
-                    Text(
-                        text = icon,
-                        color = textColor,
-                        fontSize = iconSize,
-                        lineHeight = iconSize,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
+                if (media != null && mediaUrl != null && !mediaFailed) {
+                    ButtonMediaIcon(
+                        media = media,
+                        url = mediaUrl,
+                        token = pairing?.token.orEmpty(),
+                        fit = mediaFit,
+                        isActive = isActive,
+                        modifier = Modifier.size(iconExtent),
+                        onError = { mediaFailed = true },
                     )
                     Spacer(Modifier.height(2.dp))
+                } else {
+                    button.icon?.takeIf { it.isNotBlank() }?.let { icon ->
+                        Text(
+                            text = icon,
+                            color = textColor,
+                            fontSize = iconSize,
+                            lineHeight = iconSize,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                    }
                 }
                 if (button.label.isNotBlank()) {
                     Text(
@@ -164,5 +196,49 @@ fun DeckButtonView(
         if (pressed) {
             Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.06f)))
         }
+    }
+}
+
+@Composable
+private fun ButtonMediaIcon(
+    media: MediaIconDto,
+    url: String,
+    token: String,
+    fit: ContentScale,
+    isActive: Boolean,
+    modifier: Modifier = Modifier,
+    onError: () -> Unit,
+) {
+    val context = LocalContext.current
+    if (media.type == "video") {
+        VideoSurface(
+            url = url,
+            fit = fit,
+            loop = media.loop,
+            muted = media.muted,
+            autoplay = true,
+            isActive = isActive,
+            modifier = modifier,
+            onError = onError,
+        )
+    } else {
+        val request = remember(url, token) {
+            ImageRequest.Builder(context)
+                .data(url)
+                .apply {
+                    if (token.isNotBlank()) {
+                        addHeader("Authorization", "Bearer $token")
+                    }
+                }
+                .crossfade(120)
+                .build()
+        }
+        AsyncImage(
+            model = request,
+            contentDescription = null,
+            contentScale = fit,
+            modifier = modifier,
+            onError = { onError() },
+        )
     }
 }

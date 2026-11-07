@@ -88,4 +88,84 @@ describe('config schema', () => {
     config.profiles[0]!.theme.background = { type: 'image', asset: '../secret.png', fit: 'cover' }
     expect(validateConfig(config).ok).toBe(false)
   })
+
+  it('accepts video backgrounds and media icons', () => {
+    const config = createDefaultConfig()
+    const button = config.profiles[0]!.pages[0]!.buttons[0]!
+    button.background = {
+      type: 'video',
+      asset: 'intro.MP4',
+      fit: 'cover',
+      loop: false,
+      muted: false,
+      autoplay: false,
+      overlay: 0.25,
+    }
+    button.iconMedia = { type: 'video', asset: 'spinner.webm', fit: 'contain' }
+    expect(validateConfig(config).ok).toBe(true)
+
+    button.iconMedia = { type: 'image', asset: 'animated.GIF', fit: 'cover' }
+    button.background = { type: 'image', asset: 'still.webp', fit: 'contain' }
+    expect(validateConfig(config).ok).toBe(true)
+  })
+
+  it('keeps video/icon defaults optional (renderers default them to true)', () => {
+    const config = createDefaultConfig()
+    const button = config.profiles[0]!.pages[0]!.buttons[0]!
+    button.background = { type: 'video', asset: 'loop.m4v', fit: 'cover' }
+    button.iconMedia = { type: 'image', asset: 'icon.png', fit: 'contain', loop: true, muted: false }
+    const result = validateConfig(config)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const parsed = result.config.profiles[0]!.pages[0]!.buttons[0]!
+    const background = parsed.background as { loop?: boolean; muted?: boolean; autoplay?: boolean }
+    expect(background.loop).toBeUndefined()
+    expect(background.muted).toBeUndefined()
+    expect(background.autoplay).toBeUndefined()
+    expect(parsed.iconMedia).toEqual({ type: 'image', asset: 'icon.png', fit: 'contain', loop: true, muted: false })
+  })
+
+  it('rejects mismatched or unsupported media extensions', () => {
+    const config = createDefaultConfig()
+    const button = config.profiles[0]!.pages[0]!.buttons[0]!
+
+    button.background = { type: 'video', asset: 'still.png', fit: 'cover' }
+    let result = validateConfig(config)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.errors.join(' ')).toMatch(/video asset/)
+
+    button.background = { type: 'image', asset: 'clip.mp4', fit: 'cover' }
+    result = validateConfig(config)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.errors.join(' ')).toMatch(/image asset/)
+
+    button.background = undefined
+    button.iconMedia = { type: 'video', asset: 'icon.gif', fit: 'cover' }
+    result = validateConfig(config)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.errors.join(' ')).toMatch(/video asset/)
+
+    button.iconMedia = { type: 'image', asset: 'icon.mp4', fit: 'cover' }
+    result = validateConfig(config)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.errors.join(' ')).toMatch(/image asset/)
+
+    button.iconMedia = { type: 'video', asset: 'clip.avi', fit: 'cover' }
+    expect(validateConfig(config).ok).toBe(false)
+
+    button.iconMedia = undefined
+    button.background = { type: 'image', asset: 'vector.svg', fit: 'cover' }
+    expect(validateConfig(config).ok).toBe(false)
+  })
+
+  it('rejects traversal in video and icon asset names', () => {
+    const config = createDefaultConfig()
+    const button = config.profiles[0]!.pages[0]!.buttons[0]!
+    button.background = { type: 'video', asset: '../secret.mp4', fit: 'cover' }
+    expect(validateConfig(config).ok).toBe(false)
+
+    button.background = undefined
+    button.iconMedia = { type: 'video', asset: '..%2Fsecret.mp4', fit: 'cover' }
+    expect(validateConfig(config).ok).toBe(false)
+  })
 })

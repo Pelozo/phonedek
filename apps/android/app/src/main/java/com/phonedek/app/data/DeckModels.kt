@@ -65,9 +65,19 @@ data class DeckButton(
     val label: String = "",
     val sublabel: String? = null,
     val icon: String? = null,
+    val iconMedia: MediaIconDto? = null,
     val background: BackgroundDto? = null,
     val textColor: String? = null,
     val actions: List<ActionDto> = emptyList(),
+)
+
+@Serializable
+data class MediaIconDto(
+    val type: String = "",
+    val asset: String = "",
+    val fit: String = "cover",
+    val loop: Boolean = true,
+    val muted: Boolean = true,
 )
 
 /**
@@ -89,7 +99,10 @@ data class BackgroundDto(
     val to: String? = null,
     val angle: Float? = null,
     val asset: String? = null,
-    val fit: String? = null,
+    val fit: String? = "cover",
+    val loop: Boolean = true,
+    val muted: Boolean = true,
+    val autoplay: Boolean = true,
     val overlay: Float? = null,
 )
 
@@ -195,6 +208,7 @@ private fun DeckPage.normalized(capacity: Int): DeckPage {
                 label = button.label.take(120),
                 sublabel = button.sublabel?.take(120),
                 icon = button.icon?.take(48),
+                iconMedia = button.iconMedia?.normalized(),
             )
         }
     return copy(
@@ -216,6 +230,20 @@ private fun ProfileTheme.safe(): ProfileTheme = copy(
     fontSize = fontSize.takeIf { it in 8..48 } ?: 15,
     buttonRadius = buttonRadius.takeIf { it in 0..120 } ?: 18,
 )
+
+private fun MediaIconDto.normalized(): MediaIconDto? {
+    val mediaType = type.trim().lowercase()
+    val mediaAsset = asset.trim()
+    if (mediaType != "image" && mediaType != "video") return null
+    if (mediaAsset.isEmpty()) return null
+    return copy(
+        type = mediaType,
+        asset = mediaAsset,
+        fit = if (fit.trim() == "contain") "contain" else "cover",
+        loop = loop,
+        muted = muted,
+    )
+}
 
 private fun uniqueId(raw: String, fallback: String, used: MutableSet<String>): String {
     val base = raw.ifBlank { fallback }

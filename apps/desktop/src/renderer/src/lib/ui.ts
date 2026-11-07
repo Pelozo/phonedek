@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react'
-import type { Background, DeckButton, DeckPage, DeckProfile } from '@phonedek/shared'
+import { assetKindFromName } from '@phonedek/shared'
+import type { Background, DeckButton, DeckPage, DeckProfile, VideoBackground } from '@phonedek/shared'
 import type { ServerInfoView } from '../../../shared/api'
 
 export function assetUrl(server: ServerInfoView | null, asset: string): string | null {
@@ -7,6 +8,14 @@ export function assetUrl(server: ServerInfoView | null, asset: string): string |
   // The editor always runs on the same machine as the server, so the loopback
   // address is both faster and compatible with the renderer CSP.
   return `http://127.0.0.1:${server.port}/assets/${encodeURIComponent(asset)}?token=${encodeURIComponent(server.token)}`
+}
+
+export function mediaKindForAsset(asset: string): 'image' | 'video' | null {
+  return assetKindFromName(asset)
+}
+
+export function isVideoBackground(background: Background | undefined): background is VideoBackground {
+  return background?.type === 'video'
 }
 
 export function backgroundStyle(
@@ -37,6 +46,10 @@ export function backgroundStyle(
         backgroundRepeat: 'no-repeat',
       }
     }
+    case 'video':
+      // The video itself is rendered by DeckMedia. Keep a solid fallback here so
+      // the deck never flashes a transparent surface while the video loads.
+      return { background: '#0d0c0b' }
   }
 }
 

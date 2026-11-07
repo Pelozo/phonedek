@@ -1,22 +1,43 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { extname, join, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import {
+  ASSET_CONTENT_TYPES,
+  assetKindFromName,
+  assetMaxBytes,
+  assetContentType,
+  formatAssetLimit,
+  type AssetKind,
+} from '@phonedek/shared'
 import type { Logger } from './logger'
 
-const ALLOWED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'])
-const MAX_BYTES = 25 * 1024 * 1024
-
-export const CONTENT_TYPES: Record<string, string> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp',
-  '.gif': 'image/gif',
-  '.bmp': 'image/bmp',
-}
+/** Kept for callers that imported the map from this module. */
+export const CONTENT_TYPES = ASSET_CONTENT_TYPES
 
 export function isSafeAssetName(name: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name) && !name.includes('..')
+}
+
+function kindLabel(kind: AssetKind): string {
+  return kind === 'video' ? 'video' : 'image'
+}
+
+function unsupportedExtensionMessage(kind: AssetKind): string {
+  return kind === 'video'
+    ? 'Only MP4, WEBM, M4V and MOV videos are supported'
+    : 'Only PNG, JPG, WEBP, GIF and BMP images are supported'
+}
+
+function checkExtension(name: string, kind: AssetKind): boolean {
+  const inferred = assetKindFromName(name)
+  return inferred === kind
+}
+
+function checkSize(name: string, bytes: number, kind: AssetKind): void {
+  const limit = assetMaxBytes(kind)
+  if (bytes > limit) {
+    throw new Error(`${kind === 'video' ? 'Video' : 'Image'} ${name ? `"${name}" ` : ''}is larger than ${formatAssetLimit(kind)}`)
+  }
 }
 
 export class AssetStore {
@@ -29,27 +50,39 @@ export class AssetStore {
     mkdirSync(this.dir, { recursive: true })
   }
 
-  /** Copy an image into the asset store and return its generated file name. */
-  importFile(sourcePath: string): string {
+  /**
+   * Copy an image/video into the asset store and return its generated file
+   * name. `kind` defaults to `image` so existing callers keep working.
+   */
+  importFile(sourcePath: string, kind: AssetKind = 'image'): string {
     const extension = extname(sourcePath).toLowerCase()
-    if (!ALLOWED_EXTENSIONS.has(extension)) {
-      throw new Error('Only PNG, JPG, WEBP, GIF and BMP images are supported')
+    if (!checkExtension(sourcePath, kind)) {
+      throw new Error(unsupportedExtensionMessage(kind))
     }
     const stats = statSync(sourcePath)
     if (!stats.isFile()) throw new Error('The selected path is not a file')
-    if (stats.size > MAX_BYTES) throw new Error('Image is larger than 25 MB')
+    checkSize('', stats.size, kind)
     const name = `${randomUUID()}${extension}`
     const target = join(this.dir, name)
     copyFileSync(sourcePath, target)
-    this.logger?.info(`Imported asset ${name} (${stats.size} bytes)`)
+    this.logger?.info(`Imported ${kindLabel(kind)} asset ${name} (${stats.size} bytes)`)
     return name
   }
 
-  /** Write an asset imported from a backup ZIP. Returns false for unsafe names. */
-  importBuffer(name: string, data: Buffer): boolean {
+  /**
+   * Write an asset imported from a backup ZIP. Returns false for unsafe names
+   * or extensions that do not match the kind.
+   *
+   * `kind` is inferred from the file name when omitted so existing backup
+   * imports (which call `importBuffer(name, data)`) keep working for videos.
+   */
+  importBuffer(name: string, data: Buffer, kind?: AssetKind): boolean {
     if (!isSafeAssetName(name)) return false
-    if (data.length > MAX_BYTES) throw new Error(`Asset ${name} is larger than 25 MB`)
+    const resolvedKind = kind ?? assetKindFromName(name) ?? 'image'
+    if (!checkExtension(name, resolvedKind)) return false
+    checkSize(name, data.length, resolvedKind)
     writeFileSync(join(this.dir, name), data)
+    this.logger?.info(`Imported ${kindLabel(resolvedKind)} asset ${name} (${data.length} bytes)`)
     return true
   }
 
@@ -64,7 +97,7 @@ export class AssetStore {
   }
 
   contentType(name: string): string {
-    return CONTENT_TYPES[extname(name).toLowerCase()] ?? 'application/octet-stream'
+    return assetContentType(name)
   }
 
   list(): string[] {

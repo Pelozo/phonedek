@@ -1,5 +1,5 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
-import { createReadStream } from 'node:fs'
+import { createReadStream, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { WebSocket, WebSocketServer } from 'ws'
 import {
@@ -88,6 +88,47 @@ function json(response: ServerResponse, status: number, body: unknown, extraHead
     ...extraHeaders,
   })
   response.end(payload)
+}
+
+export interface ByteRange {
+  start: number
+  end: number
+}
+
+/**
+ * Parse a single `bytes=` range. Returns null for malformed, multi-part or
+ * unsatisfiable ranges, which callers answer with 416.
+ */
+export function parseByteRange(header: string, size: number): ByteRange | null {
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(header.trim())
+  if (!match) return null
+  const startText = match[1] ?? ''
+  const endText = match[2] ?? ''
+  if (!startText && !endText) return null
+  if (!Number.isSafeInteger(size) || size <= 0) return null
+
+  if (!startText) {
+    const suffixLength = Number(endText)
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return null
+    return { start: Math.max(0, size - suffixLength), end: size - 1 }
+  }
+
+  const start = Number(startText)
+  if (!Number.isSafeInteger(start) || start >= size) return null
+  const requestedEnd = endText ? Number(endText) : size - 1
+  if (!Number.isSafeInteger(requestedEnd) || requestedEnd < start) return null
+  return { start, end: Math.min(requestedEnd, size - 1) }
+}
+
+function streamAsset(path: string, response: ServerResponse, range?: ByteRange): void {
+  const stream = range
+    ? createReadStream(path, { start: range.start, end: range.end })
+    : createReadStream(path)
+  stream.on('error', () => {
+    if (!response.headersSent) json(response, 500, { error: 'Could not read asset' })
+    else response.end()
+  })
+  stream.pipe(response)
 }
 
 async function readJson(request: IncomingMessage, limit = 32 * 1024): Promise<unknown> {
@@ -467,20 +508,48 @@ export class DeckServer {
         json(response, 404, { error: 'Asset not found' })
         return
       }
-      response.writeHead(200, {
+
+      const size = statSync(path).size
+      const commonHeaders = {
         'Content-Type': this.options.assets.contentType(name),
         'Cache-Control': 'public, max-age=3600',
+        'Accept-Ranges': 'bytes',
+      }
+      const rangeHeader = request.headers.range
+      if (rangeHeader !== undefined) {
+        const range = typeof rangeHeader === 'string' ? parseByteRange(rangeHeader, size) : null
+        if (!range) {
+          response.writeHead(416, {
+            'Accept-Ranges': 'bytes',
+            'Content-Range': `bytes */${size}`,
+            'Content-Length': 0,
+            'Cache-Control': 'no-store',
+          })
+          response.end()
+          return
+        }
+        response.writeHead(206, {
+          ...commonHeaders,
+          'Content-Range': `bytes ${range.start}-${range.end}/${size}`,
+          'Content-Length': range.end - range.start + 1,
+        })
+        if (request.method === 'HEAD') {
+          response.end()
+          return
+        }
+        streamAsset(path, response, range)
+        return
+      }
+
+      response.writeHead(200, {
+        ...commonHeaders,
+        'Content-Length': size,
       })
       if (request.method === 'HEAD') {
         response.end()
         return
       }
-      const stream = createReadStream(path)
-      stream.on('error', () => {
-        if (!response.headersSent) json(response, 500, { error: 'Could not read asset' })
-        else response.end()
-      })
-      stream.pipe(response)
+      streamAsset(path, response)
       return
     }
 

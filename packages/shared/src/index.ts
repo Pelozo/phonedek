@@ -1,6 +1,7 @@
 export * from './types'
 export * from './keys'
 export * from './schema'
+export * from './media'
 export * from './defaults'
 export * from './grid'
 export * from './actions'

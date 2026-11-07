@@ -652,6 +652,8 @@ private fun DeckPager(
             initialPage = resolvePageIndex(pages, activePageId, profile.defaultPageId),
             pageCount = { pages.size },
         )
+        // Only the settled page may play video; adjacent preloaded pages pause.
+        val settledPage = pagerState.settledPage
 
         // True from the moment the user starts dragging until the page
         // settles. Programmatic scrolls never touch this, so a canceled
@@ -731,6 +733,7 @@ private fun DeckPager(
                 page = current,
                 pairing = pairing,
                 topInset = topInset,
+                isActive = index == settledPage,
                 onPress = onPress,
             )
         }
@@ -743,6 +746,7 @@ private fun DeckPageContent(
     page: DeckPage,
     pairing: Pairing?,
     topInset: Dp,
+    isActive: Boolean,
     onPress: (DeckButton) -> Unit,
 ) {
     val spec = remember(page.background, profile.theme.background, pairing) {
@@ -751,12 +755,13 @@ private fun DeckPageContent(
 
     Box(Modifier.fillMaxSize()) {
         // Full-bleed: this backdrop sits behind the transparent top bar too.
-        BackgroundLayer(spec, Modifier.fillMaxSize())
+        BackgroundLayer(spec, Modifier.fillMaxSize(), isActive = isActive)
         DeckGrid(
             profile = profile,
             page = page,
             pairing = pairing,
             topInset = topInset,
+            isActive = isActive,
             onPress = onPress,
         )
     }
@@ -768,6 +773,7 @@ private fun DeckGrid(
     page: DeckPage,
     pairing: Pairing?,
     topInset: Dp,
+    isActive: Boolean,
     onPress: (DeckButton) -> Unit,
 ) {
     val grid = profile.grid
@@ -803,6 +809,7 @@ private fun DeckGrid(
                                 button = button,
                                 theme = profile.theme,
                                 pairing = pairing,
+                                isActive = isActive,
                                 onPress = { onPress(button) },
                             )
                         }

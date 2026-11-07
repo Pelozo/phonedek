@@ -3,10 +3,11 @@ import type { Background } from '@phonedek/shared'
 import { GRADIENTS, SOLID_PRESETS } from '@phonedek/shared'
 import type { ServerInfoView } from '../../../shared/api'
 import { backgroundStyle } from '../lib/ui'
-import { ColorField, Slider } from './Primitives'
+import { DeckMedia } from './DeckMedia'
+import { ColorField, Slider, Toggle } from './Primitives'
 import { Icon } from './Icons'
 
-type Mode = 'color' | 'gradient' | 'image'
+type Mode = 'color' | 'gradient' | 'image' | 'video'
 
 function modeOf(background: Background): Mode {
   return background.type
@@ -29,16 +30,21 @@ export function BackgroundEditor({
     if (next === value.type) return
     if (next === 'color') onChange({ type: 'color', color: '#1e293b' })
     if (next === 'gradient') onChange({ type: 'gradient', from: '#1e293b', to: '#334155', angle: 145 })
-    // Switching to image waits for the user to choose a file, so we never
-    // write an invalid "empty asset" background into the config.
+    // Image and video wait for the user to choose a file, so we never write an
+    // invalid "empty asset" background into the config.
   }
 
   const chooseImage = async (): Promise<void> => {
     setBusy(true)
     try {
-      const result = await window.phonedek.importAsset()
+      const result = await window.phonedek.importAsset('image')
       if (result.ok && result.asset) {
-        onChange({ type: 'image', asset: result.asset, fit: value.type === 'image' ? value.fit : 'cover' })
+        onChange({
+          type: 'image',
+          asset: result.asset,
+          fit: value.type === 'image' ? value.fit : 'cover',
+          ...(value.overlay ? { overlay: value.overlay } : {}),
+        })
         setMode('image')
       } else if (result.error) {
         // The App-level toast is not available here; use a native alert as fallback.
@@ -47,6 +53,39 @@ export function BackgroundEditor({
     } finally {
       setBusy(false)
     }
+  }
+
+  const chooseVideo = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      const result = await window.phonedek.importAsset('video')
+      if (result.ok && result.asset) {
+        onChange({
+          type: 'video',
+          asset: result.asset,
+          fit: value.type === 'video' ? value.fit : 'cover',
+          loop: value.type === 'video' ? (value.loop ?? true) : true,
+          muted: value.type === 'video' ? (value.muted ?? true) : true,
+          autoplay: true,
+          ...(value.overlay ? { overlay: value.overlay } : {}),
+        })
+        setMode('video')
+      } else if (result.error) {
+        window.alert(result.error)
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const clearVideo = (): void => {
+    if (value.type !== 'video') return
+    onChange({
+      type: 'color',
+      color: '#0d0c0b',
+      ...(value.overlay ? { overlay: value.overlay } : {}),
+    })
+    setMode('color')
   }
 
   const overlay = value.overlay ?? 0
@@ -60,9 +99,9 @@ export function BackgroundEditor({
   return (
     <div className="background-editor">
       <div className="segmented">
-        {(['color', 'gradient', 'image'] as const).map((item) => (
+        {(['color', 'gradient', 'image', 'video'] as const).map((item) => (
           <button key={item} type="button" className={mode === item ? 'active' : ''} onClick={() => switchMode(item)}>
-            {item === 'color' ? 'Solid' : item === 'gradient' ? 'Gradient' : 'Image'}
+            {item === 'color' ? 'Solid' : item === 'gradient' ? 'Gradient' : item === 'image' ? 'Image' : 'Video'}
           </button>
         ))}
       </div>
@@ -146,10 +185,64 @@ export function BackgroundEditor({
                     <option value="contain">Contain</option>
                   </select>
                 </div>
-                <p className="hint">PNG, JPG, WEBP, GIF or BMP · up to 25 MB. Files are copied into PhoneDeck's data folder.</p>
+                <p className="hint">PNG, JPG, WEBP, GIF or BMP · animated GIFs play in the deck · up to 25 MB.</p>
               </>
             )
           })()}
+        </div>
+      )}
+
+      {mode === 'video' && (
+        <div className="stack">
+          <div className="media-preview">
+            {value.type === 'video' && value.asset ? (
+              <DeckMedia media={value} server={server} />
+            ) : (
+              <span className="media-placeholder">
+                <Icon name="video" size={22} />
+                {value.type === 'video' ? 'No video selected' : 'Choose a video to switch the background'}
+              </span>
+            )}
+          </div>
+          <div className="media-action-row">
+            <button type="button" className="button secondary" onClick={() => void chooseVideo()} disabled={busy}>
+              <Icon name="folder" size={16} />
+              {busy ? 'Importing…' : value.type === 'video' && value.asset ? 'Replace video' : 'Choose video'}
+            </button>
+            {value.type === 'video' && value.asset && (
+              <button type="button" className="button danger ghost small" onClick={clearVideo}>
+                Remove
+              </button>
+            )}
+            <select
+              aria-label="Video fit"
+              value={value.type === 'video' ? value.fit : 'cover'}
+              disabled={value.type !== 'video'}
+              onChange={(event) =>
+                value.type === 'video' && onChange({ ...value, fit: event.target.value as 'cover' | 'contain' })
+              }
+            >
+              <option value="cover">Cover</option>
+              <option value="contain">Contain</option>
+            </select>
+          </div>
+          {value.type === 'video' && (
+            <div className="media-options">
+              <Toggle
+                label="Loop"
+                checked={value.loop !== false}
+                onChange={(loop) => onChange({ ...value, loop })}
+              />
+              <Toggle
+                label="Muted"
+                checked={value.muted !== false}
+                onChange={(muted) => onChange({ ...value, muted })}
+              />
+            </div>
+          )}
+          <p className="hint">
+            MP4/H.264 is the most compatible format · up to 100 MB. Videos loop and stay muted by default.
+          </p>
         </div>
       )}
 

@@ -2,7 +2,8 @@ import { useState, type CSSProperties, type DragEvent } from 'react'
 import { addButton, capacity, createEmptyButton, moveButton } from '@phonedek/shared'
 import type { DeckConfig, DeckPage, DeckProfile } from '@phonedek/shared'
 import type { ServerInfoView } from '../../../shared/api'
-import { backgroundStyle, buttonBackground, textColorFor } from '../lib/ui'
+import { backgroundStyle, buttonBackground, isVideoBackground, textColorFor } from '../lib/ui'
+import { DeckMedia } from './DeckMedia'
 import { Icon } from './Icons'
 
 export function DeckCanvas({
@@ -59,13 +60,16 @@ export function DeckCanvas({
     }
   }
 
+  const pageBackground = page.background ?? profile.theme.background
+  const pageVideo = isVideoBackground(pageBackground) ? pageBackground : null
+
   const gridStyle: CSSProperties = {
     gridTemplateColumns: `repeat(${profile.grid.columns}, minmax(0, 1fr))`,
     gridTemplateRows: `repeat(${profile.grid.rows}, minmax(0, 1fr))`,
     gap: `${profile.grid.gap}px`,
     padding: `${profile.grid.padding}px`,
     aspectRatio: `${profile.grid.columns} / ${profile.grid.rows}`,
-    ...backgroundStyle(page.background ?? profile.theme.background, server),
+    ...backgroundStyle(pageBackground, server),
   }
 
   return (
@@ -82,6 +86,7 @@ export function DeckCanvas({
         </div>
         <div className="deck-frame">
           <div className="deck-grid" style={gridStyle} onDragLeave={() => setOverSlot(null)}>
+            {pageVideo && <DeckMedia media={pageVideo} server={server} className="deck-bg-media" />}
             {Array.from({ length: slots }, (_, slot) => {
               const button = bySlot.get(slot)
               if (!button) {
@@ -108,6 +113,8 @@ export function DeckCanvas({
 
               const isSelected = button.id === selectedButtonId
               const background = buttonBackground(button, page, profile, server)
+              const resolvedBackground = button.background ?? profile.theme.buttonBackground
+              const buttonVideo = isVideoBackground(resolvedBackground) ? resolvedBackground : null
               return (
                 <div
                   key={button.id}
@@ -140,8 +147,15 @@ export function DeckCanvas({
                     if (event.key === 'Enter' || event.key === ' ') onSelectButton(button.id)
                   }}
                 >
+                  {buttonVideo && <DeckMedia media={buttonVideo} server={server} className="deck-button-media" />}
                   <div className="deck-button-content">
-                    {button.icon && <span className="deck-icon">{button.icon}</span>}
+                    {button.iconMedia ? (
+                      <span className="deck-icon deck-icon-media">
+                        <DeckMedia media={button.iconMedia} server={server} fallback={button.icon || '＋'} />
+                      </span>
+                    ) : button.icon ? (
+                      <span className="deck-icon">{button.icon}</span>
+                    ) : null}
                     <span className="deck-label">{button.label || 'Untitled'}</span>
                     {button.sublabel && <span className="deck-sublabel">{button.sublabel}</span>}
                   </div>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, truncateSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AdmZip from 'adm-zip'
@@ -86,5 +86,61 @@ describe('backup archives', () => {
     const raw = readFileSync(target)
     expect(raw.length).toBeGreaterThan(100)
     expect(readBackupFile(target).config.profiles.length).toBe(config.profiles.length)
+  })
+
+  it('round-trips video assets alongside images', () => {
+    const dir = tempDir()
+    const assetsDir = join(dir, 'assets')
+    mkdirSync(assetsDir)
+    writeFileSync(join(assetsDir, 'wallpaper.png'), Buffer.from([1, 2]))
+    writeFileSync(join(assetsDir, 'intro.mp4'), Buffer.from([3, 4, 5]))
+    writeFileSync(join(assetsDir, 'icon.webm'), Buffer.from([6]))
+
+    const target = join(dir, 'media.zip')
+    const written = writeBackupFile(target, createDefaultConfig(), assetsDir)
+    expect(written.assets).toBe(3)
+    expect(written.warnings).toEqual([])
+
+    const read = readBackupFile(target)
+    expect(read.assets.get('intro.mp4')).toEqual(Buffer.from([3, 4, 5]))
+    expect(read.assets.get('icon.webm')).toEqual(Buffer.from([6]))
+    expect(read.warnings).toEqual([])
+  })
+
+  it('uses the video limit and skips unsupported or oversized files', () => {
+    const dir = tempDir()
+    const assetsDir = join(dir, 'assets')
+    mkdirSync(assetsDir)
+    writeFileSync(join(assetsDir, 'still.png'), Buffer.from([1]))
+
+    // A 26 MB video is valid now; the old shared 25 MB limit would drop it.
+    const longVideo = join(assetsDir, 'long.mp4')
+    writeFileSync(longVideo, '')
+    truncateSync(longVideo, 26 * 1024 * 1024)
+
+    const hugeVideo = join(assetsDir, 'huge.webm')
+    writeFileSync(hugeVideo, '')
+    truncateSync(hugeVideo, 100 * 1024 * 1024 + 1)
+
+    writeFileSync(join(assetsDir, 'notes.txt'), Buffer.from('nope'))
+
+    const written = writeBackupFile(join(dir, 'limits.zip'), createDefaultConfig(), assetsDir)
+    expect(written.assets).toBe(2)
+    expect(written.warnings.join(' ')).toMatch(/unsupported asset: notes\.txt/)
+    expect(written.warnings.join(' ')).toMatch(/oversized asset: huge\.webm/)
+  })
+
+  it('reads videos from a ZIP and warns about unsupported entries', () => {
+    const dir = tempDir()
+    const zip = new AdmZip()
+    zip.addFile('phonedek-config.json', Buffer.from(JSON.stringify(createDefaultConfig())))
+    zip.addFile('assets/clip.mp4', Buffer.from([9, 8, 7]))
+    zip.addFile('assets/readme.txt', Buffer.from('nope'))
+    const file = join(dir, 'media-in.zip')
+    zip.writeZip(file)
+
+    const read = readBackupFile(file)
+    expect(read.assets.get('clip.mp4')).toEqual(Buffer.from([9, 8, 7]))
+    expect(read.warnings.join(' ')).toMatch(/unsupported asset: readme\.txt/)
   })
 })

@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { CONFIG_SCHEMA_VERSION, type DeckConfig } from './types'
 import { isValidKeyName, normalizeCombo } from './keys'
+import { isImageAssetName, isVideoAssetName } from './media'
 
 const hexColor = z
   .string()
@@ -18,6 +19,15 @@ const assetName = z
   .max(128)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'Invalid asset name')
 
+const imageAssetName = assetName.refine(
+  isImageAssetName,
+  'Expected an image asset (.png, .jpg, .jpeg, .webp, .gif or .bmp)',
+)
+const videoAssetName = assetName.refine(
+  isVideoAssetName,
+  'Expected a video asset (.mp4, .webm, .m4v or .mov)',
+)
+
 const overlay = z.number().min(0).max(0.95).optional()
 
 export const BackgroundSchema = z.discriminatedUnion('type', [
@@ -31,11 +41,42 @@ export const BackgroundSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     type: z.literal('image'),
-    asset: assetName,
+    asset: imageAssetName,
     fit: z.enum(['cover', 'contain']),
     overlay,
   }),
+  z.object({
+    type: z.literal('video'),
+    asset: videoAssetName,
+    fit: z.enum(['cover', 'contain']),
+    loop: z.boolean().optional(),
+    muted: z.boolean().optional(),
+    autoplay: z.boolean().optional(),
+    overlay,
+  }),
 ])
+
+export const MediaIconSchema = z
+  .object({
+    type: z.enum(['image', 'video']),
+    asset: assetName,
+    fit: z.enum(['cover', 'contain']),
+    loop: z.boolean().optional(),
+    muted: z.boolean().optional(),
+  })
+  .superRefine((value, ctx) => {
+    const valid = value.type === 'video' ? isVideoAssetName(value.asset) : isImageAssetName(value.asset)
+    if (!valid) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['asset'],
+        message:
+          value.type === 'video'
+            ? 'Expected a video asset (.mp4, .webm, .m4v or .mov)'
+            : 'Expected an image asset (.png, .jpg, .jpeg, .webp, .gif or .bmp)',
+      })
+    }
+  })
 
 const keys = z
   .array(z.string().min(1).max(24))
@@ -144,6 +185,7 @@ export const ButtonSchema = z.object({
   label: z.string().max(60),
   sublabel: z.string().max(60).optional(),
   icon: z.string().max(32).optional(),
+  iconMedia: MediaIconSchema.optional(),
   background: BackgroundSchema.optional(),
   textColor: hexColor.optional(),
   actions: z.array(ActionSchema).max(16),

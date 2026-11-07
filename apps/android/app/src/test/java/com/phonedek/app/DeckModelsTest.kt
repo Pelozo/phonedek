@@ -1,10 +1,17 @@
 package com.phonedek.app
 
+import androidx.compose.ui.graphics.Color
+import com.phonedek.app.data.BackgroundDto
 import com.phonedek.app.data.DeckJson
+import com.phonedek.app.data.Pairing
+import com.phonedek.app.ui.BackgroundSpec
+import com.phonedek.app.ui.backgroundSpec
 import com.phonedek.app.util.parseEndpoint
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DeckModelsTest {
@@ -50,6 +57,151 @@ class DeckModelsTest {
         assertEquals("b1", profile.pages.single().buttons.single().id)
         assertEquals("page", profile.pages.single().buttons.single().actions[1].type)
         assertEquals(3, profile.pages.single().buttons.single().slot)
+        assertEquals("📋", profile.pages.single().buttons.single().icon)
+        assertNull(profile.pages.single().buttons.single().iconMedia)
+        assertEquals("gradient", profile.pages.single().buttons.single().background?.type)
+    }
+
+    @Test
+    fun parsesVideoBackgroundFields() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "background": {
+                    "type": "video",
+                    "asset": "ambient.mp4",
+                    "fit": "contain",
+                    "loop": false,
+                    "muted": false,
+                    "autoplay": false,
+                    "overlay": 0.4
+                  }
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val background = DeckJson.parse(raw)!!.profiles.single().pages.single().background!!
+        assertEquals("video", background.type)
+        assertEquals("ambient.mp4", background.asset)
+        assertEquals("contain", background.fit)
+        assertFalse(background.loop)
+        assertFalse(background.muted)
+        assertFalse(background.autoplay)
+        assertEquals(0.4f, background.overlay!!, 0.001f)
+    }
+
+    @Test
+    fun parsesImageAndVideoMediaIcons() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [
+                    {
+                      "id": "gif",
+                      "slot": 0,
+                      "icon": "🖼",
+                      "iconMedia": { "type": "image", "asset": "anim.gif", "fit": "contain" }
+                    },
+                    {
+                      "id": "clip",
+                      "slot": 1,
+                      "icon": "🎬",
+                      "iconMedia": {
+                        "type": "video", "asset": "clip.mp4", "fit": "cover",
+                        "loop": false, "muted": false
+                      }
+                    }
+                  ]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val buttons = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons
+        val image = buttons.first { it.id == "gif" }.iconMedia!!
+        val video = buttons.first { it.id == "clip" }.iconMedia!!
+        assertEquals("image", image.type)
+        assertEquals("anim.gif", image.asset)
+        assertEquals("contain", image.fit)
+        assertEquals("video", video.type)
+        assertEquals("clip.mp4", video.asset)
+        assertEquals("cover", video.fit)
+        assertFalse(video.loop)
+        assertFalse(video.muted)
+    }
+
+    @Test
+    fun mediaDefaultsApplyWhenOptionalFieldsAreMissing() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "background": { "type": "video", "asset": "ambient.webm" },
+                  "buttons": [{
+                    "id": "clip",
+                    "slot": 0,
+                    "label": "Clip",
+                    "iconMedia": { "type": "video", "asset": "clip.mp4" }
+                  }]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val page = DeckJson.parse(raw)!!.profiles.single().pages.single()
+        val background = page.background!!
+        assertEquals("cover", background.fit)
+        assertTrue(background.loop)
+        assertTrue(background.muted)
+        assertTrue(background.autoplay)
+
+        val media = page.buttons.single().iconMedia!!
+        assertEquals("cover", media.fit)
+        assertTrue(media.loop)
+        assertTrue(media.muted)
+    }
+
+    @Test
+    fun unknownMediaAndBackgroundTypesFallBackSafely() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "background": { "type": "hologram", "color": "#123456" },
+                  "buttons": [{
+                    "id": "bad",
+                    "slot": 0,
+                    "icon": "❓",
+                    "iconMedia": { "type": "audio", "asset": "sound.ogg" }
+                  }]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val page = DeckJson.parse(raw)!!.profiles.single().pages.single()
+        assertNull(page.buttons.single().iconMedia)
+        assertEquals("❓", page.buttons.single().icon)
+        assertTrue(backgroundSpec(page.background, null, Color.Black) is BackgroundSpec.Solid)
+
+        val paired = Pairing("127.0.0.1", 47654, "1234", "Desk")
+        val missingAsset = backgroundSpec(
+            BackgroundDto(type = "video", asset = null),
+            paired,
+            Color.Black,
+        )
+        assertTrue(missingAsset is BackgroundSpec.Solid)
     }
 
     @Test

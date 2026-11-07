@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { ActionSchema, validateConfig } from '@phonedek/shared'
-import type { Action, DeckConfig, PressResult } from '@phonedek/shared'
+import type { Action, AssetKind, DeckConfig, PressResult } from '@phonedek/shared'
 import { AssetStore } from './assets'
 import { readBackupFile, writeBackupFile } from './backup'
 import { ConfigStore } from './config-store'
@@ -248,16 +248,23 @@ function registerIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.importAsset, async (): Promise<AssetPickResult> => {
+  ipcMain.handle(IPC.importAsset, async (_event, requested?: unknown): Promise<AssetPickResult> => {
+    if (requested !== undefined && requested !== 'image' && requested !== 'video') {
+      return { ok: false, error: 'Asset kind must be "image" or "video"' }
+    }
+    const kind: AssetKind = requested ?? 'image'
+    const video = kind === 'video'
     const result = await showOpen({
-      title: 'Choose a button background',
+      title: video ? 'Choose a video for the background or icon' : 'Choose an image for the background or icon',
       properties: ['openFile'],
-      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }],
+      filters: video
+        ? [{ name: 'Videos', extensions: ['mp4', 'webm', 'm4v', 'mov'] }]
+        : [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }],
     })
     const source = result.filePaths[0]
     if (result.canceled || !source) return { ok: false }
     try {
-      return { ok: true, asset: assets.importFile(source) }
+      return { ok: true, asset: assets.importFile(source, kind) }
     } catch (error) {
       return { ok: false, error: (error as Error).message }
     }

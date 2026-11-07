@@ -38,7 +38,33 @@ export interface ImageBackground {
   overlay?: number
 }
 
-export type Background = ColorBackground | GradientBackground | ImageBackground
+export interface VideoBackground {
+  type: 'video'
+  /** File name inside the desktop asset store, never a path. */
+  asset: string
+  fit: 'cover' | 'contain'
+  /** Defaults to true when omitted. */
+  loop?: boolean
+  /** Defaults to true when omitted. */
+  muted?: boolean
+  /** Defaults to true when omitted. */
+  autoplay?: boolean
+  overlay?: number
+}
+
+export type Background = ColorBackground | GradientBackground | ImageBackground | VideoBackground
+
+/** Animated GIF/video icon. `button.icon` remains the emoji fallback. */
+export interface MediaIcon {
+  type: 'image' | 'video'
+  /** File name inside the desktop asset store, never a path. */
+  asset: string
+  fit: 'cover' | 'contain'
+  /** Video defaults to true when omitted. */
+  loop?: boolean
+  /** Video defaults to true when omitted. */
+  muted?: boolean
+}
 
 export interface GridSettings {
   /** 1..10 */
@@ -188,8 +214,10 @@ export interface DeckButton {
   slot: number
   label: string
   sublabel?: string
-  /** Short emoji or text shown above the label. */
+  /** Short emoji or text shown above the label. Also the fallback for iconMedia. */
   icon?: string
+  /** Preferred over `icon` when present. */
+  iconMedia?: MediaIcon
   /** Overrides the profile's default button background. */
   background?: Background
   textColor?: HexColor

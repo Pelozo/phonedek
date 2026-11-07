@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import AdmZip from 'adm-zip'
-import { validateConfig } from '@phonedek/shared'
+import { assetKindFromName, assetMaxBytes, validateConfig } from '@phonedek/shared'
 import type { DeckConfig } from '@phonedek/shared'
 import { isSafeAssetName } from './assets'
 
@@ -9,7 +9,6 @@ const CONFIG_ENTRY = 'phonedek-config.json'
 const LEGACY_CONFIG_ENTRY = 'config.json'
 const ASSET_PREFIX = 'assets/'
 const MAX_CONFIG_BYTES = 5 * 1024 * 1024
-const MAX_ASSET_BYTES = 25 * 1024 * 1024
 const MAX_TOTAL_BYTES = 300 * 1024 * 1024
 const MAX_ENTRIES = 2000
 
@@ -17,7 +16,7 @@ const README = `PhoneDeck backup
 
 This ZIP contains:
   phonedek-config.json  profiles, pages, buttons and actions
-  assets/               background images referenced by the config
+  assets/               background images/clips and media icons referenced by the config
 
 Import it from PhoneDeck Desktop -> Settings -> Import.
 The pairing PIN and port are not included; pairing is per installation.
@@ -90,7 +89,12 @@ export function readBackupFile(source: string, sourceName = basename(source)): B
       warnings.push(`Skipped unsafe asset entry: ${name}`)
       continue
     }
-    if (declaredSize > MAX_ASSET_BYTES) {
+    const kind = assetKindFromName(assetName)
+    if (!kind) {
+      warnings.push(`Skipped unsupported asset: ${assetName}`)
+      continue
+    }
+    if (declaredSize > assetMaxBytes(kind)) {
       warnings.push(`Skipped oversized asset: ${assetName}`)
       continue
     }
@@ -102,7 +106,7 @@ export function readBackupFile(source: string, sourceName = basename(source)): B
   return { config: parseConfigText(configText, CONFIG_ENTRY), assets, warnings }
 }
 
-/** Create a ZIP with the current config and every image in the asset store. */
+/** Create a ZIP with the current config and every image/video in the asset store. */
 export function writeBackupFile(target: string, config: DeckConfig, assetsDir: string): BackupWriteResult {
   const zip = new AdmZip()
   zip.addFile(CONFIG_ENTRY, Buffer.from(`${JSON.stringify(config, null, 2)}\n`, 'utf8'))
@@ -113,11 +117,16 @@ export function writeBackupFile(target: string, config: DeckConfig, assetsDir: s
   const warnings: string[] = []
   for (const name of readdirSync(assetsDir)) {
     if (!isSafeAssetName(name)) continue
+    const kind = assetKindFromName(name)
+    if (!kind) {
+      warnings.push(`Skipped unsupported asset: ${name}`)
+      continue
+    }
     const path = join(assetsDir, name)
     try {
       const stats = statSync(path)
       if (!stats.isFile()) continue
-      if (stats.size > MAX_ASSET_BYTES) {
+      if (stats.size > assetMaxBytes(kind)) {
         warnings.push(`Skipped oversized asset: ${name}`)
         continue
       }

@@ -4,7 +4,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -13,11 +19,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.phonedek.app.data.BackgroundDto
 import com.phonedek.app.data.Pairing
 import com.phonedek.app.net.assetUrl
+import com.phonedek.app.util.Diag
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
@@ -41,6 +56,17 @@ sealed interface BackgroundSpec {
         val url: String,
         val token: String,
         val fit: ContentScale,
+        val fallback: Color,
+        override val overlay: Float,
+    ) : BackgroundSpec
+
+    data class Video(
+        val url: String,
+        val token: String,
+        val fit: ContentScale,
+        val loop: Boolean,
+        val muted: Boolean,
+        val autoplay: Boolean,
         val fallback: Color,
         override val overlay: Float,
     ) : BackgroundSpec
@@ -78,7 +104,7 @@ fun backgroundSpec(
     fallback: Color,
 ): BackgroundSpec {
     if (background == null) return BackgroundSpec.Solid(fallback, 0f)
-    val overlay = (background.overlay ?: 0f).coerceIn(0f, 1f)
+    val overlay = (background.overlay ?: 0f).coerceIn(0f, 0.95f)
 
     return when (background.type) {
         "gradient" -> BackgroundSpec.Gradient(
@@ -107,6 +133,29 @@ fun backgroundSpec(
             }
         }
 
+        "video" -> {
+            val current = pairing
+            val url = current?.let {
+                background.asset?.takeIf(String::isNotBlank)?.let { asset ->
+                    assetUrl(it.host, it.port, asset)
+                }
+            }
+            if (url == null) {
+                BackgroundSpec.Solid(fallback, overlay)
+            } else {
+                BackgroundSpec.Video(
+                    url = url,
+                    token = current?.token.orEmpty(),
+                    fit = if (background.fit == "contain") ContentScale.Fit else ContentScale.Crop,
+                    loop = background.loop,
+                    muted = background.muted,
+                    autoplay = background.autoplay,
+                    fallback = fallback,
+                    overlay = overlay,
+                )
+            }
+        }
+
         else -> BackgroundSpec.Solid(
             color = parseHexColor(background.color, fallback),
             overlay = overlay,
@@ -115,7 +164,11 @@ fun backgroundSpec(
 }
 
 @Composable
-fun BackgroundLayer(spec: BackgroundSpec, modifier: Modifier = Modifier) {
+fun BackgroundLayer(
+    spec: BackgroundSpec,
+    modifier: Modifier = Modifier,
+    isActive: Boolean = true,
+) {
     val context = LocalContext.current
     Box(modifier) {
         when (spec) {
@@ -151,6 +204,19 @@ fun BackgroundLayer(spec: BackgroundSpec, modifier: Modifier = Modifier) {
                     modifier = Modifier.fillMaxSize(),
                 )
             }
+
+            is BackgroundSpec.Video -> {
+                Box(Modifier.fillMaxSize().background(spec.fallback))
+                VideoSurface(
+                    url = spec.url,
+                    fit = spec.fit,
+                    loop = spec.loop,
+                    muted = spec.muted,
+                    autoplay = spec.autoplay,
+                    isActive = isActive,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
 
         if (spec.overlay > 0f) {
@@ -162,6 +228,93 @@ fun BackgroundLayer(spec: BackgroundSpec, modifier: Modifier = Modifier) {
         }
     }
 }
+
+/**
+ * Small Media3 surface shared by video backgrounds and video button icons.
+ * The caller keeps its solid/emoji fallback behind this view and provides
+ * [onError], which fires after the player has been paused and hidden.
+ */
+@androidx.annotation.OptIn(UnstableApi::class)
+@Composable
+fun VideoSurface(
+    url: String,
+    fit: ContentScale,
+    loop: Boolean,
+    muted: Boolean,
+    autoplay: Boolean,
+    isActive: Boolean,
+    modifier: Modifier = Modifier,
+    onError: () -> Unit = {},
+) {
+    val context = LocalContext.current
+    var failed by remember(url) { mutableStateOf(false) }
+    val currentOnError by rememberUpdatedState(onError)
+    val exoPlayer = remember(url) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(url))
+            repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+            volume = if (muted) 0f else 1f
+            playWhenReady = autoplay && isActive
+        }
+    }
+
+    LaunchedEffect(exoPlayer) {
+        exoPlayer.prepare()
+    }
+
+    DisposableEffect(exoPlayer) {
+        val listener = object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+                val message = error.message?.let(Diag::redactUrl) ?: "no message"
+                Diag.w("Video playback failed (${error.errorCodeName}): $message")
+                failed = true
+                exoPlayer.pause()
+                currentOnError()
+            }
+        }
+        exoPlayer.addListener(listener)
+        onDispose {
+            exoPlayer.removeListener(listener)
+            exoPlayer.release()
+        }
+    }
+
+    LaunchedEffect(exoPlayer, isActive, autoplay, loop, muted, failed) {
+        exoPlayer.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+        exoPlayer.volume = if (muted) 0f else 1f
+        if (failed || !isActive || !autoplay) {
+            exoPlayer.pause()
+        } else {
+            exoPlayer.play()
+        }
+    }
+
+    if (!failed) {
+        AndroidView(
+            modifier = modifier,
+            factory = { viewContext ->
+                PlayerView(viewContext).apply {
+                    useController = false
+                    resizeMode = resizeModeFor(fit)
+                    setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                    player = exoPlayer
+                }
+            },
+            update = { view ->
+                view.player = exoPlayer
+                view.resizeMode = resizeModeFor(fit)
+            },
+        )
+    }
+}
+
+@androidx.annotation.OptIn(UnstableApi::class)
+private fun resizeModeFor(fit: ContentScale): Int =
+    if (fit == ContentScale.Fit) {
+        AspectRatioFrameLayout.RESIZE_MODE_FIT
+    } else {
+        AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+    }
 
 private fun DrawScope.drawDeckGradient(spec: BackgroundSpec.Gradient) {
     val radians = Math.toRadians(spec.angle.toDouble())

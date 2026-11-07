@@ -142,6 +142,64 @@ describe('DeckServer HTTP', () => {
     expect((await fetch(url(base, '/assets/..%2Fconfig.json', h.token))).status).toBe(404)
   })
 
+  it('supports byte ranges, HEAD and 416 for video assets', async () => {
+    const h = await harness()
+    const bytes = Buffer.from([0, 1, 2, 3, 4, 5, 6, 7])
+    expect(h.assets.importBuffer('clip.mp4', bytes)).toBe(true)
+    const base = `http://127.0.0.1:${h.port}`
+    const assetUrl = url(base, '/assets/clip.mp4', h.token)
+
+    // Unauthenticated requests are still rejected.
+    expect((await fetch(`${base}/assets/clip.mp4`)).status).toBe(401)
+
+    const full = await fetch(assetUrl)
+    expect(full.status).toBe(200)
+    expect(full.headers.get('accept-ranges')).toBe('bytes')
+    expect(full.headers.get('content-type')).toBe('video/mp4')
+    expect(full.headers.get('content-length')).toBe('8')
+    expect(Buffer.from(await full.arrayBuffer())).toEqual(bytes)
+
+    const partial = await fetch(assetUrl, { headers: { Range: 'bytes=2-4' } })
+    expect(partial.status).toBe(206)
+    expect(partial.headers.get('accept-ranges')).toBe('bytes')
+    expect(partial.headers.get('content-range')).toBe('bytes 2-4/8')
+    expect(partial.headers.get('content-length')).toBe('3')
+    expect(Buffer.from(await partial.arrayBuffer())).toEqual(bytes.subarray(2, 5))
+
+    const openEnded = await fetch(assetUrl, { headers: { Range: 'bytes=5-' } })
+    expect(openEnded.status).toBe(206)
+    expect(openEnded.headers.get('content-range')).toBe('bytes 5-7/8')
+    expect(Buffer.from(await openEnded.arrayBuffer())).toEqual(bytes.subarray(5))
+
+    const suffix = await fetch(assetUrl, { headers: { Range: 'bytes=-3' } })
+    expect(suffix.status).toBe(206)
+    expect(suffix.headers.get('content-range')).toBe('bytes 5-7/8')
+    expect(Buffer.from(await suffix.arrayBuffer())).toEqual(bytes.subarray(5))
+
+    const clamped = await fetch(assetUrl, { headers: { Range: 'bytes=2-999' } })
+    expect(clamped.status).toBe(206)
+    expect(clamped.headers.get('content-range')).toBe('bytes 2-7/8')
+    expect(Buffer.from(await clamped.arrayBuffer())).toEqual(bytes.subarray(2))
+
+    const head = await fetch(assetUrl, { method: 'HEAD' })
+    expect(head.status).toBe(200)
+    expect(head.headers.get('accept-ranges')).toBe('bytes')
+    expect(head.headers.get('content-length')).toBe('8')
+    expect((await head.arrayBuffer()).byteLength).toBe(0)
+
+    const headRange = await fetch(assetUrl, { method: 'HEAD', headers: { Range: 'bytes=1-2' } })
+    expect(headRange.status).toBe(206)
+    expect(headRange.headers.get('content-range')).toBe('bytes 1-2/8')
+    expect(headRange.headers.get('content-length')).toBe('2')
+    expect((await headRange.arrayBuffer()).byteLength).toBe(0)
+
+    for (const range of ['bytes=99-100', 'bytes=4-2', 'bytes=abc', 'bytes=0-1,3-4']) {
+      const invalid = await fetch(assetUrl, { headers: { Range: range } })
+      expect(invalid.status, range).toBe(416)
+      expect(invalid.headers.get('content-range')).toBe('bytes */8')
+    }
+  })
+
   it('executes HTTP press fallback', async () => {
     const h = await harness()
     const button = h.config.profiles[0]!.pages[0]!.buttons[0]!
