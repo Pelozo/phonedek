@@ -1,26 +1,37 @@
 /**
- * Give the unsigned macOS build a stable code identity.
+ * Give the macOS build a stable code identity.
  *
  * With `mac.identity: null` electron-builder skips signing, so the main
  * executable keeps the prebuilt Electron signature (identifier "Electron").
- * macOS TCC then attributes the Swift keyboard helper to that "Electron"
- * identity, while the privacy pane stores the grant under the bundle ID
- * (com.phonedek.desktop). Result: the toggle looks enabled but the helper is
- * still denied.
+ * macOS TCC then attributes the Swift keyboard helper to that identity while
+ * the privacy pane stores the grant under the bundle ID, so the toggle misses
+ * the helper.
  *
- * Ad-hoc signing the two executables with the app identifier makes TCC see one
- * consistent identity, so the native permission prompt is enough and users do
- * not have to add the inner binary by hand.
- *
- * This is not Developer ID signing/notarization; Gatekeeper still treats the
- * app as unsigned. It only fixes TCC attribution.
+ * We always ad-hoc sign the two executables with explicit identifiers. If a
+ * local self-signed "PhoneDeck Local Signing" certificate exists (see
+ * scripts/make-signing-cert.sh), we use it instead: TCC then records a
+ * certificate-based requirement that survives rebuilds.
  */
 const { execFileSync } = require('node:child_process')
 const { existsSync } = require('node:fs')
 const path = require('node:path')
 
-function adHocSign(target, identifier) {
-  execFileSync('codesign', ['--force', '--sign', '-', '--identifier', identifier, target], {
+function resolveIdentity() {
+  if (process.env.PHONEDEK_SIGN_IDENTITY) return process.env.PHONEDEK_SIGN_IDENTITY
+  try {
+    const out = execFileSync('security', ['find-identity', '-v', '-p', 'codesigning'], {
+      encoding: 'utf8',
+    })
+    const match = out.match(/"(PhoneDeck Local Signing[^"]*)"/)
+    if (match) return match[1]
+  } catch {
+    // `security` is macOS-only; keep ad-hoc signing if it is unavailable.
+  }
+  return '-'
+}
+
+function sign(target, identifier, identity) {
+  execFileSync('codesign', ['--force', '--sign', identity, '--identifier', identifier, target], {
     stdio: 'inherit',
   })
 }
@@ -33,7 +44,8 @@ module.exports = async function afterPack(context) {
   const appPath = path.join(context.appOutDir, `${appName}.app`)
   const executable = path.join(appPath, 'Contents', 'MacOS', appName)
   const helper = path.join(appPath, 'Contents', 'Resources', 'keyboard-helper')
+  const identity = resolveIdentity()
 
-  if (existsSync(executable)) adHocSign(executable, appId)
-  if (existsSync(helper)) adHocSign(helper, `${appId}.keyboard-helper`)
+  if (existsSync(executable)) sign(executable, appId, identity)
+  if (existsSync(helper)) sign(helper, `${appId}.keyboard-helper`, identity)
 }

@@ -78,22 +78,26 @@ function requestAccessibilityPermission(prompt: boolean): boolean {
   }
 }
 
+let lastPermissionGranted: boolean | null = null
+
 async function buildPermissionStatus(): Promise<PermissionStatus> {
   const supported = process.platform === 'darwin'
   const granted = supported ? requestAccessibilityPermission(false) : true
-  let helperGranted: boolean | null = null
-  if (supported) {
-    if (!granted) helperGranted = false
-    else if (keySender?.probeAccessibility) helperGranted = await keySender.probeAccessibility()
+  // A helper that started before the privacy switch was flipped can keep the
+  // cached denial; respawn it when permission becomes available so the grant
+  // takes effect without relaunching the app.
+  if (supported && granted && lastPermissionGranted === false) {
+    void keySender?.restart?.().catch(() => {
+      // The next command retries starting the helper.
+    })
   }
+  lastPermissionGranted = supported ? granted : null
   return {
     platform: process.platform,
     supported,
     granted,
-    helperGranted,
     paneName: macPrivacyPaneName(),
-    appPath: process.execPath ?? null,
-    helperPath: supported ? helperPath() : null,
+    appPath: supported ? (process.execPath ?? null) : null,
   }
 }
 
@@ -389,10 +393,10 @@ function registerIpc(): void {
     if (process.platform === 'darwin') requestAccessibilityPermission(true)
     return buildPermissionStatus()
   })
-  ipcMain.handle(IPC.revealPermissionHelper, async (): Promise<void> => {
+  ipcMain.handle(IPC.revealPermissionFile, async (_event, kind: unknown): Promise<void> => {
     if (process.platform !== 'darwin') return
-    const helper = helperPath()
-    shell.showItemInFolder(existsSync(helper) ? helper : process.execPath)
+    const target = kind === 'app' ? process.execPath : kind === 'helper' ? helperPath() : null
+    if (target && existsSync(target)) shell.showItemInFolder(target)
   })
 
   ipcMain.handle(IPC.openExternal, async (_event, url: string): Promise<void> => {

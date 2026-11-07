@@ -88,6 +88,23 @@ npm run dist:mac:universal -w @phonedek/desktop
 only packaging for macOS does. The helper binary is ignored by git and is built
 by CI or locally.
 
+### Stable local signing (recommended if you rebuild often)
+
+Every ad-hoc rebuild changes the cdhash, so macOS 27 drops the privacy grant and
+you have to add the executable again. Create a local self-signed code-signing
+certificate once:
+
+```sh
+npm run make-signing-cert -w @phonedek/desktop
+```
+
+Then package normally. `after-pack.cjs` detects `PhoneDeck Local Signing` (or
+`PHONEDEK_SIGN_IDENTITY`) and signs with it; electron-builder auto-discovers the
+same identity and signs the whole bundle. TCC then stores a certificate-based
+requirement that survives rebuilds. The certificate is trusted only in your
+login keychain; nothing is committed, and Gatekeeper still treats the app as
+unsigned (not notarized).
+
 ## CI
 
 The `macos` job runs on `macos-latest`, asserts the runner is arm64, installs
@@ -110,10 +127,18 @@ ZIP and verifies that the bundled helper is executable, arm64 and passes
    PhoneDeck banner or **PhoneDeck → Grant … Permission…**, which opens the
    native macOS alert. In System Settings the pane is **Privacy & Security →
    Accessibility**, renamed **Device Control and Data Access** on macOS 27
-   (same TCC service, same `…?Privacy_Accessibility` deep link). The app menu
-   also has **Open … Settings**. If an existing grant survives a rebuild but
-   input still fails, remove the row and re-add it — rebuilding changes the
-   ad-hoc signature. Restart PhoneDeck if input still fails.
+   (same TCC service, same `…?Privacy_Accessibility` deep link).
+
+   On macOS 27 the prompt's entry is sometimes not enough for an unsigned
+   build; add the executable itself with **+** or by dragging it from Finder:
+
+   ```
+   /Applications/PhoneDeck.app/Contents/MacOS/PhoneDeck
+   ```
+
+   Settings → Input permission shows that path with **Show app file** and
+   **Copy**. Only the executable is required — the helper inherits the app's
+   decision. Restart PhoneDeck if input still fails.
 4. Allow incoming connections and, on macOS 15+, **Local Network** access so
    pairing/discovery work. Third-party firewalls need TCP 47654 and UDP 47655.
 
@@ -124,10 +149,12 @@ injection. Secure Input/password prompts can still block synthetic input.
 
 - **Unsigned**: every rebuild may change the ad-hoc signature and revoke the
   Accessibility grant. Gatekeeper bypass is required on each reinstall.
-- **TCC identity**: `scripts/after-pack.cjs` ad-hoc signs the main executable
-  and the helper with the app identifier (`com.phonedek.desktop` and
+- **TCC identity**: `scripts/after-pack.cjs` signs the main executable and the
+  helper with the app identifier (`com.phonedek.desktop` and
   `…keyboard-helper`). Without that, macOS 27 attributes input permission to
-  the prebuilt Electron identity and the privacy toggle misses the helper.
+  the prebuilt Electron identity and the privacy toggle misses the app. On
+  macOS 27 the app executable may still need to be added as a file (Settings →
+  Input permission shows its path).
 - **No auto-update**: Squirrel.Mac requires a signed, notarized app. The in-app
   updater is disabled on macOS and points users at manual DMG updates. Config
   and assets in `~/Library/Application Support/PhoneDeck` survive replacement.

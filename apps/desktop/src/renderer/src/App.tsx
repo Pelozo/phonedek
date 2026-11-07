@@ -171,9 +171,9 @@ export default function App() {
     }
   }, [showToast])
 
-  const revealPermissionHelper = useCallback(async (): Promise<void> => {
+  const revealPermissionFile = useCallback(async (kind: 'app' | 'helper'): Promise<void> => {
     try {
-      await window.phonedek.revealPermissionHelper()
+      await window.phonedek.revealPermissionFile(kind)
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), 'error')
     }
@@ -398,7 +398,7 @@ export default function App() {
             busy={permissionBusy}
             onGrant={() => void grantPermission()}
             onOpenSettings={() => void openPermissionSettings()}
-            onRevealHelper={() => void revealPermissionHelper()}
+            onRevealApp={() => void revealPermissionFile('app')}
             onDismiss={() => setPermissionDismissed(true)}
           />
         )}

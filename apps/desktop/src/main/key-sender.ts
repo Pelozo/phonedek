@@ -7,6 +7,8 @@ export interface KeySender {
   send(step: KeyboardPlanStep): Promise<void>
   /** Whether the helper can inject input right now (macOS TCC check). */
   probeAccessibility?(): Promise<boolean>
+  /** Restart a helper that cached a permission denial. */
+  restart?(): Promise<void>
   dispose?(): void
 }
 
@@ -83,6 +85,17 @@ export class HelperKeySender implements KeySender {
     } catch {
       return false
     }
+  }
+
+  /**
+   * macOS caches permission decisions per process, so a helper that started
+   * before the user flipped the privacy switch keeps failing. Respawn it
+   * without marking the sender disposed so the next probe/command retries.
+   */
+  async restart(): Promise<void> {
+    if (this.disposed) return
+    this.kill()
+    await this.ensureStarted()
   }
 
   private async sendRaw(step: object): Promise<void> {

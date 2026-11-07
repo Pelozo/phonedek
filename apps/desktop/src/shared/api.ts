@@ -84,14 +84,10 @@ export interface PermissionStatus {
   /** False on platforms that do not gate synthetic input. */
   supported: boolean
   granted: boolean
-  /** Whether the helper itself can inject input; null while unknown. */
-  helperGranted: boolean | null
   /** Localized pane name: "Device Control and Data Access" on macOS 27+. */
   paneName: string
-  /** Main executable inside the app bundle. */
+  /** Main executable that macOS must authorize. */
   appPath: string | null
-  /** The Swift helper that actually posts input events. */
-  helperPath: string | null
 }
 
 export interface PhoneDeckApi {
@@ -113,7 +109,7 @@ export interface PhoneDeckApi {
   copyText(text: string): Promise<void>
   getPermissionStatus(): Promise<PermissionStatus>
   requestPermission(): Promise<PermissionStatus>
-  revealPermissionHelper(): Promise<void>
+  revealPermissionFile(kind: 'app' | 'helper'): Promise<void>
   getUpdateStatus(): Promise<UpdateStatus>
   checkForUpdates(): Promise<UpdateStatus>
   installUpdate(): Promise<void>
@@ -141,7 +137,7 @@ export const IPC = {
   copyText: 'phonedek:copy-text',
   getPermissionStatus: 'phonedek:get-permission-status',
   requestPermission: 'phonedek:request-permission',
-  revealPermissionHelper: 'phonedek:reveal-permission-helper',
+  revealPermissionFile: 'phonedek:reveal-permission-file',
   getUpdateStatus: 'phonedek:update-get-status',
   checkForUpdates: 'phonedek:update-check',
   installUpdate: 'phonedek:update-install',

@@ -178,11 +178,13 @@ docs/
 
 1. Download `PhoneDeck-0.1.4-arm64.dmg` from the release and drag PhoneDeck to **Applications**.
 2. Gatekeeper: right-click the app → **Open**, or use **System Settings → Privacy & Security → Open Anyway**.
-3. Grant **Accessibility** for key/mouse actions. PhoneDeck shows a banner with a
-   **Grant permission** button that opens the native macOS prompt; the app menu
-   has the same action. The pane is **System Settings → Privacy & Security →
-   Accessibility**, renamed **Device Control and Data Access** on macOS 27.
-   Allow **Local Network** on macOS 15+ for pairing/discovery.
+3. Grant **input control** for key/mouse actions. PhoneDeck shows a banner with a
+   **Grant permission** button that opens the native macOS prompt. The pane is
+   **System Settings → Privacy & Security → Accessibility**, renamed **Device
+   Control and Data Access** on macOS 27. If the switch alone doesn't stick, add
+   `/Applications/PhoneDeck.app/Contents/MacOS/PhoneDeck` as a file — Settings →
+   Input permission has **Show app file** and **Copy** for it. Allow **Local
+   Network** on macOS 15+ for pairing/discovery.
 4. Pair with the 4-digit PIN or QR exactly like Windows.
 
 The macOS build is unsigned and arm64-only; in-app auto-update is disabled there until Developer ID signing/notarization. See [docs/MACOS.md](docs/MACOS.md).
