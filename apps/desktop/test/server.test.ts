@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import AdmZip from 'adm-zip'
 import { WebSocket } from 'ws'
 import { createDefaultConfig } from '@phonedek/shared'
 import type { ClientMessage, DeckConfig, PressMessage, ServerMessage } from '@phonedek/shared'
@@ -92,8 +93,14 @@ describe('DeckServer HTTP', () => {
 
     const info = await fetch(`${base}/api/info`)
     expect(info.status).toBe(200)
-    const infoBody = (await info.json()) as { app: string; serverName: string; protocol: number }
+    const infoBody = (await info.json()) as {
+      app: string
+      serverName: string
+      protocol: number
+      capabilities?: string[]
+    }
     expect(infoBody).toMatchObject({ app: 'PhoneDeck', serverName: 'Test deck', protocol: 1 })
+    expect(infoBody.capabilities).toContain('backup-export-v1')
 
     expect((await fetch(`${base}/api/config`)).status).toBe(401)
     expect((await fetch(`${base}/api/config?token=wrong`)).status).toBe(401)
@@ -197,6 +204,83 @@ describe('DeckServer HTTP', () => {
       const invalid = await fetch(assetUrl, { headers: { Range: range } })
       expect(invalid.status, range).toBe(416)
       expect(invalid.headers.get('content-range')).toBe('bytes */8')
+    }
+  })
+
+  it('exports a ZIP backup with auth, headers and temp cleanup', async () => {
+    const h = await harness()
+    const base = `http://127.0.0.1:${h.port}`
+    const before = new Set(readdirSync(tmpdir()).filter((name) => name.startsWith('phonedek-export-')))
+
+    expect((await fetch(`${base}/api/backup`)).status).toBe(401)
+
+    const response = await fetch(url(base, '/api/backup', h.token))
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toBe('application/zip')
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(response.headers.get('accept-ranges')).toBe('bytes')
+    expect(response.headers.get('content-disposition')).toMatch(
+      /^attachment; filename="phonedek-backup-\d{8}-\d{6}\.zip"$/,
+    )
+
+    const buffer = Buffer.from(await response.arrayBuffer())
+    expect(buffer.subarray(0, 2).toString('latin1')).toBe('PK')
+    expect(Number(response.headers.get('content-length'))).toBe(buffer.length)
+
+    // Empty asset store still produces the existing config + README ZIP.
+    const zip = new AdmZip(buffer)
+    expect(zip.getEntry('phonedek-config.json')).toBeTruthy()
+    expect(zip.getEntry('README.txt')).toBeTruthy()
+    expect(zip.readAsText('phonedek-config.json')).toContain('Test deck')
+
+    await waitFor(() =>
+      readdirSync(tmpdir())
+        .filter((name) => name.startsWith('phonedek-export-'))
+        .every((name) => before.has(name)),
+    )
+  })
+
+  it('supports HEAD and inclusive Range for backups', async () => {
+    const h = await harness()
+    const base = `http://127.0.0.1:${h.port}`
+    const backupUrl = url(base, '/api/backup', h.token)
+
+    const head = await fetch(backupUrl, { method: 'HEAD' })
+    expect(head.status).toBe(200)
+    expect(head.headers.get('content-type')).toBe('application/zip')
+    expect(head.headers.get('content-disposition')).toMatch(/^attachment; filename="phonedek-backup-/)
+    expect(Number(head.headers.get('content-length'))).toBeGreaterThan(0)
+    expect((await head.arrayBuffer()).byteLength).toBe(0)
+
+    const range = await fetch(backupUrl, { headers: { Range: 'bytes=0-1' } })
+    expect(range.status).toBe(206)
+    expect(range.headers.get('content-range')).toMatch(/^bytes 0-1\/\d+$/)
+    expect(range.headers.get('content-length')).toBe('2')
+    const bytes = Buffer.from(await range.arrayBuffer())
+    expect(bytes).toHaveLength(2)
+    expect(bytes.toString('latin1')).toBe('PK')
+
+    const invalid = await fetch(backupUrl, { headers: { Range: 'bytes=999999999-' } })
+    expect(invalid.status).toBe(416)
+    expect(invalid.headers.get('content-range')).toMatch(/^bytes \*\/\d+$/)
+  })
+
+  it('snapshots current assets and handles concurrent exports', async () => {
+    const h = await harness()
+    const source = join(tmpdir(), `phonedek-backup-asset-${Date.now()}.png`)
+    writeFileSync(source, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+    const asset = h.assets.importFile(source)
+    const base = `http://127.0.0.1:${h.port}`
+    const target = url(base, '/api/backup', h.token)
+
+    const [first, second] = await Promise.all([fetch(target), fetch(target)])
+    expect(first.status).toBe(200)
+    expect(second.status).toBe(200)
+
+    for (const response of [first, second]) {
+      const zip = new AdmZip(Buffer.from(await response.arrayBuffer()))
+      expect(zip.getEntry('phonedek-config.json')).toBeTruthy()
+      expect(zip.getEntry(`assets/${asset}`)).toBeTruthy()
     }
   })
 

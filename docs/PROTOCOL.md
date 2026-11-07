@@ -33,10 +33,17 @@ minute it answers `429` with `Retry-After: 60`.
 
 | Method | Path            | Auth | Description |
 | ------ | --------------- | ---- | ----------- |
-| GET    | `/api/info`     | no   | `{ app, protocol, serverName, version }` |
+| GET    | `/api/info`     | no   | `{ app, protocol, serverName, version, capabilities }` |
 | GET    | `/api/config`   | yes  | Full `DeckConfig` JSON. Supports `If-None-Match` → `304`. |
-| GET    | `/assets/<file>`| yes  | Background images. `Content-Type` inferred from extension. |
+| GET    | `/assets/<file>`| yes  | Background images/videos. `Content-Type` inferred from extension; byte ranges supported. |
+| GET/HEAD | `/api/backup` | yes  | Full PhoneDeck backup ZIP (`phonedek-config.json` + `assets/`). Byte ranges supported. |
 | POST   | `/api/press`    | yes  | Optional HTTP fallback for button presses (same body as WS `press`). |
+
+`/api/info` currently advertises `capabilities: ["backup-export-v1"]`. Clients
+must treat the array as optional and only show backup controls when the marker
+is present. `/api/backup` responds with `Content-Type: application/zip`,
+`Content-Disposition: attachment; filename="phonedek-backup-YYYYMMDD-HHMMSS.zip"`,
+`Content-Length`, and `Cache-Control: no-store`.
 
 The phone may cache the last config and render offline; presses are only
 executed while the WebSocket is connected.

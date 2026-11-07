@@ -1,5 +1,7 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
-import { createReadStream, statSync } from 'node:fs'
+import { createReadStream, mkdtempSync, rmSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { WebSocket, WebSocketServer } from 'ws'
 import {
@@ -18,7 +20,11 @@ import type {
   ServerMessage,
 } from '@phonedek/shared'
 import type { AssetStore } from './assets'
+import { writeBackupFile } from './backup'
 import type { Logger } from './logger'
+
+/** LAN endpoints advertised to clients that understand optional features. */
+export const SERVER_CAPABILITIES = ['backup-export-v1'] as const
 
 export interface PressContext {
   profile: DeckProfile
@@ -93,6 +99,15 @@ function json(response: ServerResponse, status: number, body: unknown, extraHead
 export interface ByteRange {
   start: number
   end: number
+}
+
+/** `phonedek-backup-YYYYMMDD-HHMMSS.zip` in UTC. */
+export function backupExportFileName(now: Date = new Date()): string {
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  const stamp =
+    `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}` +
+    `-${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}`
+  return `phonedek-backup-${stamp}.zip`
 }
 
 /**
@@ -435,6 +450,7 @@ export class DeckServer {
         serverName: this.options.getServerName(),
         version: this.options.version,
         pairingRequired: true,
+        capabilities: [...SERVER_CAPABILITIES],
       })
       return
     }
@@ -464,6 +480,91 @@ export class DeckServer {
         ETag: etag,
       })
       response.end(body)
+      return
+    }
+
+    if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/api/backup') {
+      const filename = backupExportFileName()
+      // A fresh directory per request also makes concurrent exports independent.
+      const tempDir = mkdtempSync(join(tmpdir(), 'phonedek-export-'))
+      const tempPath = join(tempDir, filename)
+      let cleaned = false
+      const cleanup = (): void => {
+        if (cleaned) return
+        cleaned = true
+        try {
+          rmSync(tempDir, { recursive: true, force: true })
+        } catch {
+          // Best effort: the OS will eventually clear its temp directory.
+        }
+      }
+
+      try {
+        writeBackupFile(tempPath, this.options.getConfig(), this.options.assets.dir)
+        const size = statSync(tempPath).size
+        const headers = {
+          'Content-Type': 'application/zip',
+          'Content-Disposition': `attachment; filename="${filename}"`,
+          'Cache-Control': 'no-store',
+          'Accept-Ranges': 'bytes',
+        }
+
+        const rangeHeader = request.headers.range
+        let range: ByteRange | null = null
+        if (rangeHeader !== undefined) {
+          range = typeof rangeHeader === 'string' ? parseByteRange(rangeHeader, size) : null
+          if (!range) {
+            response.writeHead(416, {
+              ...headers,
+              'Content-Range': `bytes */${size}`,
+              'Content-Length': 0,
+            })
+            response.end()
+            cleanup()
+            return
+          }
+          response.writeHead(206, {
+            ...headers,
+            'Content-Range': `bytes ${range.start}-${range.end}/${size}`,
+            'Content-Length': range.end - range.start + 1,
+          })
+        } else {
+          response.writeHead(200, {
+            ...headers,
+            'Content-Length': size,
+          })
+        }
+
+        if (request.method === 'HEAD') {
+          response.end()
+          cleanup()
+          return
+        }
+
+        const stream = range
+          ? createReadStream(tempPath, { start: range.start, end: range.end })
+          : createReadStream(tempPath)
+        // Wait for the read handle to close before deleting the temp directory
+        // (Windows will reject deleting an open file). Aborted responses destroy
+        // the stream, whose close event then performs the cleanup.
+        response.once('close', () => {
+          if (!stream.closed) stream.destroy()
+        })
+        stream.once('close', cleanup)
+        stream.once('error', (error) => {
+          this.options.logger?.warn(`Backup stream failed: ${error.message}`)
+          if (!response.headersSent) json(response, 500, { error: 'Could not stream backup' })
+          else response.destroy()
+        })
+        stream.pipe(response)
+      } catch (error) {
+        cleanup()
+        this.options.logger?.warn(
+          `Could not create backup: ${error instanceof Error ? error.message : String(error)}`,
+        )
+        if (!response.headersSent) json(response, 500, { error: 'Could not create backup' })
+        else response.end()
+      }
       return
     }
 
