@@ -40,6 +40,7 @@ No cloud, no account, no vendor lock-in: the phone talks directly to your PC ove
 - **Buttons** — label, sublabel, emoji icon, solid/gradient/image background, dark overlay, custom text color, per-button radius.
 - **Backgrounds** — curated gradients, color presets, or import your own PNG/JPG/WEBP/GIF/BMP (up to 25 MB). Images are copied into the app's data folder and served to the phone.
 - **Live preview** — the editor canvas is the same grid the phone renders, including slots and overflow warnings.
+- **Backups** — export/import a ZIP containing the config and every background image; legacy JSON configs still import.
 - **Instant sync** — every saved change is pushed to connected phones over WebSocket.
 
 ### Actions

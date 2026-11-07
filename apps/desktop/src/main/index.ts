@@ -1,11 +1,12 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from 'electron'
 import type { OpenDialogOptions, SaveDialogOptions } from 'electron'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { ActionSchema, validateConfig } from '@phonedek/shared'
 import type { Action, DeckConfig, PressResult } from '@phonedek/shared'
 import { AssetStore } from './assets'
+import { readBackupFile, writeBackupFile } from './backup'
 import { ConfigStore } from './config-store'
 import { DiscoveryService } from './discovery'
 import { ActionExecutor } from './executor'
@@ -272,13 +273,15 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.exportConfig, async (): Promise<OperationResult> => {
     const result = await showSave({
-      title: 'Export PhoneDeck configuration',
-      defaultPath: 'phonedek-config.json',
-      filters: [{ name: 'PhoneDeck config', extensions: ['json'] }],
+      title: 'Export PhoneDeck backup',
+      defaultPath: 'phonedek-backup.zip',
+      filters: [{ name: 'PhoneDeck backup', extensions: ['zip'] }],
     })
     if (result.canceled || !result.filePath) return { ok: false }
     try {
-      writeFileSync(result.filePath, `${JSON.stringify(store.get(), null, 2)}\n`, 'utf8')
+      const written = writeBackupFile(result.filePath, store.get(), assets.dir)
+      for (const warning of written.warnings) logger.warn(warning)
+      logger.info(`Exported backup with ${written.assets} assets (${written.bytes} bytes)`)
       return { ok: true, path: result.filePath }
     } catch (error) {
       return { ok: false, error: (error as Error).message }
@@ -287,17 +290,24 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.importConfig, async (): Promise<SaveConfigResult> => {
     const result = await showOpen({
-      title: 'Import PhoneDeck configuration',
+      title: 'Import PhoneDeck backup',
       properties: ['openFile'],
-      filters: [{ name: 'PhoneDeck config', extensions: ['json'] }],
+      filters: [
+        { name: 'PhoneDeck backup', extensions: ['zip', 'json'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
     })
     const file = result.filePaths[0]
     if (result.canceled || !file) return { ok: false }
     try {
-      const parsed = JSON.parse(readFileSync(file, 'utf8')) as unknown
-      const validation = validateConfig(parsed)
-      if (!validation.ok) return { ok: false, errors: validation.errors }
-      const config = store.replace(validation.config)
+      const backup = readBackupFile(file)
+      let importedAssets = 0
+      for (const [name, data] of backup.assets) {
+        if (assets.importBuffer(name, data)) importedAssets += 1
+      }
+      for (const warning of backup.warnings) logger.warn(warning)
+      const config = store.replace(backup.config)
+      logger.info(`Imported backup ${file} (${importedAssets} assets)`)
       mainWindow?.webContents.send(IPC.configChangedEvent, config)
       return { ok: true, config }
     } catch (error) {

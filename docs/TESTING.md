@@ -20,7 +20,7 @@ Report issues with `%APPDATA%\PhoneDeck\phonedek.log`, the Windows version and t
 - [ ] Add a macro action → Record → type `hello`, press Ctrl+C, wait, Stop → Add steps.
 - [ ] Press **Test** on the button; Notepad receives the shortcut/text (focus Notepad first if needed).
 - [ ] **Run all actions on this PC** returns a success toast, or a useful error.
-- [ ] Export config, delete a profile, import the config → layout returns.
+- [ ] Export backup (ZIP), delete a profile, import the backup → layout and images return.
 - [ ] Close and reopen the app → configuration persists.
 
 ## Phone + desktop

@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { extname, join, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { Logger } from './logger'
@@ -43,6 +43,14 @@ export class AssetStore {
     copyFileSync(sourcePath, target)
     this.logger?.info(`Imported asset ${name} (${stats.size} bytes)`)
     return name
+  }
+
+  /** Write an asset imported from a backup ZIP. Returns false for unsafe names. */
+  importBuffer(name: string, data: Buffer): boolean {
+    if (!isSafeAssetName(name)) return false
+    if (data.length > MAX_BYTES) throw new Error(`Asset ${name} is larger than 25 MB`)
+    writeFileSync(join(this.dir, name), data)
+    return true
   }
 
   /** Resolve an asset name to an absolute path, refusing path traversal. */

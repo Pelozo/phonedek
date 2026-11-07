@@ -22,7 +22,7 @@ Electron stores everything under:
   phonedek.log         runtime log (rotates at 4 MB)
 ```
 
-Back up the whole folder to move a setup to another PC. **Settings → Export** writes the JSON only; copy `assets\` alongside it if you use image backgrounds.
+Back up the whole folder to move a setup to another PC. **Settings → Export backup** writes a ZIP with the config and every background image; **Import backup** restores both. Legacy JSON configs still import (without images).
 
 ## Firewall / port
 

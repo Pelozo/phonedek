@@ -114,14 +114,14 @@ export function SettingsDialog({
         <div className="settings-row">
           <div>
             <strong>Export / import</strong>
-            <small>JSON profiles, pages and actions. Background images stay in PhoneDeck's data folder.</small>
+            <small>A ZIP backup with profiles, pages, actions and background images.</small>
           </div>
           <div className="row gap">
             <button type="button" className="button secondary" onClick={() => void exportConfig()} disabled={busy}>
-              <Icon name="download" size={15} /> Export
+              <Icon name="download" size={15} /> Export backup
             </button>
             <button type="button" className="button secondary" onClick={() => void importConfig()} disabled={busy}>
-              <Icon name="upload" size={15} /> Import
+              <Icon name="upload" size={15} /> Import backup
             </button>
           </div>
         </div>

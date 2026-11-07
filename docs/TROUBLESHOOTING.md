@@ -51,7 +51,7 @@ Symptoms: key/text/media actions return an error mentioning PowerShell or the he
 ## Background image is missing
 
 - Imported images live in `%APPDATA%\PhoneDeck\assets\` and are referenced by file name.
-- Exporting the JSON does not include images; copy the `assets` folder or re-import after moving to another PC.
+- Use **Settings → Export backup** (ZIP) to keep images with the config. A legacy JSON export does not include images; copy the `assets` folder or re-import the images after moving to another PC.
 - The phone must keep the token to load `/assets/...`.
 
 ## Build errors
