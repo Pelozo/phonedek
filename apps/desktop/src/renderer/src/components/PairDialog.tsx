@@ -84,7 +84,7 @@ export function PairDialog({
     }
   }
 
-  const hostOptions = Array.from(new Set([...server.lanAddresses, '127.0.0.1']))
+  const hostOptions = Array.from(new Set(server.lanAddresses))
 
   return (
     <Modal
@@ -157,7 +157,7 @@ export function PairDialog({
                   <option value="">Automatic ({server.pair?.host ?? 'not detected'})</option>
                   {hostOptions.map((address) => (
                     <option key={address} value={address}>
-                      {address}{address === '127.0.0.1' ? ' (loopback)' : ''}
+                      {address}
                     </option>
                   ))}
                   {settings.pairHost && !hostOptions.includes(settings.pairHost) && (
