@@ -19,11 +19,26 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.put
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+
+/**
+ * OkHttp's HttpUrl only accepts http/https. WebSocket requests are regular
+ * HTTP requests with an Upgrade header, so a ws:// URL is built as http://.
+ */
+internal fun buildWebSocketUrl(host: String, port: Int, token: String): HttpUrl? = runCatching {
+    HttpUrl.Builder()
+        .scheme("http")
+        .host(host)
+        .port(port)
+        .addPathSegment("ws")
+        .addQueryParameter("token", token)
+        .build()
+}.getOrNull()
 
 enum class ConnectionStatus {
     CONNECTING,
@@ -125,19 +140,9 @@ class DeckConnection(
     private fun connect() {
         if (!active) return
         val generation = ++socketGeneration
-        val urlResult = runCatching {
-            okhttp3.HttpUrl.Builder()
-                .scheme("ws")
-                .host(host)
-                .port(port)
-                .addPathSegment("ws")
-                .addQueryParameter("token", token)
-                .build()
-        }
-        val url = urlResult.getOrNull()
-
+        val url = buildWebSocketUrl(host, port, token)
         if (url == null) {
-            Diag.e("WS URL build failed for host=\"$host\" port=$port", urlResult.exceptionOrNull())
+            Diag.e("WS URL build failed for host=\"$host\" port=$port")
             listener.onServerError("bad_address", "The server address is not valid (\"$host:$port\").")
             scheduleReconnect(generation)
             return
