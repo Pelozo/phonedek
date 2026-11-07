@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -237,15 +238,37 @@ fun BackgroundLayer(
 
             is BackgroundSpec.Video -> {
                 Box(Modifier.fillMaxSize().background(spec.fallback))
-                VideoSurface(
-                    url = spec.url,
-                    fit = spec.fit,
-                    loop = spec.loop,
-                    muted = spec.muted,
-                    autoplay = spec.autoplay,
-                    isActive = isActive,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                BoxWithConstraints(Modifier.fillMaxSize()) {
+                    val aspect = if (maxHeight > 0.dp) maxWidth / maxHeight else 1f
+                    val rotated = contentRotation % 180f != 0f
+                    val scale = if (
+                        rotated &&
+                        spec.fit == ContentScale.Crop &&
+                        aspect > 0f
+                    ) {
+                        max(aspect, 1f / aspect)
+                    } else {
+                        1f
+                    }
+                    VideoSurface(
+                        url = spec.url,
+                        fit = spec.fit,
+                        loop = spec.loop,
+                        muted = spec.muted,
+                        autoplay = spec.autoplay,
+                        isActive = isActive,
+                        // SurfaceView cannot be transformed by the parent
+                        // graphics layer; use TextureView only while rotated.
+                        useTextureView = rotated,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                rotationZ = contentRotation
+                                scaleX = scale
+                                scaleY = scale
+                            },
+                    )
+                }
             }
         }
 
@@ -335,30 +358,34 @@ fun VideoSurface(
     }
 
     if (!failed) {
-        AndroidView(
-            modifier = modifier,
-            factory = { viewContext ->
-                val view = if (useTextureView) {
-                    LayoutInflater.from(viewContext)
-                        .inflate(R.layout.view_video_texture, null) as PlayerView
-                } else {
-                    PlayerView(viewContext)
-                }
-                view.apply {
-                    useController = false
-                    isClickable = false
-                    isFocusable = false
-                    importantForAccessibility = android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                    resizeMode = resizeModeFor(fit)
-                    setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
-                    player = exoPlayer
-                }
-            },
-            update = { view ->
-                view.player = exoPlayer
-                view.resizeMode = resizeModeFor(fit)
-            },
-        )
+        // The view type must change with the rotation mode; otherwise the
+        // SurfaceView would keep rendering without the parent transform.
+        key(useTextureView) {
+            AndroidView(
+                modifier = modifier,
+                factory = { viewContext ->
+                    val view = if (useTextureView) {
+                        LayoutInflater.from(viewContext)
+                            .inflate(R.layout.view_video_texture, null) as PlayerView
+                    } else {
+                        PlayerView(viewContext)
+                    }
+                    view.apply {
+                        useController = false
+                        isClickable = false
+                        isFocusable = false
+                        importantForAccessibility = android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                        resizeMode = resizeModeFor(fit)
+                        setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                        player = exoPlayer
+                    }
+                },
+                update = { view ->
+                    view.player = exoPlayer
+                    view.resizeMode = resizeModeFor(fit)
+                },
+            )
+        }
     }
 }
 

@@ -27,13 +27,25 @@ fun buttonContentRotation(
 ): Float {
     if (!lockLandscape || !enabled) return 0f
     if (!isPhysicalPortrait(physicalOrientation)) return 0f
-    return when (displayRotation) {
+    val base = when (displayRotation) {
         Surface.ROTATION_90 -> -90f
         Surface.ROTATION_270 -> 90f
         else -> 0f
     }
+    // The 180° portrait pole is physically upside down relative to natural
+    // portrait, so the content needs an extra half turn to stay readable.
+    return if (isUpsideDownPortrait(physicalOrientation)) normalizeRotation(base + 180f) else base
 }
 
 private fun isPhysicalPortrait(orientation: Int): Boolean =
     orientation >= 0 &&
         (orientation < 45 || orientation >= 315 || orientation in 135..225)
+
+private fun isUpsideDownPortrait(orientation: Int): Boolean = orientation in 135..225
+
+private fun normalizeRotation(degrees: Float): Float {
+    var value = degrees % 360f
+    if (value > 180f) value -= 360f
+    if (value < -180f) value += 360f
+    return value
+}

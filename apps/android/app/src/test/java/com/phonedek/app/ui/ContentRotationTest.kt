@@ -34,14 +34,14 @@ class ContentRotationTest {
     }
 
     @Test
-    fun invertedPortraitUsesTheSameDisplayRotationSign() {
+    fun invertedPortraitAddsAHalfTurn() {
         assertEquals(
-            -90f,
+            90f,
             buttonContentRotation(180, Surface.ROTATION_90, true, true),
             0f,
         )
         assertEquals(
-            90f,
+            -90f,
             buttonContentRotation(180, Surface.ROTATION_270, true, true),
             0f,
         )
