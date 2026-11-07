@@ -292,22 +292,32 @@ function AppContent() {
     }
   }
 
-  const addNewControl = (kind: 'volume' | 'scroll'): void => {
+  const addNewControl = (kind: 'volume' | 'scroll' | 'volume-wheel'): void => {
     if (!config || !profile || !page) return
     const grid = pageGrid(profile, page)
-    const span = kind === 'volume' ? { columns: 3, rows: 1 } : { columns: 2, rows: 1 }
-    let slot: number | null = null
-    for (let candidate = 0; candidate < grid.columns * grid.rows; candidate += 1) {
-      if (canPlaceButton(page.buttons, candidate, span, grid)) {
-        slot = candidate
-        break
+    const preferredSpan =
+      kind === 'volume'
+        ? { columns: 3, rows: 1 }
+        : kind === 'volume-wheel'
+          ? { columns: 2, rows: 1 }
+          : { columns: 2, rows: 1 }
+
+    const findSlot = (span: { columns: number; rows: number }): number | null => {
+      for (let candidate = 0; candidate < grid.columns * grid.rows; candidate += 1) {
+        if (canPlaceButton(page.buttons, candidate, span, grid)) return candidate
       }
+      return null
+    }
+
+    let span = preferredSpan
+    let slot = findSlot(span)
+    const fallback = slot === null && preferredSpan.columns > 1
+    if (fallback) {
+      span = { columns: 1, rows: 1 }
+      slot = findSlot(span)
     }
     if (slot === null) {
-      showToast(
-        `No ${span.columns}×${span.rows} space left on this page. Resize the grid or remove a button first.`,
-        'error',
-      )
+      showToast('No free cell left on this page. Resize the grid or remove a button first.', 'error')
       return
     }
 
@@ -325,16 +335,31 @@ function AppContent() {
             unit: '%',
             haptics: true,
           }
-        : {
-            kind: 'dial',
-            emit: 'delta',
-            binding: { type: 'scroll', axis: 'vertical' },
-            step: 1,
-            haptics: true,
-          }
+        : kind === 'volume-wheel'
+          ? {
+              kind: 'dial',
+              emit: 'delta',
+              binding: { type: 'volume', mode: 'relative', stepPercent: 2 },
+              min: 0,
+              max: 100,
+              step: 2,
+              initial: 50,
+              unit: '%',
+              haptics: true,
+            }
+          : {
+              kind: 'dial',
+              emit: 'delta',
+              binding: { type: 'scroll', axis: 'vertical' },
+              step: 1,
+              haptics: true,
+            }
     const button: DeckButton = {
-      ...createEmptyButton(slot, kind === 'volume' ? 'Volume' : 'Scroll'),
-      icon: kind === 'volume' ? '🔊' : '🖱️',
+      ...createEmptyButton(
+        slot,
+        kind === 'volume' ? 'Volume' : kind === 'volume-wheel' ? 'Volume' : 'Scroll',
+      ),
+      icon: kind === 'scroll' ? '🖱️' : '🔊',
       span,
       control,
     }
@@ -342,7 +367,12 @@ function AppContent() {
       const next = addButton(config, profile.id, page.id, button)
       setConfig(next)
       setSelectedButtonId(button.id)
-      showToast(kind === 'volume' ? 'Volume slider added' : 'Scroll wheel added', 'success')
+      const name =
+        kind === 'volume' ? 'Volume slider' : kind === 'volume-wheel' ? 'Volume wheel' : 'Scroll wheel'
+      showToast(
+        fallback ? `${name} added as 1×1 — no wider space was free` : `${name} added`,
+        'success',
+      )
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), 'error')
     }
@@ -452,6 +482,12 @@ function AppContent() {
                   icon: 'music',
                   description: '3 × 1 · relative volume',
                   onClick: () => addNewControl('volume'),
+                },
+                {
+                  label: 'Volume wheel',
+                  icon: 'sliders',
+                  description: '2 × 1 · relative volume',
+                  onClick: () => addNewControl('volume-wheel'),
                 },
                 {
                   label: 'Scroll wheel',

@@ -2,7 +2,6 @@ import { useState, type CSSProperties, type DragEvent } from 'react'
 import {
   addButton,
   buttonFootprint,
-  buttonSpan,
   canPlaceButton,
   createEmptyButton,
   moveButton,
@@ -10,17 +9,12 @@ import {
   pageCapacity,
   pageGrid,
 } from '@phonedek/shared'
-import type { DeckButton, DeckConfig, DeckPage, DeckProfile } from '@phonedek/shared'
+import type { DeckConfig, DeckPage, DeckProfile } from '@phonedek/shared'
 import type { ServerInfoView } from '../../../shared/api'
 import { backgroundStyle, buttonBackground, isVideoBackground, textColorFor } from '../lib/ui'
 import { ControlPreview } from './ControlPreview'
 import { DeckMedia } from './DeckMedia'
 import { Icon } from './Icons'
-
-function isSingleCell(button: DeckButton): boolean {
-  const span = buttonSpan(button)
-  return span.columns === 1 && span.rows === 1
-}
 
 export function DeckCanvas({
   config,
@@ -70,16 +64,6 @@ export function DeckCanvas({
     const id = dragging ?? event.dataTransfer.getData('text/phonedek-button')
     setDragging(null)
     const target = bySlot.get(slot)
-    const source = id ? page.buttons.find((button) => button.id === id) : undefined
-
-    if (source && !isSingleCell(source)) {
-      onToast('Spanning controls can’t be dragged yet. Move the tiles around them or change the span.', 'info')
-      return
-    }
-    if (target && !isSingleCell(target)) {
-      onToast('That area is covered by a control. Drop onto a free cell instead.', 'info')
-      return
-    }
     if (!id) {
       if (!target && !occupied.has(slot)) addAt(slot)
       return
@@ -172,11 +156,6 @@ export function DeckCanvas({
                   }}
                   draggable
                   onDragStart={(event) => {
-                    if (spanning) {
-                      event.preventDefault()
-                      onToast('Spanning controls can’t be dragged yet. Change the span or move the surrounding tiles.', 'info')
-                      return
-                    }
                     event.dataTransfer.setData('text/phonedek-button', button.id)
                     event.dataTransfer.effectAllowed = 'move'
                     setDragging(button.id)
@@ -231,7 +210,7 @@ export function DeckCanvas({
         </div>
       </div>
       <div className="deck-hint">
-        <Icon name="drag" size={13} /> Drag 1×1 tiles to rearrange · click an empty cell to add a button · spanning controls stay put
+        <Icon name="drag" size={13} /> Drag tiles to rearrange · click an empty cell to add a button · controls keep their span when moved
       </div>
     </div>
   )
