@@ -15,14 +15,20 @@
 - Release v0.1.1 published: https://github.com/Pelozo/phonedek/releases/tag/v0.1.1
   (installer 122,061,144 B, debug APK 11,291,469 B, SHA256SUMS). v0.1.0 was deleted
   because its Android WebSocket inherited the 15s HTTP read timeout.
-- Latest code commit: 85032cc "Point README at v0.1.1"; CI run 42316659889 green.
+- Latest code commit: 928f2dc "Use a stable debug signing key"; CI run 42317604545 green.
 - v0.1.1 adds: advertised-host selector, ZIP backups with assets, Android socket timeout
   fix, Android unit tests in CI, Android v0.1.1/versionCode 2, monochrome icon.
+- Stable APK signing: committed `apps/android/debug.keystore` (standard debug creds) so
+  future CI APKs update in place. New v0.1.1 assets were re-uploaded with this key:
+  APK SHA-256 e125c521…3610df, cert SHA-256 db0345e3…c83fc; installer SHA-256
+  58f97c6a…0d9a9. If an interim v0.1.1 APK (before 00:24 UTC) was installed, uninstall
+  it once because its signature differs.
 - Android background precedence fixed (`DeckButtonView` uses theme, not page).
 - Android subagent session `ses_e4cf99e72ffen0aq1xsuJgWb94`: its files are in the repo and
   CI-green; local arm64 Gradle still runs/fails on x86_64 aapt2 (CI x64 is authoritative).
   If it reports edits after 20:35, review and re-run CI.
 - Next action: user manual test of v0.1.1 using docs/TESTING.md; collect feedback and fix issues.
+  Release and docs are final; no pending code changes.
 - Optional backlog: signed release APK, Windows code signing, global macro recording hook,
   tray/minimize-to-tray, page swipe on Android, refresh screenshots to 0.1.1 footer.
 - Release notes draft:
