@@ -34,7 +34,7 @@ import type {
 
 app.setName('PhoneDeck')
 
-const APP_VERSION = '0.2.1'
+const APP_VERSION = '0.2.2'
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
