@@ -3,12 +3,17 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  clampVolumeLevel,
   createHostActions,
+  LINUX_VOLUME_COMMAND,
+  linuxVolumeArgs,
   MAC_SCREENSHOT_ARGS,
   MAC_SCREENSHOT_COMMAND,
+  MAC_VOLUME_COMMAND,
   macApplicationOpenArgs,
   macScreenshotArgs,
   macScreenshotPath,
+  macVolumeArgs,
 } from '../src/main/host-actions'
 
 const tempDirs: string[] = []
@@ -192,5 +197,40 @@ describe('macOS screenshot', () => {
   it('rejects on non-macOS hosts', async () => {
     const host = createHostActions({ platform: 'win32' })
     await expect(host.screenshot()).rejects.toThrow(/only implemented on macOS/)
+  })
+})
+
+describe('absolute volume', () => {
+  it('builds the platform commands', () => {
+    expect(MAC_VOLUME_COMMAND).toBe('/usr/bin/osascript')
+    expect(macVolumeArgs(55)).toEqual(['-e', 'set volume output volume 55'])
+    expect(LINUX_VOLUME_COMMAND).toBe('pactl')
+    expect(linuxVolumeArgs(42)).toEqual(['set-sink-volume', '@DEFAULT_SINK@', '42%'])
+  })
+
+  it('clamps levels and uses the injected seam', async () => {
+    expect(clampVolumeLevel(55.6)).toBe(56)
+    expect(clampVolumeLevel(120)).toBe(100)
+    expect(clampVolumeLevel(-5)).toBe(0)
+    expect(() => clampVolumeLevel(Number.NaN)).toThrow(/finite/)
+
+    const seen: number[] = []
+    const host = createHostActions({
+      platform: 'darwin',
+      setSystemVolume: async (level) => {
+        seen.push(level)
+      },
+    })
+    await host.setVolume(55.6)
+    await host.setVolume(120)
+    await host.setVolume(-5)
+    expect(seen).toEqual([56, 100, 0])
+  })
+
+  it('returns clear errors for unsupported hosts', async () => {
+    const windows = createHostActions({ platform: 'win32' })
+    await expect(windows.setVolume(50)).rejects.toThrow(/not implemented on Windows/)
+    const other = createHostActions({ platform: 'sunos' })
+    await expect(other.setVolume(50)).rejects.toThrow(/not implemented on sunos/)
   })
 })

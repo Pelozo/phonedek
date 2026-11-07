@@ -84,12 +84,19 @@ describe('controlToActions', () => {
     expect(controlToActions(scroll('vertical'), Number.POSITIVE_INFINITY)).toEqual([])
   })
 
-  it('returns an empty batch for unknown bindings', () => {
+  it('returns an empty batch for unknown bindings and absolute volume', () => {
     const unknown = {
       kind: 'dial',
       emit: 'delta',
       binding: { type: 'nope' },
     } as unknown as ControlSpec
     expect(controlToActions(unknown, 5)).toEqual([])
+
+    const absolute: ControlSpec = {
+      kind: 'slider',
+      emit: 'value',
+      binding: { type: 'volume', mode: 'absolute' },
+    }
+    expect(controlToActions(absolute, 5)).toEqual([])
   })
 })

@@ -10,6 +10,8 @@ export interface HostActions {
   runCommand(command: string, cwd: string | undefined, hidden: boolean): Promise<void>
   /** Capture the full screen on macOS (no shutter sound); returns the saved path. */
   screenshot(): Promise<string>
+  /** Set system output volume, 0..100. */
+  setVolume(level: number): Promise<void>
 }
 
 export interface HostActionOptions {
@@ -22,6 +24,8 @@ export interface HostActionOptions {
   screenshotDirectory?: string
   /** Runtime folder lookup; takes precedence over `screenshotDirectory`. */
   getScreenshotDirectory?: () => string
+  /** Test seam for absolute volume; receives 0..100. */
+  setSystemVolume?: (level: number) => Promise<void>
   /** Overrides the user's home directory (used by tests to avoid touching ~/Desktop). */
   homeDir?: string
   logger?: Logger
@@ -30,6 +34,22 @@ export interface HostActionOptions {
 export const MAC_SCREENSHOT_COMMAND = '/usr/sbin/screencapture'
 /** `-x` = silent, `-t png` = explicit PNG output; the destination file follows. */
 export const MAC_SCREENSHOT_ARGS: readonly string[] = ['-x', '-t', 'png']
+
+export const MAC_VOLUME_COMMAND = '/usr/bin/osascript'
+export function macVolumeArgs(level: number): string[] {
+  return ['-e', `set volume output volume ${level}`]
+}
+
+export const LINUX_VOLUME_COMMAND = 'pactl'
+export function linuxVolumeArgs(level: number): string[] {
+  return ['set-sink-volume', '@DEFAULT_SINK@', `${level}%`]
+}
+
+/** Validate and clamp an absolute volume level to an integer 0..100. */
+export function clampVolumeLevel(level: number): number {
+  if (!Number.isFinite(level)) throw new Error('Volume level must be a finite number')
+  return Math.max(0, Math.min(100, Math.round(level)))
+}
 
 function pad2(value: number): string {
   return String(value).padStart(2, '0')
@@ -209,6 +229,29 @@ export function createHostActions(options: HostActionOptions = {}): HostActions 
         await spawnDetached('/bin/sh', ['-c', command], { cwd, hidden })
       }
       logger?.info(`Ran command: ${command.slice(0, 140)}`)
+    },
+
+    async setVolume(level) {
+      const value = clampVolumeLevel(level)
+      if (options.setSystemVolume) {
+        await options.setSystemVolume(value)
+      } else if (platform === 'darwin') {
+        await runToCompletion(MAC_VOLUME_COMMAND, macVolumeArgs(value))
+      } else if (platform === 'linux') {
+        try {
+          await runToCompletion(LINUX_VOLUME_COMMAND, linuxVolumeArgs(value))
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          throw new Error(
+            `Could not set system volume with pactl. Install PulseAudio/PipeWire and ensure "pactl" is on PATH. ${message}`,
+          )
+        }
+      } else if (platform === 'win32') {
+        throw new Error('Absolute volume is not implemented on Windows yet.')
+      } else {
+        throw new Error(`Absolute volume is not implemented on ${platform}.`)
+      }
+      logger?.info(`Set system volume to ${value}%`)
     },
 
     async screenshot() {

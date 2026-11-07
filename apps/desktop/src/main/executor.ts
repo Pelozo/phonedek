@@ -43,6 +43,30 @@ export class ActionExecutor {
     return task
   }
 
+  /** Set absolute system volume through the same serialized queue as presses. */
+  executeVolume(level: number, label = 'volume'): Promise<PressResult> {
+    const task = this.queue.then(() => this.runVolume(level, label))
+    this.queue = task.then(
+      () => undefined,
+      () => undefined,
+    )
+    return task
+  }
+
+  private async runVolume(level: number, label: string): Promise<PressResult> {
+    if (!Number.isFinite(level)) return { ok: false, error: 'Volume level must be a finite number' }
+    const value = Math.max(0, Math.min(100, Math.round(level)))
+    this.logger?.info(`Set volume to ${value}% for "${label}"`)
+    try {
+      await this.host.setVolume(value)
+      return { ok: true }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger?.error(`Volume action for "${label}" failed: ${message}`)
+      return { ok: false, error: message }
+    }
+  }
+
   private async run(actions: readonly Action[], label: string): Promise<PressResult> {
     const plan = actionsToPlan(actions)
     if (plan.length === 0) {

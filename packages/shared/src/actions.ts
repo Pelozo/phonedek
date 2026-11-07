@@ -138,6 +138,7 @@ export function hasHostActions(actions: readonly Action[]): boolean {
  */
 export function controlToActions(control: ControlSpec, delta: number): Action[] {
   if (!Number.isFinite(delta) || delta === 0) return []
+  if (control.binding.type === 'volume' && control.binding.mode === 'absolute') return []
   const magnitude = Math.ceil(Math.abs(delta))
 
   switch (control.binding.type) {

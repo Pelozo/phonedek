@@ -256,6 +256,18 @@ describe('schema for spans and controls', () => {
       binding: { type: 'scroll', axis: 'vertical', invert: true },
     }
     expect(validateConfig(config).ok).toBe(true)
+
+    target.control = {
+      kind: 'slider',
+      emit: 'value',
+      binding: { type: 'volume', mode: 'absolute' },
+      min: 0,
+      max: 100,
+      step: 1,
+      initial: 50,
+      unit: '%',
+    }
+    expect(validateConfig(config).ok).toBe(true)
   })
 
   it('rejects invalid spans', () => {
@@ -287,6 +299,23 @@ describe('schema for spans and controls', () => {
     expect(validateConfig(config).ok).toBe(false)
 
     target.control = { ...valid, binding: { type: 'volume', mode: 'absolute' } } as unknown as ControlSpec
+    expect(validateConfig(config).ok).toBe(false)
+
+    target.control = { ...valid, emit: 'value' } as unknown as ControlSpec
+    expect(validateConfig(config).ok).toBe(false)
+
+    target.control = {
+      kind: 'slider',
+      emit: 'value',
+      binding: { type: 'volume', mode: 'absolute' },
+    }
+    expect(validateConfig(config).ok).toBe(true)
+
+    target.control = {
+      kind: 'slider',
+      emit: 'delta',
+      binding: { type: 'volume', mode: 'absolute' },
+    } as unknown as ControlSpec
     expect(validateConfig(config).ok).toBe(false)
 
     target.control = { ...valid, binding: { type: 'scroll' } } as unknown as ControlSpec

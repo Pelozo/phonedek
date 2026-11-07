@@ -186,12 +186,18 @@ export const CellSpanSchema = z.object({
 
 const controlAxis = z.enum(['horizontal', 'vertical']).optional()
 
-export const ControlBindingSchema = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('volume'),
-    mode: z.literal('relative'),
-    stepPercent: z.number().int().min(1).max(25).optional(),
-  }),
+export const ControlBindingSchema = z.union([
+  z.discriminatedUnion('mode', [
+    z.object({
+      type: z.literal('volume'),
+      mode: z.literal('relative'),
+      stepPercent: z.number().int().min(1).max(25).optional(),
+    }),
+    z.object({
+      type: z.literal('volume'),
+      mode: z.literal('absolute'),
+    }),
+  ]),
   z.object({
     type: z.literal('scroll'),
     axis: z.enum(['vertical', 'horizontal']),
@@ -217,6 +223,19 @@ export const ControlSpecSchema = z
     z.object({ kind: z.literal('dial'), ...controlFields }),
   ])
   .superRefine((control, ctx) => {
+    if (control.binding.type === 'volume') {
+      const expectedEmit = control.binding.mode === 'absolute' ? 'value' : 'delta'
+      if (control.emit !== expectedEmit) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['emit'],
+          message:
+            control.binding.mode === 'absolute'
+              ? 'Absolute volume requires emit "value"'
+              : 'Relative volume requires emit "delta"',
+        })
+      }
+    }
     if (control.min !== undefined && control.max !== undefined && control.min >= control.max) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

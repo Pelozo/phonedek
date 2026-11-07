@@ -497,6 +497,7 @@ describe('DeckServer continuous input', () => {
     phase: 'start' | 'move' | 'end',
     controlId: string,
     delta?: number,
+    value?: number,
   ) {
     return {
       type: 'input',
@@ -506,6 +507,7 @@ describe('DeckServer continuous input', () => {
       controlId,
       phase,
       ...(delta === undefined ? {} : { delta }),
+      ...(value === undefined ? {} : { value }),
     }
   }
 
@@ -556,6 +558,30 @@ describe('DeckServer continuous input', () => {
     )
     expect(missing).toMatchObject({ type: 'inputResult', ok: false })
     if (missing.type === 'inputResult') expect(missing.error).toMatch(/not found/i)
+
+    ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
+  it('passes absolute control values through onInput', async () => {
+    const h = await harness()
+    attachControl(h, 'btn-vol-down', {
+      kind: 'slider',
+      emit: 'value',
+      binding: { type: 'volume', mode: 'absolute' },
+    })
+    const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await waitFor(() => messages.find((message) => message.type === 'hello'))
+
+    ws.send(JSON.stringify(inputMessage(h, 'abs-move', 'move', 'btn-vol-down', undefined, 0.42)))
+    ws.send(JSON.stringify(inputMessage(h, 'abs-end', 'end', 'btn-vol-down')))
+    await waitFor(() =>
+      messages.find((message) => message.type === 'inputResult' && message.requestId === 'abs-end'),
+    )
+
+    const move = h.inputs.find((call) => call.message.requestId === 'abs-move')
+    expect(move?.message.value).toBe(0.42)
+    expect(move?.context.control.binding).toEqual({ type: 'volume', mode: 'absolute' })
 
     ws.close()
     await waitFor(() => h.server.getClients().length === 0)

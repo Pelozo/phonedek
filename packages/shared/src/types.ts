@@ -222,9 +222,8 @@ export interface CellSpan {
 /**
  * What a continuous control drives.
  *
- * The MVP only supports *relative* bindings: a slider/dial emits deltas and the
- * desktop turns them into repeated media-volume steps or mouse-wheel scrolls.
- * Absolute values (level, position, arbitrary targets) are a later phase.
+ * Relative volume emits deltas that become repeated media-volume keys. Absolute
+ * volume emits a normalized 0..1 value and sets the system volume directly.
  */
 export type ControlBinding =
   | {
@@ -232,6 +231,12 @@ export type ControlBinding =
       mode: 'relative'
       /** Percent per full slider travel or dial tick. 1..25, default 2. */
       stepPercent?: number
+    }
+  | {
+      type: 'volume'
+      mode: 'absolute'
+      /** Not used in absolute mode; kept for older renderer type access. */
+      stepPercent?: never
     }
   | {
       type: 'scroll'

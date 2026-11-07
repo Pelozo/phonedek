@@ -747,6 +747,7 @@ async function bootstrap(): Promise<void> {
   })
   const router = new ControlInputRouter({
     execute: (actions, label) => executor.execute(actions, label),
+    applyAbsolute: (_control, value, label) => executor.executeVolume(value * 100, label),
     logger,
   })
   inputRouter = router

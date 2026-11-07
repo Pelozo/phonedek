@@ -38,6 +38,9 @@ function fakeHost(log: string[], screenshotPaths: string[] = [SCREENSHOT_PATH]):
       log.push('screenshot')
       return path
     },
+    async setVolume(level) {
+      log.push(`volume:${level}`)
+    },
   }
 }
 
@@ -176,6 +179,59 @@ describe('ActionExecutor', () => {
     const after = await executor.execute([{ type: 'hotkey', keys: ['WIN', 'D'] }], 'good')
     expect(after.ok).toBe(true)
     expect(log).toContain('keys:WIN+D')
+  })
+
+  it('sets absolute volume through the executor queue', async () => {
+    const log: string[] = []
+    const executor = new ActionExecutor(fakeKeys(log), fakeHost(log))
+    await expect(executor.executeVolume(42.6, 'volume')).resolves.toEqual({ ok: true })
+    expect(log).toEqual(['volume:43'])
+
+    await expect(executor.executeVolume(Number.NaN, 'volume')).resolves.toEqual({
+      ok: false,
+      error: 'Volume level must be a finite number',
+    })
+  })
+
+  it('returns a useful volume error and keeps the queue alive', async () => {
+    const log: string[] = []
+    const host: HostActions = {
+      ...fakeHost(log),
+      async setVolume() {
+        throw new Error('Could not set system volume with pactl')
+      },
+    }
+    const executor = new ActionExecutor(fakeKeys(log), host)
+    const failed = await executor.executeVolume(40, 'volume')
+    expect(failed).toEqual({ ok: false, error: 'Could not set system volume with pactl' })
+
+    const after = await executor.execute([{ type: 'hotkey', keys: ['WIN', 'D'] }], 'good')
+    expect(after.ok).toBe(true)
+  })
+
+  it('serializes volume with overlapping presses', async () => {
+    const log: string[] = []
+    let release: (() => void) | null = null
+    const keys: KeySender = {
+      async send(step) {
+        if (step.kind === 'keys' && step.keys[0] === 'A') {
+          log.push('start:A')
+          await new Promise<void>((resolve) => {
+            release = resolve
+          })
+          log.push('end:A')
+        }
+      },
+    }
+    const executor = new ActionExecutor(keys, fakeHost(log))
+    const first = executor.execute([{ type: 'hotkey', keys: ['A'] }], 'one')
+    const volume = executor.executeVolume(30, 'volume')
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(log).toEqual(['start:A'])
+    if (release) (release as () => void)()
+    await first
+    await volume
+    expect(log).toEqual(['start:A', 'end:A', 'volume:30'])
   })
 
   it('serializes overlapping presses', async () => {

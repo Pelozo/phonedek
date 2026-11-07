@@ -14,12 +14,19 @@ const scroll: ControlSpec = {
   binding: { type: 'scroll', axis: 'vertical' },
 }
 
+const absoluteVolume: ControlSpec = {
+  kind: 'slider',
+  emit: 'value',
+  binding: { type: 'volume', mode: 'absolute' },
+}
+
 let counter = 0
 
 function message(
   phase: InputMessage['phase'],
   delta?: number,
   controlId = 'btn-vol',
+  value?: number,
 ): InputMessage {
   counter += 1
   return {
@@ -30,6 +37,7 @@ function message(
     controlId,
     phase,
     ...(delta === undefined ? {} : { delta }),
+    ...(value === undefined ? {} : { value }),
   }
 }
 
@@ -162,6 +170,96 @@ describe('ControlInputRouter', () => {
     expect(calls).toHaveLength(0)
     await expect(router.handle(message('end'), target())).resolves.toEqual({ ok: true })
     expect(calls).toHaveLength(0)
+    router.dispose()
+  })
+
+  it('coalesces absolute volume with latest-wins semantics', async () => {
+    vi.useFakeTimers()
+    const applied: number[] = []
+    const router = new ControlInputRouter({
+      execute: async () => ({ ok: true }),
+      applyAbsolute: async (_control, value) => {
+        applied.push(value)
+        return { ok: true }
+      },
+      flushMs: 50,
+    })
+
+    await router.handle(message('move', undefined, 'btn-abs', 0.2), target(absoluteVolume))
+    await router.handle(message('move', undefined, 'btn-abs', 0.8), target(absoluteVolume))
+    expect(applied).toEqual([])
+
+    await vi.advanceTimersByTimeAsync(50)
+    expect(applied).toEqual([0.8])
+
+    await expect(router.handle(message('end', undefined, 'btn-abs'), target(absoluteVolume))).resolves.toEqual({
+      ok: true,
+    })
+    expect(applied).toEqual([0.8])
+    router.dispose()
+  })
+
+  it('flushes the latest absolute value immediately on end', async () => {
+    const applied: number[] = []
+    const router = new ControlInputRouter({
+      execute: async () => ({ ok: true }),
+      applyAbsolute: async (_control, value) => {
+        applied.push(value)
+        return { ok: true }
+      },
+    })
+
+    await router.handle(message('move', undefined, 'btn-abs', 0), target(absoluteVolume))
+    await router.handle(message('move', undefined, 'btn-abs', 0.35), target(absoluteVolume))
+    await expect(router.handle(message('end', undefined, 'btn-abs'), target(absoluteVolume))).resolves.toEqual({
+      ok: true,
+    })
+    expect(applied).toEqual([0.35])
+    router.dispose()
+  })
+
+  it('applies the newest absolute value after an in-flight update', async () => {
+    vi.useFakeTimers()
+    const applied: number[] = []
+    let release: (() => void) | null = null
+    const router = new ControlInputRouter({
+      execute: async () => ({ ok: true }),
+      applyAbsolute: async (_control, value) => {
+        applied.push(value)
+        if (applied.length === 1) {
+          await new Promise<void>((resolve) => {
+            release = resolve
+          })
+        }
+        return { ok: true }
+      },
+      flushMs: 50,
+    })
+
+    await router.handle(message('move', undefined, 'btn-abs', 0.1), target(absoluteVolume))
+    await vi.advanceTimersByTimeAsync(50)
+    expect(applied).toEqual([0.1])
+
+    await router.handle(message('move', undefined, 'btn-abs', 0.9), target(absoluteVolume))
+    const end = router.handle(message('end', undefined, 'btn-abs'), target(absoluteVolume))
+    await Promise.resolve()
+    expect(applied).toEqual([0.1])
+
+    expect(release).toBeTypeOf('function')
+    release!()
+    await expect(end).resolves.toEqual({ ok: true })
+    expect(applied).toEqual([0.1, 0.9])
+    router.dispose()
+  })
+
+  it('rejects absolute volume when no absolute backend is wired', async () => {
+    const router = new ControlInputRouter({ execute: async () => ({ ok: true }) })
+    const result = await router.handle(
+      message('move', undefined, 'btn-abs', 0.5),
+      target(absoluteVolume),
+    )
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/not available/)
     router.dispose()
   })
 

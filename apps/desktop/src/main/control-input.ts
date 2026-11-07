@@ -17,6 +17,8 @@ export interface ControlInputTarget {
 export interface ControlInputRouterOptions {
   /** Usually `executor.execute`; it already serializes keyboard work. */
   execute: (actions: Action[], label: string) => Promise<PressResult>
+  /** Absolute volume: value is normalized 0..1. Usually `executor.executeVolume(value*100)`. */
+  applyAbsolute?: (control: ControlSpec, value: number, label: string) => Promise<PressResult>
   logger?: Logger
   /** Coalescing window for move events. Default 50 ms. */
   flushMs?: number
@@ -26,6 +28,8 @@ interface PendingControl {
   control: ControlSpec
   label: string
   delta: number
+  /** Latest absolute value (0..1), or null when no value is pending. */
+  value: number | null
   timer: NodeJS.Timeout | null
   running: Promise<InputResult> | null
 }
@@ -39,19 +43,21 @@ const DEFAULT_FLUSH_MS = 50
  *   is in flight instead of queueing one execution per move.
  * - A 50 ms timer flushes accumulated deltas; `end` forces an immediate flush
  *   and waits for it so the matching `inputResult` is accurate.
- * - `start` resets any unflushed delta from an interrupted gesture.
- * - MVP only: relative volume and scroll. Absolute (`emit: 'value'`) controls
- *   return a clear unsupported error.
+ * - `start` resets any unflushed delta/value from an interrupted gesture.
+ * - Relative volume/scroll still use `execute`; absolute volume uses
+ *   `applyAbsolute` with the latest 0..1 value.
  */
 export class ControlInputRouter {
   private readonly pending = new Map<string, PendingControl>()
   private readonly execute: ControlInputRouterOptions['execute']
+  private readonly applyAbsolute?: ControlInputRouterOptions['applyAbsolute']
   private readonly logger?: Logger
   private readonly flushMs: number
   private disposed = false
 
   constructor(options: ControlInputRouterOptions) {
     this.execute = options.execute
+    this.applyAbsolute = options.applyAbsolute
     this.logger = options.logger
     this.flushMs = Math.max(1, options.flushMs ?? DEFAULT_FLUSH_MS)
   }
@@ -65,7 +71,14 @@ export class ControlInputRouter {
     const key = `${message.profileId}\u0000${message.pageId}\u0000${message.controlId}`
     let state = this.pending.get(key)
     if (!state) {
-      state = { control: target.control, label: target.label, delta: 0, timer: null, running: null }
+      state = {
+        control: target.control,
+        label: target.label,
+        delta: 0,
+        value: null,
+        timer: null,
+        running: null,
+      }
       this.pending.set(key, state)
     } else {
       state.control = target.control
@@ -76,10 +89,18 @@ export class ControlInputRouter {
       case 'start':
         this.cancelTimer(state)
         state.delta = 0
+        state.value = null
         return Promise.resolve({ ok: true })
       case 'move': {
-        const delta = message.delta
-        if (delta !== undefined && Number.isFinite(delta)) state.delta += delta
+        if (this.isAbsolute(target.control)) {
+          const value = message.value
+          if (value !== undefined && Number.isFinite(value)) {
+            state.value = Math.max(0, Math.min(1, value))
+          }
+        } else {
+          const delta = message.delta
+          if (delta !== undefined && Number.isFinite(delta)) state.delta += delta
+        }
         this.schedule(state)
         return Promise.resolve({ ok: true })
       }
@@ -87,7 +108,9 @@ export class ControlInputRouter {
         this.cancelTimer(state)
         const current = state
         return this.flush(current, true).then((result) => {
-          if (!current.running && current.delta === 0) this.pending.delete(key)
+          if (!current.running && current.delta === 0 && current.value === null) {
+            this.pending.delete(key)
+          }
           return result
         })
       }
@@ -100,7 +123,16 @@ export class ControlInputRouter {
     this.pending.clear()
   }
 
+  private isAbsolute(control: ControlSpec): boolean {
+    return control.binding.type === 'volume' && control.binding.mode === 'absolute'
+  }
+
   private unsupportedReason(control: ControlSpec): string | null {
+    if (this.isAbsolute(control)) {
+      if (control.emit !== 'value') return 'Absolute volume requires a value control.'
+      if (!this.applyAbsolute) return 'Absolute volume is not available on this desktop.'
+      return null
+    }
     if (control.emit !== 'delta') {
       return 'Absolute controls are not supported yet. Use a relative control.'
     }
@@ -111,7 +143,7 @@ export class ControlInputRouter {
   }
 
   private schedule(state: PendingControl): void {
-    if (state.timer || state.running || state.delta === 0) return
+    if (state.timer || state.running || (state.delta === 0 && state.value === null)) return
     state.timer = setTimeout(() => {
       state.timer = null
       void this.flush(state, false)
@@ -131,6 +163,14 @@ export class ControlInputRouter {
       await state.running
     }
 
+    if (state.value !== null) {
+      const value = state.value
+      state.value = null
+      const apply = this.applyAbsolute
+      if (!apply) return { ok: false, error: 'Absolute volume is not available on this desktop.' }
+      return this.runExecution(state, () => apply(state.control, value, state.label), force)
+    }
+
     if (state.delta === 0) return { ok: true }
 
     const actions = controlToActions(state.control, state.delta)
@@ -139,9 +179,17 @@ export class ControlInputRouter {
     state.delta = 0
     if (actions.length === 0) return { ok: true }
 
+    return this.runExecution(state, () => this.execute(actions, state.label), force)
+  }
+
+  private async runExecution(
+    state: PendingControl,
+    operation: () => Promise<PressResult>,
+    force: boolean,
+  ): Promise<InputResult> {
     const execution = (async (): Promise<InputResult> => {
       try {
-        return await this.execute(actions, state.label)
+        return await operation()
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         this.logger?.warn(`Control input failed: ${message}`)
@@ -158,9 +206,9 @@ export class ControlInputRouter {
     }
 
     if (force) {
-      // Deltas that arrived while this batch ran must flush before `end` acks.
-      if (state.delta !== 0) return this.flush(state, true)
-    } else if (state.delta !== 0) {
+      // Values/deltas that arrived while this batch ran must flush before `end`.
+      if (state.value !== null || state.delta !== 0) return this.flush(state, true)
+    } else if (state.value !== null || state.delta !== 0) {
       this.schedule(state)
     }
     return result
