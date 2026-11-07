@@ -52,13 +52,21 @@ mac:
   category: public.app-category.utilities
   icon: build/icon.png
   artifactName: ${productName}-${version}-${arch}.${ext}
-  # CI builds unsigned (CSC_IDENTITY_AUTO_DISCOVERY=false); after-pack.cjs
-  # signs the two executables, using a local "PhoneDeck Local Signing"
-  # certificate when available so TCC grants survive rebuilds.
-  identity: null
-  hardenedRuntime: false
+  # Signed releases: provide CSC_LINK + CSC_KEY_PASSWORD (Developer ID
+  # Application) and APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID.
+  # electron-builder then signs, hardens and notarizes; macOS shows the normal
+  # one-time permission prompt and keeps the grant across updates.
+  #
+  # Without those secrets the build stays unsigned: set
+  # CSC_IDENTITY_AUTO_DISCOVERY=false (CI already does) to skip signing, and
+  # after-pack.cjs applies ad-hoc signatures for local testing.
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
   gatekeeperAssess: false
-  notarize: false
+  # Signed by electron-builder with the real identity when one is available.
+  binaries:
+    - Contents/Resources/keyboard-helper
   extraResources:
     - from: resources/mac/keyboard-helper
       to: keyboard-helper

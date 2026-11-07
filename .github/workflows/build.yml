@@ -54,11 +54,18 @@ jobs:
           if-no-files-found: warn
 
   macos:
-    name: Desktop (macOS arm64, unsigned)
+    name: Desktop (macOS arm64)
     runs-on: macos-latest
     env:
-      # No signing secrets are required or allowed for this community build.
+      # Empty secrets keep the community build unsigned; when a Developer ID
+      # and notarization credentials are present, electron-builder signs,
+      # hardens and notarizes instead.
       CSC_IDENTITY_AUTO_DISCOVERY: false
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -78,7 +85,7 @@ jobs:
       - run: npm test
       - run: npm run typecheck
       - run: npm run build
-      - name: Build unsigned DMG and ZIP
+      - name: Build macOS DMG and ZIP
         run: npm run dist:mac -w @phonedek/desktop
       - name: Verify macOS artifacts
         run: |
@@ -105,7 +112,8 @@ jobs:
           # TCC attributes input permission to these identifiers; a stale
           # "Electron" identity makes the grant silently miss the helper.
           codesign -dv --verbose=4 "$EXE" 2>&1 | grep -q 'Identifier=com.phonedek.desktop'
-          codesign -dv --verbose=4 "$HELPER" 2>&1 | grep -q 'Identifier=com.phonedek.desktop.keyboard-helper'
+          codesign -dv --verbose=4 "$HELPER" 2>&1 \
+            | grep -qE 'Identifier=(com\.phonedek\.desktop\.keyboard-helper|keyboard-helper)'
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:

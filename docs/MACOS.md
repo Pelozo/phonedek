@@ -172,22 +172,50 @@ injection. Secure Input/password prompts can still block synthetic input.
 - **Keyboard layouts**: virtual keycodes are physical, like Windows VK codes;
   Unicode text is layout-independent.
 
-## Remaining signed/notarized release work
+## Signed release (the long-term fix)
 
-1. Obtain a Developer ID Application certificate and change `mac.identity` from
-   `null` to that identity (or use CI `CSC_LINK`/`CSC_KEY_PASSWORD`).
-2. Enable `hardenedRuntime`, add an entitlements plist (allow JIT for Electron,
-   no app sandbox), and add `mac.binaries` for
-   `Contents/Resources/keyboard-helper` so the nested helper is signed.
-3. Enable notarization with `APPLE_API_KEY`/`APPLE_API_ISSUER` or
-   `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID`; remove `notarize:
-   false`.
-4. Re-enable `UpdateService` for packaged darwin builds and publish DMG, ZIP,
-   `latest-mac.yml` and blockmaps in the same release as the Windows assets.
-5. Verify `codesign --verify --deep --strict`, `spctl --assess --type execute`,
-   `xcrun stapler validate`, and helper `lipo -info`; then test updating from a
-   previous signed version.
-6. Decide between arm64-only and universal distribution.
+An unsigned build cannot be made seamless on macOS 27: TCC keys the grant to a
+code identity, ad-hoc signatures change on every rebuild, and Apple provides no
+API for an app to add itself to the privacy list. The only supported fix is a
+**Developer ID Application** certificate plus notarization (Apple Developer
+Program, $99/year). Then macOS shows the standard one-time prompt, keeps the
+grant across updates, Gatekeeper stops blocking the app, and Squirrel.Mac
+auto-update can be enabled.
+
+The build is already wired for it:
+
+- `hardenedRuntime: true`, with `build/entitlements.mac.plist` and
+  `build/entitlements.mac.inherit.plist` (Electron JIT entitlements).
+- `mac.binaries` signs `Contents/Resources/keyboard-helper` with the same
+  Developer ID.
+- Notarization runs automatically when credentials are present.
+
+Remaining work, all repository/CI configuration:
+
+1. Create a **Developer ID Application** certificate in the Apple Developer
+   portal and export it as `.p12`.
+2. Add GitHub Actions secrets:
+   - `CSC_LINK` — base64 of the `.p12` (`base64 -i cert.p12 | pbcopy`)
+   - `CSC_KEY_PASSWORD` — its password
+   - `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` — notarization
+3. Push a tag/release. The `macos` workflow signs, hardens and notarizes;
+   users then install a DMG with no Gatekeeper or TCC file-dragging.
+4. Re-enable `UpdateService` for packaged darwin builds and keep publishing
+   DMG, ZIP, `latest-mac.yml` and blockmaps with each release.
+5. Verify once: `codesign --verify --deep --strict`, `spctl --assess --type
+   execute`, `xcrun stapler validate`, and update from a previous signed build.
+
+Until that exists, the unsigned preview keeps the in-app guidance: one file can
+be added manually, and it is only needed once per build.
+
+## Unsigned previews
+
+- Every rebuild may change the ad-hoc signature and revoke the grant;
+  Gatekeeper bypass is required on each reinstall.
+- On macOS 27 the app executable occasionally has to be added as a file; the
+  app shows its path and a **Show app file** button.
+- Squirrel.Mac auto-update stays disabled; updates are manual DMG replacements.
+  Config and assets in `~/Library/Application Support/PhoneDeck` survive.
 
 ## Manual test checklist (needs a Mac)
 

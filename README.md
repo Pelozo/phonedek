@@ -176,6 +176,10 @@ docs/
 
 ## macOS (unsigned preview)
 
+> **Long-term:** the seamless path is Developer ID signing + notarization; the
+> build pipeline is ready for it (see [docs/MACOS.md](docs/MACOS.md)). Unsigned
+> previews need a one-time permission step per build.
+
 1. Download `PhoneDeck-0.1.4-arm64.dmg` from the release and drag PhoneDeck to **Applications**.
 2. Gatekeeper: right-click the app → **Open**, or use **System Settings → Privacy & Security → Open Anyway**.
 3. Grant **input control** for key/mouse actions. PhoneDeck shows a banner with a
