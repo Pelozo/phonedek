@@ -72,29 +72,30 @@ export function readBackupFile(source: string, sourceName = basename(source)): B
   for (const entry of entries) {
     if (entry.isDirectory) continue
     const name = entry.entryName.replace(/\\/g, '/')
-    const data = entry.getData()
-    total += data.length
+    const declaredSize = entry.header.size
+    const isConfig = name === CONFIG_ENTRY || name === LEGACY_CONFIG_ENTRY
+    if (!isConfig && !name.startsWith(ASSET_PREFIX)) continue
+
+    total += declaredSize
     if (total > MAX_TOTAL_BYTES) throw new Error('That backup is larger than 300 MB when unpacked')
 
-    if (name === CONFIG_ENTRY || name === LEGACY_CONFIG_ENTRY) {
-      if (data.length > MAX_CONFIG_BYTES) throw new Error('The config inside the backup is too large')
-      configText = data.toString('utf8')
+    if (isConfig) {
+      if (declaredSize > MAX_CONFIG_BYTES) throw new Error('The config inside the backup is too large')
+      configText = entry.getData().toString('utf8')
       continue
     }
 
-    if (name.startsWith(ASSET_PREFIX)) {
-      const assetName = name.slice(ASSET_PREFIX.length)
-      if (!isSafeAssetName(assetName) || assetName.includes('/')) {
-        warnings.push(`Skipped unsafe asset entry: ${name}`)
-        continue
-      }
-      if (data.length > MAX_ASSET_BYTES) {
-        warnings.push(`Skipped oversized asset: ${assetName}`)
-        continue
-      }
-      if (assets.has(assetName)) warnings.push(`Duplicate asset replaced: ${assetName}`)
-      assets.set(assetName, data)
+    const assetName = name.slice(ASSET_PREFIX.length)
+    if (!isSafeAssetName(assetName) || assetName.includes('/')) {
+      warnings.push(`Skipped unsafe asset entry: ${name}`)
+      continue
     }
+    if (declaredSize > MAX_ASSET_BYTES) {
+      warnings.push(`Skipped oversized asset: ${assetName}`)
+      continue
+    }
+    if (assets.has(assetName)) warnings.push(`Duplicate asset replaced: ${assetName}`)
+    assets.set(assetName, entry.getData())
   }
 
   if (!configText) throw new Error(`The backup does not contain ${CONFIG_ENTRY}`)
