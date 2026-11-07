@@ -32,6 +32,27 @@ export interface SettingsView {
   pairHost: string
 }
 
+export type UpdateState =
+  | 'disabled'
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error'
+
+export interface UpdateStatus {
+  state: UpdateState
+  currentVersion: string
+  availableVersion?: string
+  progress?: number
+  bytesPerSecond?: number
+  transferred?: number
+  total?: number
+  message?: string
+  canCheck: boolean
+}
+
 export interface AppState {
   config: DeckConfig
   server: ServerInfoView
@@ -73,6 +94,10 @@ export interface PhoneDeckApi {
   openLogs(): Promise<void>
   openExternal(url: string): Promise<void>
   copyText(text: string): Promise<void>
+  getUpdateStatus(): Promise<UpdateStatus>
+  checkForUpdates(): Promise<UpdateStatus>
+  installUpdate(): Promise<void>
+  onUpdateStatus(listener: (status: UpdateStatus) => void): () => void
   onServerInfo(listener: (info: ServerInfoView) => void): () => void
   onConfigChanged(listener: (config: DeckConfig) => void): () => void
 }
@@ -93,6 +118,10 @@ export const IPC = {
   openLogs: 'phonedek:open-logs',
   openExternal: 'phonedek:open-external',
   copyText: 'phonedek:copy-text',
+  getUpdateStatus: 'phonedek:update-get-status',
+  checkForUpdates: 'phonedek:update-check',
+  installUpdate: 'phonedek:update-install',
+  updateStatusEvent: 'phonedek:update-status',
   serverInfoEvent: 'phonedek:server-info',
   configChangedEvent: 'phonedek:config-changed',
 } as const

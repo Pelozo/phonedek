@@ -18,6 +18,7 @@ private val Context.deckDataStore by preferencesDataStore(name = "phonedek")
 data class StoredSettings(
     val pairing: Pairing?,
     val keepScreenOn: Boolean,
+    val hideTopBarWhenConnected: Boolean,
     val lastProfileId: String?,
     val lastPageId: String?,
 )
@@ -29,6 +30,8 @@ class PrefsRepository(private val context: Context) {
         val TOKEN = stringPreferencesKey("token")
         val SERVER_NAME = stringPreferencesKey("server_name")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
+        val HIDE_TOP_BAR_WHEN_CONNECTED =
+            booleanPreferencesKey("hide_top_bar_when_connected")
         val LAST_PROFILE = stringPreferencesKey("last_profile")
         val LAST_PAGE = stringPreferencesKey("last_page")
     }
@@ -71,6 +74,8 @@ class PrefsRepository(private val context: Context) {
         return StoredSettings(
             pairing = pairing,
             keepScreenOn = prefs[Keys.KEEP_SCREEN_ON] ?: true,
+            // Hidden chrome is the default once a deck is paired and connected.
+            hideTopBarWhenConnected = prefs[Keys.HIDE_TOP_BAR_WHEN_CONNECTED] ?: true,
             lastProfileId = prefs[Keys.LAST_PROFILE]?.takeIf { it.isNotBlank() },
             lastPageId = prefs[Keys.LAST_PAGE]?.takeIf { it.isNotBlank() },
         )
@@ -105,6 +110,10 @@ class PrefsRepository(private val context: Context) {
 
     suspend fun setKeepScreenOn(enabled: Boolean) {
         context.deckDataStore.edit { prefs -> prefs[Keys.KEEP_SCREEN_ON] = enabled }
+    }
+
+    suspend fun setHideTopBarWhenConnected(enabled: Boolean) {
+        context.deckDataStore.edit { prefs -> prefs[Keys.HIDE_TOP_BAR_WHEN_CONNECTED] = enabled }
     }
 
     suspend fun setLastPage(profileId: String, pageId: String) {

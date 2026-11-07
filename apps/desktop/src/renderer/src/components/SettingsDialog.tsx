@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react'
 import type { DeckConfig } from '@phonedek/shared'
-import type { ServerInfoView, SettingsView } from '../../../shared/api'
+import type { ServerInfoView, SettingsView, UpdateStatus } from '../../../shared/api'
+import {
+  canCheckForUpdates,
+  formatProgressDetail,
+  summarizeUpdateStatus,
+  updateProgressPercent,
+} from '../../../shared/update-status'
 import { Icon } from './Icons'
 import { Modal, Toggle } from './Primitives'
 
@@ -8,6 +14,9 @@ export function SettingsDialog({
   server,
   settings,
   serverName,
+  updateStatus,
+  onCheckForUpdates,
+  onInstallUpdate,
   onRenameServer,
   onClose,
   onServerUpdate,
@@ -17,6 +26,9 @@ export function SettingsDialog({
   server: ServerInfoView
   settings: SettingsView
   serverName: string
+  updateStatus: UpdateStatus | null
+  onCheckForUpdates: () => Promise<UpdateStatus>
+  onInstallUpdate: () => Promise<void>
   onRenameServer: (name: string) => void
   onClose: () => void
   onServerUpdate: (server: ServerInfoView) => void
@@ -71,6 +83,42 @@ export function SettingsDialog({
     }
   }
 
+  const checkUpdates = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      await onCheckForUpdates()
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : String(error), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const installUpdate = async (): Promise<void> => {
+    const version = updateStatus?.availableVersion
+    const message = version
+      ? `PhoneDeck will close and restart to install version ${version}. Continue?`
+      : 'PhoneDeck will close and restart to install the downloaded update. Continue?'
+    if (!window.confirm(message)) return
+    setBusy(true)
+    try {
+      await onInstallUpdate()
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : String(error), 'error')
+      setBusy(false)
+    }
+  }
+
+  const updateSummary = updateStatus
+    ? summarizeUpdateStatus(updateStatus)
+    : {
+        title: 'Update status unavailable',
+        detail: 'The desktop process did not report update state. Restart PhoneDeck and try again.',
+        tone: 'neutral' as const,
+      }
+  const updatePercent = updateStatus?.state === 'downloading' ? updateProgressPercent(updateStatus) : null
+  const checkDisabled = busy || !updateStatus || !canCheckForUpdates(updateStatus)
+
   return (
     <Modal
       title="Settings"
@@ -107,6 +155,93 @@ export function SettingsDialog({
           onChange={(enabled) => void toggleLogin(enabled)}
           disabled={busy}
         />
+      </div>
+
+      <div className="settings-section">
+        <h3>Updates</h3>
+        <div className={`update-card ${updateSummary.tone}`}>
+          <div className="update-card-head">
+            <span className="update-card-icon">
+              <Icon
+                name={
+                  updateStatus?.state === 'downloaded'
+                    ? 'check'
+                    : updateStatus?.state === 'checking'
+                      ? 'refresh'
+                      : updateStatus?.state === 'disabled'
+                        ? 'monitor'
+                        : updateStatus?.state === 'error'
+                          ? 'bolt'
+                          : 'download'
+                }
+                size={18}
+              />
+            </span>
+            <div className="update-card-text">
+              <strong>{updateSummary.title}</strong>
+              <small>{updateSummary.detail}</small>
+            </div>
+          </div>
+
+          {updateStatus?.state === 'downloading' && updatePercent !== null && (
+            <div className="update-progress">
+              <div
+                className="update-progress-track"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={updatePercent}
+              >
+                <span style={{ width: `${updatePercent}%` }} />
+              </div>
+              <div className="update-progress-meta">{formatProgressDetail(updateStatus)}</div>
+            </div>
+          )}
+
+          <div className="update-meta">
+            <span>Installed version</span>
+            <strong>{updateStatus?.currentVersion ?? server.version}</strong>
+            {updateStatus?.availableVersion && (
+              <>
+                <span>Available version</span>
+                <strong>{updateStatus.availableVersion}</strong>
+              </>
+            )}
+          </div>
+
+          <div className="settings-row">
+            <div>
+              <strong>GitHub Releases</strong>
+              <small>Checks the public release feed over HTTPS. No GitHub account or token is required.</small>
+            </div>
+            <div className="row gap">
+              <button
+                type="button"
+                className="button secondary"
+                onClick={() => void checkUpdates()}
+                disabled={checkDisabled}
+              >
+                <Icon name={updateStatus?.state === 'checking' ? 'refresh' : 'download'} size={15} />
+                {updateStatus?.state === 'checking' ? 'Checking…' : 'Check for updates'}
+              </button>
+              {updateStatus?.state === 'downloaded' && (
+                <button type="button" className="button primary" onClick={() => void installUpdate()} disabled={busy}>
+                  <Icon name="arrow-up" size={15} /> Restart and install
+                </button>
+              )}
+            </div>
+          </div>
+
+          {updateStatus?.state === 'disabled' && (
+            <p className="update-note">
+              Automatic updates only run in the installed Windows build. Development and Linux builds must be updated
+              manually.
+            </p>
+          )}
+          {updateStatus?.state === 'error' && (
+            <p className="update-note">You can retry the check, or download the latest installer from GitHub Releases.</p>
+          )}
+        </div>
       </div>
 
       <div className="settings-section">

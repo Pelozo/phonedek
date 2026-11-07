@@ -17,6 +17,7 @@ import { lanAddresses, primaryLanAddress, urlsForPort } from './lan'
 import { createPairInfo } from './qr'
 import { DeckServer, type PressContext } from './server'
 import { SettingsStore } from './settings-store'
+import { UpdateService } from './updater'
 import { IPC } from '../shared/api'
 import type {
   AppState,
@@ -40,6 +41,7 @@ let server: DeckServer
 let discovery: DiscoveryService
 let keySender: KeySender
 let executor: ActionExecutor
+let updater: UpdateService
 let serverError: string | null = null
 let pairCache: { key: string; value: PairView } | null = null
 let shuttingDown = false
@@ -329,6 +331,10 @@ function registerIpc(): void {
   ipcMain.handle(IPC.copyText, async (_event, text: string): Promise<void> => {
     clipboard.writeText(String(text).slice(0, 20_000))
   })
+
+  ipcMain.handle(IPC.getUpdateStatus, async () => updater.getStatus())
+  ipcMain.handle(IPC.checkForUpdates, async () => updater.check())
+  ipcMain.handle(IPC.installUpdate, async (): Promise<void> => updater.install())
 }
 
 function createWindow(): void {
@@ -433,7 +439,17 @@ async function bootstrap(): Promise<void> {
 
   registerIpc()
   Menu.setApplicationMenu(null)
+
+  updater = new UpdateService({
+    enabled: app.isPackaged && process.platform === 'win32',
+    currentVersion: app.getVersion(),
+    getWindow: () => mainWindow,
+    logger,
+  })
+  updater.init()
+
   createWindow()
+  updater.checkOnStartup()
 }
 
 const gotLock = app.requestSingleInstanceLock()

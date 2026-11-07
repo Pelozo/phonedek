@@ -10,6 +10,8 @@
 The installer uses a per-user NSIS install and creates Desktop/Start Menu shortcuts.
 Keep PhoneDeck running while you use the deck; closing the window stops the LAN server.
 
+Installed Windows builds can check GitHub Releases and update themselves from **Settings → Updates**. See [UPDATES.md](UPDATES.md) for the release process and caveats.
+
 ## Data locations
 
 Electron stores everything under:

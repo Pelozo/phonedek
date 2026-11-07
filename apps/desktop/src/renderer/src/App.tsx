@@ -5,7 +5,8 @@ import {
   nextFreeSlot,
 } from '@phonedek/shared'
 import type { DeckConfig } from '@phonedek/shared'
-import type { AppState, ServerInfoView } from '../../shared/api'
+import type { AppState, ServerInfoView, UpdateStatus } from '../../shared/api'
+import { isUpdateNoticeVisible, updateIndicatorLabel } from '../../shared/update-status'
 import { DeckCanvas } from './components/DeckCanvas'
 import { Icon } from './components/Icons'
 import { Inspector } from './components/Inspector'
@@ -33,6 +34,7 @@ export default function App() {
   const [toast, setToast] = useState<ToastState | null>(null)
   const [pairOpen, setPairOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
 
   const skipSave = useRef(true)
   const saveNonce = useRef(0)
@@ -86,6 +88,35 @@ export default function App() {
       offServer()
       offConfig()
     }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    const offUpdates = window.phonedek.onUpdateStatus((next) => {
+      if (active) setUpdateStatus(next)
+    })
+    void window.phonedek
+      .getUpdateStatus()
+      .then((next) => {
+        if (active && next) setUpdateStatus(next)
+      })
+      .catch(() => {
+        // Update status is optional; the rest of the app keeps working.
+      })
+    return () => {
+      active = false
+      offUpdates()
+    }
+  }, [])
+
+  const checkForUpdates = useCallback(async (): Promise<UpdateStatus> => {
+    const next = await window.phonedek.checkForUpdates()
+    setUpdateStatus(next)
+    return next
+  }, [])
+
+  const installUpdate = useCallback(async (): Promise<void> => {
+    await window.phonedek.installUpdate()
   }, [])
 
   const save = useCallback(
@@ -270,6 +301,17 @@ export default function App() {
           </div>
 
           <div className="topbar-actions">
+            {updateStatus && isUpdateNoticeVisible(updateStatus) && (
+              <button
+                type="button"
+                className={`update-pill ${updateStatus.state}`}
+                onClick={() => setSettingsOpen(true)}
+                title="Open update settings"
+              >
+                <Icon name={updateStatus.state === 'downloaded' ? 'arrow-up' : 'download'} size={15} />
+                {updateIndicatorLabel(updateStatus)}
+              </button>
+            )}
             <div className={`save-state ${saveStatus}`} title={saveErrors[0] ?? 'Configuration is stored on this PC'}>
               <Icon name={saveStatus === 'saved' ? 'check' : saveStatus === 'saving' ? 'refresh' : 'bolt'} size={15} />
               {saveLabel}
@@ -341,6 +383,9 @@ export default function App() {
           server={server}
           settings={server.settings}
           serverName={config.serverName}
+          updateStatus={updateStatus}
+          onCheckForUpdates={checkForUpdates}
+          onInstallUpdate={installUpdate}
           onRenameServer={(name) => setConfig({ ...config, serverName: name })}
           onClose={() => setSettingsOpen(false)}
           onServerUpdate={setServer}

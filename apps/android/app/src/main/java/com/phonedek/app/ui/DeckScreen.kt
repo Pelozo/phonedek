@@ -1,5 +1,11 @@
 package com.phonedek.app.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -11,14 +17,19 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -41,12 +52,14 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.phonedek.app.data.DeckButton
@@ -56,6 +69,15 @@ import com.phonedek.app.data.Pairing
 import com.phonedek.app.data.ProfileTheme
 import com.phonedek.app.net.ConnectionStatus
 import kotlinx.coroutines.flow.distinctUntilChanged
+
+private val TopBarHeight = 54.dp
+
+/**
+ * Height reserved for the floating chrome when the top bar is hidden. The
+ * settings gear and the compact page indicator live in this strip so they
+ * never cover deck buttons, yet it is much smaller than the full top bar.
+ */
+private val HiddenChromeHeight = 40.dp
 
 @Composable
 fun DeckScreen(state: UiState, viewModel: MainViewModel) {
@@ -74,13 +96,41 @@ fun DeckScreen(state: UiState, viewModel: MainViewModel) {
         backgroundSpec(pageBackground, state.pairing, Navy950)
     }
 
-    Box(Modifier.fillMaxSize()) {
-        BackgroundLayer(background, Modifier.fillMaxSize())
+    // The bar is chrome for an unpaired/connecting deck; once the connection is
+    // healthy it can get out of the way (default). Reconnecting brings it back.
+    val hideTopBar = state.hideTopBarWhenConnected &&
+        state.connection == ConnectionStatus.CONNECTED
+    val topInset by animateDpAsState(
+        targetValue = if (hideTopBar) HiddenChromeHeight else TopBarHeight,
+        label = "deck-top-inset",
+    )
 
-        Column(
-            Modifier
-                .fillMaxSize()
-                .safeDrawingPadding(),
+    Box(Modifier.fillMaxSize()) {
+        if (profile != null && pages.isNotEmpty()) {
+            // Each page paints its own full-bleed background *under* the bar,
+            // so the backdrop slides with the pager instead of going stale.
+            DeckPager(
+                profile = profile,
+                activePageId = state.activePageId,
+                pairing = state.pairing,
+                topInset = topInset,
+                onPageSettled = { pageId -> viewModel.onPageSelected(profile.id, pageId) },
+                onPress = viewModel::onButtonPressed,
+            )
+        } else {
+            BackgroundLayer(background, Modifier.fillMaxSize())
+            DeckEmptyState(
+                state = state,
+                topInset = topInset,
+                onOpenSettings = { showSettings = true },
+            )
+        }
+
+        AnimatedVisibility(
+            visible = !hideTopBar,
+            modifier = Modifier.align(Alignment.TopCenter),
+            enter = fadeIn() + slideInVertically { -it },
+            exit = fadeOut() + slideOutVertically { -it },
         ) {
             DeckTopBar(
                 state = state,
@@ -88,23 +138,20 @@ fun DeckScreen(state: UiState, viewModel: MainViewModel) {
                 page = page,
                 onOpenSettings = { showSettings = true },
             )
+        }
 
-            Box(Modifier.fillMaxWidth().weight(1f)) {
-                if (profile != null && pages.isNotEmpty()) {
-                    DeckPager(
-                        profile = profile,
-                        activePageId = state.activePageId,
-                        pairing = state.pairing,
-                        onPageSettled = { pageId -> viewModel.onPageSelected(profile.id, pageId) },
-                        onPress = viewModel::onButtonPressed,
-                    )
-                } else {
-                    DeckEmptyState(
-                        state = state,
-                        onOpenSettings = { showSettings = true },
-                    )
-                }
-            }
+        AnimatedVisibility(
+            visible = hideTopBar,
+            modifier = Modifier.align(Alignment.TopCenter),
+            enter = fadeIn(),
+            exit = fadeOut(),
+        ) {
+            HiddenChrome(
+                status = state.connection,
+                pages = pages,
+                activePageId = page?.id,
+                onOpenSettings = { showSettings = true },
+            )
         }
     }
 
@@ -121,6 +168,85 @@ fun DeckScreen(state: UiState, viewModel: MainViewModel) {
                 viewModel.forgetServer()
             },
             onKeepScreenOn = viewModel::setKeepScreenOn,
+            onHideTopBarWhenConnected = viewModel::setHideTopBarWhenConnected,
+        )
+    }
+}
+
+/**
+ * Compact chrome for the hidden-bar mode: page dots stay available in the
+ * centre and a small gear (with the live connection dot) opens Settings.
+ * The container itself is not clickable, so swipes pass through to the pager.
+ */
+@Composable
+private fun HiddenChrome(
+    status: ConnectionStatus,
+    pages: List<DeckPage>,
+    activePageId: String?,
+    onOpenSettings: () -> Unit,
+) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(
+                WindowInsets.safeDrawing.only(
+                    WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
+                ),
+            )
+            .height(HiddenChromeHeight),
+    ) {
+        PageIndicator(
+            pages = pages,
+            activePageId = activePageId,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .clip(RoundedCornerShape(50))
+                .background(Color.Black.copy(alpha = 0.22f))
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+        )
+
+        FloatingSettingsButton(
+            status = status,
+            onOpenSettings = onOpenSettings,
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 8.dp),
+        )
+    }
+}
+
+@Composable
+private fun FloatingSettingsButton(
+    status: ConnectionStatus,
+    onOpenSettings: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val (label, color) = statusLabelAndColor(status)
+
+    Box(
+        modifier = modifier
+            .size(32.dp)
+            .clip(CircleShape)
+            .background(Navy900.copy(alpha = 0.55f))
+            .border(1.dp, Color.White.copy(alpha = 0.12f), CircleShape)
+            .clickable(role = Role.Button, onClick = onOpenSettings)
+            .semantics {
+                contentDescription = "Open settings. Connection: $label."
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "⚙\uFE0E",
+            fontSize = 16.sp,
+            color = Slate300,
+        )
+        Box(
+            Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 3.dp, bottom = 3.dp)
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(color),
         )
     }
 }
@@ -132,57 +258,77 @@ private fun DeckTopBar(
     page: DeckPage?,
     onOpenSettings: () -> Unit,
 ) {
-    Row(
+    // Only a soft scrim: the page background remains visible and keeps moving
+    // under the bar during a swipe, so the chrome never shows a stale colour.
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(54.dp)
-            .padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color.Black.copy(alpha = 0.55f),
+                        Color.Black.copy(alpha = 0.08f),
+                    ),
+                ),
+            )
+            .windowInsetsPadding(
+                WindowInsets.safeDrawing.only(
+                    WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
+                ),
+            ),
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = state.pairing?.serverName ?: state.config?.serverName ?: "PhoneDeck",
-                color = Color(0xFFE2E8F0),
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = page?.name ?: profile?.name ?: "No deck",
-                color = Slate500,
-                fontSize = 10.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-
-        PageIndicator(
-            pages = profile?.pages.orEmpty(),
-            activePageId = page?.id,
-            modifier = Modifier.padding(horizontal = 8.dp),
-        )
-
-        StatusPill(
-            status = state.connection,
-            onOpenSettings = onOpenSettings,
-        )
-
-        Spacer(Modifier.width(4.dp))
-
-        Box(
+        Row(
             modifier = Modifier
-                .size(38.dp)
-                .clip(CircleShape)
-                .clickable(role = Role.Button, onClick = onOpenSettings)
-                .semantics { contentDescription = "Open settings" },
-            contentAlignment = Alignment.Center,
+                .fillMaxWidth()
+                .height(TopBarHeight)
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = "⚙\uFE0E",
-                fontSize = 18.sp,
-                color = Slate300,
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = state.pairing?.serverName ?: state.config?.serverName ?: "PhoneDeck",
+                    color = Color(0xFFE2E8F0),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = page?.name ?: profile?.name ?: "No deck",
+                    color = Slate500,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            PageIndicator(
+                pages = profile?.pages.orEmpty(),
+                activePageId = page?.id,
+                modifier = Modifier.padding(horizontal = 8.dp),
             )
+
+            StatusPill(
+                status = state.connection,
+                onOpenSettings = onOpenSettings,
+            )
+
+            Spacer(Modifier.width(4.dp))
+
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .clickable(role = Role.Button, onClick = onOpenSettings)
+                    .semantics { contentDescription = "Open settings" },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "⚙\uFE0E",
+                    fontSize = 18.sp,
+                    color = Slate300,
+                )
+            }
         }
     }
 }
@@ -232,12 +378,7 @@ private fun StatusPill(
     status: ConnectionStatus,
     onOpenSettings: () -> Unit,
 ) {
-    val (label, color) = when (status) {
-        ConnectionStatus.CONNECTED -> "Connected" to Emerald400
-        ConnectionStatus.CONNECTING -> "Connecting" to Amber400
-        ConnectionStatus.RECONNECTING -> "Reconnecting" to Amber400
-        ConnectionStatus.OFFLINE -> "Offline" to Red400
-    }
+    val (label, color) = statusLabelAndColor(status)
 
     val shape = RoundedCornerShape(50)
     Row(
@@ -273,6 +414,13 @@ private fun StatusPill(
     }
 }
 
+private fun statusLabelAndColor(status: ConnectionStatus): Pair<String, Color> = when (status) {
+    ConnectionStatus.CONNECTED -> "Connected" to Emerald400
+    ConnectionStatus.CONNECTING -> "Connecting" to Amber400
+    ConnectionStatus.RECONNECTING -> "Reconnecting" to Amber400
+    ConnectionStatus.OFFLINE -> "Offline" to Red400
+}
+
 /**
  * Swipeable deck pages. The pager state is recreated whenever the profile or
  * the set of page ids changes, which keeps deletions/profile switches on a
@@ -284,6 +432,7 @@ private fun DeckPager(
     profile: DeckProfile,
     activePageId: String?,
     pairing: Pairing?,
+    topInset: Dp,
     onPageSettled: (String) -> Unit,
     onPress: (DeckButton) -> Unit,
 ) {
@@ -373,6 +522,7 @@ private fun DeckPager(
                 profile = profile,
                 page = current,
                 pairing = pairing,
+                topInset = topInset,
                 onPress = onPress,
             )
         }
@@ -384,6 +534,7 @@ private fun DeckPageContent(
     profile: DeckProfile,
     page: DeckPage,
     pairing: Pairing?,
+    topInset: Dp,
     onPress: (DeckButton) -> Unit,
 ) {
     val spec = remember(page.background, profile.theme.background, pairing) {
@@ -391,11 +542,13 @@ private fun DeckPageContent(
     }
 
     Box(Modifier.fillMaxSize()) {
+        // Full-bleed: this backdrop sits behind the transparent top bar too.
         BackgroundLayer(spec, Modifier.fillMaxSize())
         DeckGrid(
             profile = profile,
             page = page,
             pairing = pairing,
+            topInset = topInset,
             onPress = onPress,
         )
     }
@@ -406,6 +559,7 @@ private fun DeckGrid(
     profile: DeckProfile,
     page: DeckPage,
     pairing: Pairing?,
+    topInset: Dp,
     onPress: (DeckButton) -> Unit,
 ) {
     val grid = profile.grid
@@ -414,6 +568,10 @@ private fun DeckGrid(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            // Safe-area handling stays here so the background above can bleed
+            // to the screen edges while buttons avoid notches and the chrome.
+            .safeDrawingPadding()
+            .padding(top = topInset)
             .padding(grid.padding.dp),
         verticalArrangement = Arrangement.spacedBy(grid.gap.dp),
     ) {
@@ -448,13 +606,19 @@ private fun DeckGrid(
 }
 
 @Composable
-private fun DeckEmptyState(state: UiState, onOpenSettings: () -> Unit) {
+private fun DeckEmptyState(
+    state: UiState,
+    topInset: Dp,
+    onOpenSettings: () -> Unit,
+) {
     val waiting = state.connection == ConnectionStatus.CONNECTING ||
         state.connection == ConnectionStatus.RECONNECTING
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .safeDrawingPadding()
+            .padding(top = topInset)
             .padding(32.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,

@@ -53,6 +53,7 @@ fun SettingsSheet(
     onReconnect: () -> Unit,
     onChangeServer: () -> Unit,
     onKeepScreenOn: (Boolean) -> Unit,
+    onHideTopBarWhenConnected: (Boolean) -> Unit,
 ) {
     var confirmChange by remember { mutableStateOf(false) }
     var logs by remember { mutableStateOf(Diag.snapshot()) }
@@ -169,6 +170,39 @@ fun SettingsSheet(
                 Switch(
                     checked = state.keepScreenOn,
                     onCheckedChange = onKeepScreenOn,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color(0xFF03130D),
+                        checkedTrackColor = Emerald400,
+                        uncheckedThumbColor = Slate300,
+                        uncheckedTrackColor = Navy700,
+                        uncheckedBorderColor = Color.White.copy(alpha = 0.16f),
+                    ),
+                )
+            }
+
+            Spacer(Modifier.height(18.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = "Hide top bar when connected",
+                        color = Color(0xFFE2E8F0),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        text = "Uses the full screen for the deck. A gear button stays " +
+                            "in the top-right, so Settings are always one tap away.",
+                        color = Slate500,
+                        fontSize = 12.sp,
+                    )
+                }
+                Switch(
+                    checked = state.hideTopBarWhenConnected,
+                    onCheckedChange = onHideTopBarWhenConnected,
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = Color(0xFF03130D),
                         checkedTrackColor = Emerald400,

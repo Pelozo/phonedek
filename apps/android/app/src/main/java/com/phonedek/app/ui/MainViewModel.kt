@@ -45,6 +45,7 @@ data class UiState(
     val activePageId: String? = null,
     val connection: ConnectionStatus = ConnectionStatus.OFFLINE,
     val keepScreenOn: Boolean = true,
+    val hideTopBarWhenConnected: Boolean = true,
     val pairingBusy: Boolean = false,
     val pairingError: String? = null,
     val pairingDraft: PairingDraft? = null,
@@ -305,9 +306,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         protocolWarningShown = false
         authWarningShown = false
         val keepScreenOn = _state.value.keepScreenOn
+        val hideTopBarWhenConnected = _state.value.hideTopBarWhenConnected
         _state.value = UiState(
             ready = true,
             keepScreenOn = keepScreenOn,
+            hideTopBarWhenConnected = hideTopBarWhenConnected,
             connection = ConnectionStatus.OFFLINE,
         )
         viewModelScope.launch {
@@ -319,6 +322,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setKeepScreenOn(enabled: Boolean) {
         _state.update { it.copy(keepScreenOn = enabled) }
         viewModelScope.launch { runCatching { prefs.setKeepScreenOn(enabled) } }
+    }
+
+    fun setHideTopBarWhenConnected(enabled: Boolean) {
+        _state.update { it.copy(hideTopBarWhenConnected = enabled) }
+        viewModelScope.launch { runCatching { prefs.setHideTopBarWhenConnected(enabled) } }
     }
 
     /**
@@ -392,6 +400,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             activeProfileId = profileId,
             activePageId = pageId,
             keepScreenOn = stored.keepScreenOn,
+            hideTopBarWhenConnected = stored.hideTopBarWhenConnected,
         )
         loaded = true
 

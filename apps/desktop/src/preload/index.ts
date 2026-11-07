@@ -8,6 +8,7 @@ import type {
   PhoneDeckApi,
   SaveConfigResult,
   ServerInfoView,
+  UpdateStatus,
 } from '../shared/api'
 
 const api: PhoneDeckApi = {
@@ -27,6 +28,14 @@ const api: PhoneDeckApi = {
   openLogs: (): Promise<void> => ipcRenderer.invoke(IPC.openLogs),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke(IPC.openExternal, url),
   copyText: (text: string): Promise<void> => ipcRenderer.invoke(IPC.copyText, text),
+  getUpdateStatus: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.getUpdateStatus),
+  checkForUpdates: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.checkForUpdates),
+  installUpdate: (): Promise<void> => ipcRenderer.invoke(IPC.installUpdate),
+  onUpdateStatus: (listener: (status: UpdateStatus) => void): (() => void) => {
+    const handler = (_event: unknown, status: UpdateStatus): void => listener(status)
+    ipcRenderer.on(IPC.updateStatusEvent, handler)
+    return () => ipcRenderer.removeListener(IPC.updateStatusEvent, handler)
+  },
   onServerInfo: (listener: (info: ServerInfoView) => void): (() => void) => {
     const handler = (_event: unknown, info: ServerInfoView): void => listener(info)
     ipcRenderer.on(IPC.serverInfoEvent, handler)
