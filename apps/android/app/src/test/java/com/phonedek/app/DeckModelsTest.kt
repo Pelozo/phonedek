@@ -65,6 +65,161 @@ class DeckModelsTest {
         assertEquals("gradient", profile.pages.single().buttons.single().background?.type)
         assertNull(profile.pages.single().grid)
         assertEquals(profile.grid, pageGrid(profile, profile.pages.single()))
+        assertNull(profile.pages.single().buttons.single().control)
+        assertNull(profile.pages.single().buttons.single().span)
+    }
+
+    @Test
+    fun parsesSliderControlAndColumnSpan() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "grid": { "columns": 5, "rows": 3, "gap": 8, "padding": 10 },
+                "pages": [{
+                  "id": "page",
+                  "buttons": [{
+                    "id": "volume",
+                    "slot": 0,
+                    "label": "Volume",
+                    "control": {
+                      "kind": "slider",
+                      "axis": "horizontal",
+                      "emit": "delta",
+                      "binding": { "type": "volume", "mode": "relative", "stepPercent": 3 },
+                      "min": 0,
+                      "max": 100,
+                      "step": 5,
+                      "initial": 40,
+                      "unit": "%",
+                      "haptics": false
+                    },
+                    "span": { "columns": 3, "rows": 1 }
+                  }]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val button = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons.single()
+        val control = button.control!!
+        assertEquals("slider", control.kind)
+        assertEquals("horizontal", control.axis)
+        assertEquals("delta", control.emit)
+        assertEquals("volume", control.binding.type)
+        assertEquals("relative", control.binding.mode)
+        assertEquals(3, control.binding.stepPercent)
+        assertEquals(0f, control.min!!, 0.001f)
+        assertEquals(100f, control.max!!, 0.001f)
+        assertEquals(5f, control.step!!, 0.001f)
+        assertEquals(40f, control.initial!!, 0.001f)
+        assertEquals("%", control.unit)
+        assertFalse(control.haptics)
+        assertEquals(3, button.span!!.columns)
+        assertEquals(1, button.span!!.rows)
+    }
+
+    @Test
+    fun parsesDialScrollControlWithDefaults() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [{
+                    "id": "scroll",
+                    "slot": 0,
+                    "control": {
+                      "kind": "dial",
+                      "emit": "delta",
+                      "binding": { "type": "scroll", "axis": "vertical", "invert": true }
+                    }
+                  }]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val control = DeckJson.parse(raw)!!.profiles.single().pages.single()
+            .buttons.single().control!!
+        assertEquals("dial", control.kind)
+        assertEquals("scroll", control.binding.type)
+        assertEquals("vertical", control.binding.axis)
+        assertEquals(true, control.binding.invert)
+        assertEquals(0f, control.min!!, 0.001f)
+        assertEquals(100f, control.max!!, 0.001f)
+        assertEquals(1f, control.step!!, 0.001f)
+        assertEquals(50f, control.initial!!, 0.001f)
+        assertTrue(control.haptics)
+    }
+
+    @Test
+    fun unsupportedControlFallsBackToATapTile() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [
+                    {
+                      "id": "absolute",
+                      "slot": 0,
+                      "icon": "🔊",
+                      "control": {
+                        "kind": "slider",
+                        "emit": "value",
+                        "binding": { "type": "volume", "mode": "relative" }
+                      }
+                    },
+                    {
+                      "id": "unknown",
+                      "slot": 1,
+                      "icon": "?",
+                      "control": {
+                        "kind": "dial",
+                        "emit": "delta",
+                        "binding": { "type": "brightness" }
+                      }
+                    }
+                  ]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val buttons = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons
+        assertNull(buttons.first { it.id == "absolute" }.control)
+        assertNull(buttons.first { it.id == "unknown" }.control)
+        assertEquals("🔊", buttons.first { it.id == "absolute" }.icon)
+    }
+
+    @Test
+    fun spanningButtonsOccupyTheirCellsAndRejectOverlaps() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "grid": { "columns": 4, "rows": 2, "gap": 4, "padding": 4 },
+                "pages": [{
+                  "id": "page",
+                  "buttons": [
+                    { "id": "wide", "slot": 0, "span": { "columns": 2, "rows": 2 } },
+                    { "id": "overlap", "slot": 1 },
+                    { "id": "below", "slot": 5 },
+                    { "id": "free", "slot": 2 },
+                    { "id": "out", "slot": 99 }
+                  ]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val buttons = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons
+        assertEquals(listOf("wide", "free"), buttons.map { it.id })
+        assertEquals(2, buttons.first().span!!.columns)
+        assertEquals(2, buttons.first().span!!.rows)
     }
 
     @Test

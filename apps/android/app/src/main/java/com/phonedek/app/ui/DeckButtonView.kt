@@ -59,6 +59,8 @@ fun DeckButtonView(
     theme: ProfileTheme,
     pairing: Pairing?,
     onPress: () -> Unit,
+    onControlInput: (controlId: String, phase: String, delta: Float) -> Unit = { _, _, _ -> },
+    onControlInteracting: (Boolean) -> Unit = {},
     isActive: Boolean = true,
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -124,11 +126,22 @@ fun DeckButtonView(
     ) {
         BackgroundLayer(spec, Modifier.fillMaxSize(), isActive = isActive)
 
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 6.dp, vertical = 4.dp),
-        ) {
+        val control = button.control
+        if (control != null) {
+            DeckControlView(
+                control = control,
+                label = button.label,
+                textColor = textColor,
+                onInput = { phase, delta -> onControlInput(button.id, phase, delta) },
+                onInteractingChange = onControlInteracting,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            BoxWithConstraints(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+            ) {
             val density = LocalDensity.current
             val labelSize = with(density) {
                 minOf(theme.fontSize.dp, maxHeight * 0.16f).toSp()
@@ -193,6 +206,7 @@ fun DeckButtonView(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+            }
             }
         }
 

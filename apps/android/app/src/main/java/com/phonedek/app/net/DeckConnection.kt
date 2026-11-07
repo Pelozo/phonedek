@@ -12,6 +12,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -60,7 +61,7 @@ class DeckConnection(
     interface Listener {
         fun onStatus(status: ConnectionStatus)
         fun onOpen()
-        fun onServerHello(serverName: String, protocol: Int)
+        fun onServerHello(serverName: String, protocol: Int, capabilities: Set<String>)
         fun onConfig(rawJson: String)
         fun onPressResult(
             requestId: String,
@@ -69,6 +70,7 @@ class DeckConnection(
             error: String?,
             message: String?,
         )
+        fun onInputResult(requestId: String, controlId: String, ok: Boolean, error: String?)
         fun onServerError(code: String, message: String)
         fun onNavigate(direction: String, pageId: String?)
         fun onPong()
@@ -137,6 +139,31 @@ class DeckConnection(
             put("profileId", profileId)
             put("pageId", pageId)
             put("buttonId", buttonId)
+        }
+        return socket.send(payload.toString())
+    }
+
+    fun sendInput(
+        requestId: String,
+        profileId: String,
+        pageId: String,
+        controlId: String,
+        phase: String,
+        delta: Float? = null,
+    ): Boolean {
+        val socket = webSocketRef
+        if (!active || !connected || socket == null) {
+            Diag.w("sendInput dropped: connected=$connected active=$active socket=${socket != null}")
+            return false
+        }
+        val payload = buildJsonObject {
+            put("type", "input")
+            put("requestId", requestId)
+            put("profileId", profileId)
+            put("pageId", pageId)
+            put("controlId", controlId)
+            put("phase", phase)
+            if (delta != null) put("delta", delta.toDouble())
         }
         return socket.send(payload.toString())
     }
@@ -297,8 +324,12 @@ class DeckConnection(
                 if (config != null) listener.onConfig(config.toString())
                 val serverName = obj.string("serverName") ?: "PhoneDeck"
                 val protocol = obj.int("protocol") ?: PROTOCOL_VERSION
-                Diag.i("WS hello from=\"$serverName\" protocol=$protocol config=${config != null}")
-                listener.onServerHello(serverName, protocol)
+                val capabilities = parseCapabilities(obj)
+                Diag.i(
+                    "WS hello from=\"$serverName\" protocol=$protocol " +
+                        "capabilities=${capabilities.joinToString(",")} config=${config != null}",
+                )
+                listener.onServerHello(serverName, protocol, capabilities)
             }
 
             "config" -> {
@@ -313,6 +344,15 @@ class DeckConnection(
                     ok = result.ok,
                     error = result.error,
                     message = result.message,
+                )
+            }
+
+            "inputResult" -> {
+                listener.onInputResult(
+                    requestId = obj.string("requestId").orEmpty(),
+                    controlId = obj.string("controlId").orEmpty(),
+                    ok = obj.bool("ok") ?: false,
+                    error = obj.string("error"),
                 )
             }
 
@@ -354,6 +394,9 @@ internal data class PressResultPayload(
     val message: String?,
 )
 
+internal fun parseCapabilities(obj: JsonObject): Set<String> =
+    obj.stringList("capabilities").orEmpty().toSet()
+
 internal fun parsePressResult(obj: JsonObject): PressResultPayload = PressResultPayload(
     requestId = obj.string("requestId").orEmpty(),
     buttonId = obj.string("buttonId").orEmpty(),
@@ -370,3 +413,6 @@ private fun JsonObject.int(key: String): Int? =
 
 private fun JsonObject.bool(key: String): Boolean? =
     (this[key] as? JsonPrimitive)?.booleanOrNull
+
+private fun JsonObject.stringList(key: String): List<String>? =
+    (this[key] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }

@@ -1,5 +1,7 @@
 package com.phonedek.app.net
 
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
@@ -40,6 +42,25 @@ class DeckConnectionPressResultTest {
         assertTrue(payload.ok)
         assertNull(payload.message)
         assertNull(payload.error)
+    }
+
+    @Test
+    fun parsesCapabilityArray() {
+        val capabilities = parseCapabilities(
+            buildJsonObject {
+                put(
+                    "capabilities",
+                    buildJsonArray {
+                        add("backup-export-v1")
+                        add("input-v1")
+                    },
+                )
+            },
+        )
+
+        assertEquals(setOf("backup-export-v1", "input-v1"), capabilities)
+        assertTrue("input-v1" in capabilities)
+        assertTrue(parseCapabilities(buildJsonObject { }).isEmpty())
     }
 
     @Test

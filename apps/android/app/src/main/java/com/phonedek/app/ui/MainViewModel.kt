@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.ContentResolver
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -31,6 +32,7 @@ import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -43,6 +45,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
+private const val CONTROL_INPUT_FLUSH_MS = 40L
+
 data class UiState(
     val ready: Boolean = false,
     val pairing: Pairing? = null,
@@ -50,6 +54,7 @@ data class UiState(
     val activeProfileId: String? = null,
     val activePageId: String? = null,
     val connection: ConnectionStatus = ConnectionStatus.OFFLINE,
+    val inputCapable: Boolean = false,
     val keepScreenOn: Boolean = true,
     val hideTopBarWhenConnected: Boolean = true,
     val lockLandscape: Boolean = true,
@@ -100,6 +105,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var pairJob: Job? = null
     private var fetchJob: Job? = null
     private var backupJob: Job? = null
+    private var inputFlushJob: Job? = null
+    private var activeControlId: String? = null
+    private var pendingInputDelta = 0f
+    private var lastInputSentAt = 0L
+    private var inputUnsupportedShown = false
     private var protocolWarningShown = false
     private var authWarningShown = false
 
@@ -116,7 +126,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 refreshConfig()
             }
 
-            override fun onServerHello(serverName: String, protocol: Int) {
+            override fun onServerHello(
+                serverName: String,
+                protocol: Int,
+                capabilities: Set<String>,
+            ) {
+                val inputCapable = "input-v1" in capabilities
+                _state.update { it.copy(inputCapable = inputCapable) }
+                if (inputCapable) inputUnsupportedShown = false
                 if (protocol != 1 && !protocolWarningShown) {
                     protocolWarningShown = true
                     emit("This desktop uses protocol v$protocol; some features may not work.")
@@ -146,6 +163,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     // Success messages are optional; ordinary presses stay quiet.
                     message?.trim()?.takeIf { it.isNotEmpty() }?.let(::emit)
+                }
+            }
+
+            override fun onInputResult(
+                requestId: String,
+                controlId: String,
+                ok: Boolean,
+                error: String?,
+            ) {
+                if (!ok) {
+                    emit(
+                        error?.takeIf { it.isNotBlank() }
+                            ?: "The desktop could not run that control.",
+                    )
                 }
             }
 
@@ -320,6 +351,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         fetchJob?.cancel()
         backupJob?.cancel()
         backupJob = null
+        inputFlushJob?.cancel()
+        inputFlushJob = null
+        activeControlId = null
+        pendingInputDelta = 0f
+        inputUnsupportedShown = false
         connection.stop()
         lastRawConfig = null
         lastPageId = null
@@ -503,6 +539,123 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }.getOrNull()?.takeIf { it.isNotBlank() }
+
+    /**
+     * Relative slider/dial input. Moves are coalesced to about 25 Hz; `end`
+     * always flushes the pending delta and is sent even when it is zero.
+     */
+    fun onControlInput(controlId: String, phase: String, delta: Float) {
+        val snapshot = _state.value
+        val profileId = snapshot.activeProfileId ?: return
+        val pageId = snapshot.activePageId ?: return
+        if (snapshot.connection != ConnectionStatus.CONNECTED) return
+        if (!snapshot.inputCapable) {
+            if (!inputUnsupportedShown) {
+                inputUnsupportedShown = true
+                emit("Update PhoneDeck on your PC to use sliders.")
+            }
+            return
+        }
+
+        when (phase) {
+            "start" -> {
+                if (activeControlId != null && activeControlId != controlId) {
+                    endActiveControl(profileId, pageId)
+                }
+                inputFlushJob?.cancel()
+                inputFlushJob = null
+                activeControlId = controlId
+                pendingInputDelta = 0f
+                lastInputSentAt = SystemClock.elapsedRealtime()
+                sendControlInput(profileId, pageId, controlId, "start", null)
+            }
+
+            "move" -> {
+                if (activeControlId != controlId) {
+                    // Defensive: a move without a start still opens a gesture.
+                    activeControlId = controlId
+                    pendingInputDelta = 0f
+                    lastInputSentAt = 0L
+                    sendControlInput(profileId, pageId, controlId, "start", null)
+                }
+                if (delta.isFinite() && delta != 0f) {
+                    pendingInputDelta += delta
+                }
+                val now = SystemClock.elapsedRealtime()
+                val elapsed = now - lastInputSentAt
+                if (elapsed >= CONTROL_INPUT_FLUSH_MS) {
+                    flushControlMove(profileId, pageId, controlId)
+                } else if (inputFlushJob?.isActive != true) {
+                    inputFlushJob = viewModelScope.launch {
+                        delay(CONTROL_INPUT_FLUSH_MS - elapsed)
+                        flushControlMove(profileId, pageId, controlId)
+                    }
+                }
+            }
+
+            "end" -> {
+                inputFlushJob?.cancel()
+                inputFlushJob = null
+                if (pendingInputDelta != 0f) {
+                    sendControlInput(
+                        profileId,
+                        pageId,
+                        controlId,
+                        "move",
+                        pendingInputDelta,
+                    )
+                    pendingInputDelta = 0f
+                }
+                sendControlInput(profileId, pageId, controlId, "end", null)
+                activeControlId = null
+                pendingInputDelta = 0f
+            }
+        }
+    }
+
+    private fun flushControlMove(profileId: String, pageId: String, controlId: String) {
+        inputFlushJob = null
+        if (activeControlId != controlId) return
+        val delta = pendingInputDelta
+        pendingInputDelta = 0f
+        lastInputSentAt = SystemClock.elapsedRealtime()
+        if (delta.isFinite() && delta != 0f) {
+            sendControlInput(profileId, pageId, controlId, "move", delta)
+        }
+    }
+
+    private fun endActiveControl(profileId: String, pageId: String) {
+        val controlId = activeControlId ?: return
+        inputFlushJob?.cancel()
+        inputFlushJob = null
+        if (pendingInputDelta != 0f) {
+            sendControlInput(profileId, pageId, controlId, "move", pendingInputDelta)
+        }
+        sendControlInput(profileId, pageId, controlId, "end", null)
+        activeControlId = null
+        pendingInputDelta = 0f
+    }
+
+    private fun sendControlInput(
+        profileId: String,
+        pageId: String,
+        controlId: String,
+        phase: String,
+        delta: Float?,
+    ): Boolean {
+        val sent = connection.sendInput(
+            requestId = connection.newRequestId(),
+            profileId = profileId,
+            pageId = pageId,
+            controlId = controlId,
+            phase = phase,
+            delta = delta?.coerceIn(-100f, 100f),
+        )
+        if (!sent) {
+            Diag.w("Control input dropped: control=$controlId phase=$phase")
+        }
+        return sent
+    }
 
     /**
      * Called when a horizontal swipe settles on [pageId]. Uses the same
@@ -716,6 +869,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         backupJob?.cancel()
+        inputFlushJob?.cancel()
         connection.stop()
         super.onCleared()
     }

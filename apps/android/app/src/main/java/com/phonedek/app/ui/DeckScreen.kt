@@ -17,6 +17,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -101,6 +102,7 @@ fun DeckScreen(state: UiState, viewModel: MainViewModel) {
     var settingsChangeServerOnOpen by rememberSaveable { mutableStateOf(false) }
     var showDiagnostics by rememberSaveable { mutableStateOf(false) }
     var chromeRevealed by rememberSaveable { mutableStateOf(false) }
+    var controlInteracting by remember { mutableStateOf(false) }
     var bannerHeightPx by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
 
@@ -139,6 +141,11 @@ fun DeckScreen(state: UiState, viewModel: MainViewModel) {
         if (!canHideChrome) chromeRevealed = false
     }
 
+    // A disappeared control view cannot leave the pager locked.
+    LaunchedEffect(page?.id) {
+        controlInteracting = false
+    }
+
     // A revealed bar is temporary: it recedes again after a few seconds, or
     // immediately if the user opens Settings (the sheet keeps the controls).
     LaunchedEffect(chromeRevealed, showSettings) {
@@ -160,7 +167,9 @@ fun DeckScreen(state: UiState, viewModel: MainViewModel) {
     Box(
         Modifier
             .fillMaxSize()
-            .revealChromeOnTopEdgeSwipe(enabled = hideTopBar) { chromeRevealed = true }
+            .revealChromeOnTopEdgeSwipe(enabled = hideTopBar && !controlInteracting) {
+                chromeRevealed = true
+            }
             .then(
                 if (hideTopBar) {
                     Modifier.semantics {
@@ -184,8 +193,11 @@ fun DeckScreen(state: UiState, viewModel: MainViewModel) {
                 activePageId = state.activePageId,
                 pairing = state.pairing,
                 topInset = topInset,
+                controlInteracting = controlInteracting,
                 onPageSettled = { pageId -> viewModel.onPageSelected(profile.id, pageId) },
                 onPress = viewModel::onButtonPressed,
+                onControlInput = viewModel::onControlInput,
+                onControlInteracting = { controlInteracting = it },
             )
         } else {
             BackgroundLayer(background, Modifier.fillMaxSize())
@@ -645,8 +657,11 @@ private fun DeckPager(
     activePageId: String?,
     pairing: Pairing?,
     topInset: Dp,
+    controlInteracting: Boolean,
     onPageSettled: (String) -> Unit,
     onPress: (DeckButton) -> Unit,
+    onControlInput: (controlId: String, phase: String, delta: Float) -> Unit,
+    onControlInteracting: (Boolean) -> Unit,
 ) {
     val pages = profile.pages
     val pageIds = pages.map { it.id }
@@ -727,8 +742,9 @@ private fun DeckPager(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
             beyondViewportPageCount = 1,
-            // A single-page deck must not swallow horizontal drags.
-            userScrollEnabled = pages.size > 1,
+            // A single-page deck must not swallow horizontal drags, and a
+            // control drag owns horizontal gestures until it ends.
+            userScrollEnabled = pages.size > 1 && !controlInteracting,
             key = { index -> pages.getOrNull(index)?.id ?: index },
         ) { index ->
             val current = pages.getOrNull(index) ?: return@HorizontalPager
@@ -739,6 +755,8 @@ private fun DeckPager(
                 topInset = topInset,
                 isActive = index == settledPage,
                 onPress = onPress,
+                onControlInput = onControlInput,
+                onControlInteracting = onControlInteracting,
             )
         }
     }
@@ -752,6 +770,8 @@ private fun DeckPageContent(
     topInset: Dp,
     isActive: Boolean,
     onPress: (DeckButton) -> Unit,
+    onControlInput: (controlId: String, phase: String, delta: Float) -> Unit,
+    onControlInteracting: (Boolean) -> Unit,
 ) {
     val spec = remember(page.background, profile.theme.background, pairing) {
         backgroundSpec(page.background ?: profile.theme.background, pairing, InkDeep)
@@ -767,6 +787,8 @@ private fun DeckPageContent(
             topInset = topInset,
             isActive = isActive,
             onPress = onPress,
+            onControlInput = onControlInput,
+            onControlInteracting = onControlInteracting,
         )
     }
 }
@@ -779,6 +801,8 @@ private fun DeckGrid(
     topInset: Dp,
     isActive: Boolean,
     onPress: (DeckButton) -> Unit,
+    onControlInput: (controlId: String, phase: String, delta: Float) -> Unit,
+    onControlInteracting: (Boolean) -> Unit,
 ) {
     val grid = pageGrid(profile, page)
     val capacity = grid.columns * grid.rows
@@ -788,7 +812,7 @@ private fun DeckGrid(
         page.buttons.filter { it.slot in 0 until capacity }.associateBy { it.slot }
     }
 
-    Column(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             // Safe-area handling stays here so the background above can bleed
@@ -796,31 +820,74 @@ private fun DeckGrid(
             .safeDrawingPadding()
             .padding(top = topInset)
             .padding(grid.padding.dp),
-        verticalArrangement = Arrangement.spacedBy(grid.gap.dp),
     ) {
-        repeat(grid.rows) { row ->
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(grid.gap.dp),
-            ) {
-                repeat(grid.columns) { column ->
-                    val slot = row * grid.columns + column
-                    val button = bySlot[slot]
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                    ) {
+        val gap = grid.gap.dp
+        val cellWidth = ((maxWidth - gap * (grid.columns - 1)) / grid.columns)
+            .coerceAtLeast(0.dp)
+
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(gap),
+        ) {
+            repeat(grid.rows) { row ->
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    var column = 0
+                    while (column < grid.columns) {
+                        val slot = row * grid.columns + column
+                        val button = bySlot[slot]
                         if (button != null) {
-                            DeckButtonView(
-                                button = button,
-                                theme = profile.theme,
-                                pairing = pairing,
-                                isActive = isActive,
-                                onPress = { onPress(button) },
-                            )
+                            val spanColumns = (button.span?.columns ?: 1)
+                                .coerceIn(1, grid.columns - column)
+                            val spanRows = button.span?.rows ?: 1
+                            val tileWidth = cellWidth * spanColumns +
+                                gap * (spanColumns - 1)
+                            Box(
+                                modifier = Modifier
+                                    .width(tileWidth)
+                                    .fillMaxHeight(),
+                            ) {
+                                DeckButtonView(
+                                    button = button,
+                                    theme = profile.theme,
+                                    pairing = pairing,
+                                    isActive = isActive,
+                                    onPress = { onPress(button) },
+                                    onControlInput = onControlInput,
+                                    onControlInteracting = onControlInteracting,
+                                )
+                                if (spanRows > 1) {
+                                    Text(
+                                        text = "ROWS $spanRows → 1",
+                                        color = Color.White.copy(alpha = 0.55f),
+                                        fontFamily = ConsoleMono,
+                                        fontSize = 7.sp,
+                                        maxLines = 1,
+                                        modifier = Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .padding(4.dp)
+                                            .background(
+                                                Color.Black.copy(alpha = 0.45f),
+                                                RoundedCornerShape(2.dp),
+                                            )
+                                            .padding(horizontal = 3.dp, vertical = 1.dp),
+                                    )
+                                }
+                            }
+                            if (column + spanColumns < grid.columns) {
+                                Spacer(Modifier.width(gap))
+                            }
+                            column += spanColumns
+                        } else {
+                            Spacer(Modifier.width(cellWidth))
+                            if (column + 1 < grid.columns) {
+                                Spacer(Modifier.width(gap))
+                            }
+                            column += 1
                         }
                     }
                 }

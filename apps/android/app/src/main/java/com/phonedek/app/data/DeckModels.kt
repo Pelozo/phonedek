@@ -83,6 +83,37 @@ data class DeckButton(
     val background: BackgroundDto? = null,
     val textColor: String? = null,
     val actions: List<ActionDto> = emptyList(),
+    val control: ControlDto? = null,
+    val span: CellSpanDto? = null,
+)
+
+@Serializable
+data class CellSpanDto(
+    val columns: Int = 1,
+    val rows: Int = 1,
+)
+
+@Serializable
+data class ControlDto(
+    val kind: String = "",
+    val axis: String? = null,
+    val emit: String = "",
+    val binding: ControlBindingDto = ControlBindingDto(),
+    val min: Float? = null,
+    val max: Float? = null,
+    val step: Float? = null,
+    val initial: Float? = null,
+    val unit: String? = null,
+    val haptics: Boolean = true,
+)
+
+@Serializable
+data class ControlBindingDto(
+    val type: String = "",
+    val mode: String? = null,
+    val stepPercent: Int? = null,
+    val axis: String? = null,
+    val invert: Boolean? = null,
 )
 
 @Serializable
@@ -213,26 +244,60 @@ private fun DeckProfile.normalized(): DeckProfile? {
 private fun DeckPage.normalized(profileGrid: GridSettings): DeckPage {
     val safePageGrid = grid?.toGridSettings(profileGrid)
     val effectiveGrid = safePageGrid ?: profileGrid
-    val capacity = effectiveGrid.columns * effectiveGrid.rows
+    val columns = effectiveGrid.columns
+    val rows = effectiveGrid.rows
+    val capacity = columns * rows
 
     val usedButtonIds = mutableSetOf<String>()
-    val cleanButtons = buttons
-        .filter { it.slot in 0 until capacity }
-        .distinctBy { it.slot }
-        .mapIndexed { index, button ->
-            button.copy(
-                id = uniqueId(button.id, "btn-${button.slot}-$index", usedButtonIds),
-                label = button.label.take(120),
-                sublabel = button.sublabel?.take(120),
-                icon = button.icon?.take(48),
-                iconMedia = button.iconMedia?.normalized(),
-            )
+    val occupied = mutableSetOf<Int>()
+    val cleanButtons = mutableListOf<DeckButton>()
+
+    buttons.forEachIndexed { index, button ->
+        if (button.slot !in 0 until capacity) return@forEachIndexed
+        val anchorRow = button.slot / columns
+        val anchorColumn = button.slot % columns
+        var span = button.span?.normalized() ?: CellSpanDto()
+
+        // A broken footprint falls back to the anchor cell rather than vanishing.
+        if (anchorColumn + span.columns > columns || anchorRow + span.rows > rows) {
+            span = CellSpanDto()
         }
+        var covered = spanCells(button.slot, span, columns)
+        if (covered.any { it in occupied }) {
+            span = CellSpanDto()
+            covered = spanCells(button.slot, span, columns)
+            if (covered.any { it in occupied }) return@forEachIndexed
+        }
+        occupied += covered
+
+        cleanButtons += button.copy(
+            id = uniqueId(button.id, "btn-${button.slot}-$index", usedButtonIds),
+            label = button.label.take(120),
+            sublabel = button.sublabel?.take(120),
+            icon = button.icon?.take(48),
+            iconMedia = button.iconMedia?.normalized(),
+            control = button.control?.normalized(),
+            span = if (button.span == null) null else span,
+        )
+    }
+
     return copy(
         name = name.ifBlank { "Page" },
         grid = safePageGrid?.toDto(),
         buttons = cleanButtons,
     )
+}
+
+private fun spanCells(slot: Int, span: CellSpanDto, columns: Int): List<Int> {
+    val anchorRow = slot / columns
+    val anchorColumn = slot % columns
+    return buildList {
+        repeat(span.rows) { rowOffset ->
+            repeat(span.columns) { columnOffset ->
+                add((anchorRow + rowOffset) * columns + anchorColumn + columnOffset)
+            }
+        }
+    }
 }
 
 private fun GridSettings.toDto(): GridDto = GridDto(
@@ -280,6 +345,63 @@ private fun MediaIconDto.normalized(): MediaIconDto? {
         fit = if (fit.trim() == "contain") "contain" else "cover",
         loop = loop,
         muted = muted,
+    )
+}
+
+private fun CellSpanDto.normalized(): CellSpanDto = copy(
+    columns = columns.coerceIn(1, 10),
+    rows = rows.coerceIn(1, 10),
+)
+
+private fun ControlBindingDto.normalized(): ControlBindingDto? {
+    return when (type.trim().lowercase()) {
+        "volume" -> {
+            if (mode != null && mode.trim().lowercase() != "relative") return null
+            ControlBindingDto(
+                type = "volume",
+                mode = "relative",
+                stepPercent = (stepPercent ?: 2).coerceIn(1, 25),
+            )
+        }
+
+        "scroll" -> ControlBindingDto(
+            type = "scroll",
+            axis = if (axis?.trim()?.lowercase() == "horizontal") "horizontal" else "vertical",
+            invert = invert ?: false,
+        )
+
+        else -> null
+    }
+}
+
+private fun ControlDto.normalized(): ControlDto? {
+    val controlKind = kind.trim().lowercase()
+    if (controlKind != "slider" && controlKind != "dial") return null
+    // MVP supports relative delta controls only; absolute controls stay tap-only.
+    if (emit.trim().lowercase() != "delta") return null
+    val safeBinding = binding.normalized() ?: return null
+
+    val safeMin = min?.takeIf { it.isFinite() } ?: 0f
+    var safeMax = max?.takeIf { it.isFinite() } ?: 100f
+    if (safeMax <= safeMin) safeMax = safeMin + 100f
+    val safeStep = step?.takeIf { it.isFinite() && it > 0f }
+        ?: if (safeBinding.type == "volume") safeBinding.stepPercent!!.toFloat() else 1f
+    val safeInitial = (initial?.takeIf { it.isFinite() } ?: ((safeMin + safeMax) / 2f))
+        .coerceIn(safeMin, safeMax)
+    val safeAxis = if (axis?.trim()?.lowercase() == "vertical") "vertical" else "horizontal"
+    val safeUnit = unit?.trim()?.takeIf { it.isNotEmpty() }?.take(16)
+
+    return copy(
+        kind = controlKind,
+        axis = safeAxis,
+        emit = "delta",
+        binding = safeBinding,
+        min = safeMin,
+        max = safeMax,
+        step = safeStep,
+        initial = safeInitial,
+        unit = safeUnit,
+        haptics = haptics,
     )
 }
 
