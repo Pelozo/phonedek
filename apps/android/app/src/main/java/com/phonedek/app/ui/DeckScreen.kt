@@ -32,12 +32,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -52,12 +50,12 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -70,15 +68,15 @@ import com.phonedek.app.data.ProfileTheme
 import com.phonedek.app.net.ConnectionStatus
 import kotlinx.coroutines.flow.distinctUntilChanged
 
-private val TopBarHeight = 54.dp
+private val TopBarHeight = 56.dp
+private val HiddenChromeHeight = 40.dp
+private val ControlShape = RoundedCornerShape(4.dp)
 
 /**
  * Height reserved for the floating chrome when the top bar is hidden. The
- * settings gear and the compact page indicator live in this strip so they
+ * settings control and the compact page indicator live in this strip so they
  * never cover deck buttons, yet it is much smaller than the full top bar.
  */
-private val HiddenChromeHeight = 40.dp
-
 @Composable
 fun DeckScreen(state: UiState, viewModel: MainViewModel) {
     var showSettings by rememberSaveable { mutableStateOf(false) }
@@ -93,7 +91,7 @@ fun DeckScreen(state: UiState, viewModel: MainViewModel) {
     val theme = profile?.theme ?: ProfileTheme()
     val pageBackground = page?.background ?: theme.background
     val background = remember(pageBackground, state.pairing) {
-        backgroundSpec(pageBackground, state.pairing, Navy950)
+        backgroundSpec(pageBackground, state.pairing, InkDeep)
     }
 
     // The bar is chrome for an unpaired/connecting deck; once the connection is
@@ -174,9 +172,9 @@ fun DeckScreen(state: UiState, viewModel: MainViewModel) {
 }
 
 /**
- * Compact chrome for the hidden-bar mode: page dots stay available in the
- * centre and a small gear (with the live connection dot) opens Settings.
- * The container itself is not clickable, so swipes pass through to the pager.
+ * Compact chrome for the hidden-bar mode: a status word on the left, page
+ * ticks in the centre and a squared settings control on the right. The
+ * container itself is not clickable, so swipes pass through.
  */
 @Composable
 private fun HiddenChrome(
@@ -195,18 +193,31 @@ private fun HiddenChrome(
             )
             .height(HiddenChromeHeight),
     ) {
-        PageIndicator(
-            pages = pages,
-            activePageId = activePageId,
+        HiddenStatusChip(
+            status = status,
             modifier = Modifier
-                .align(Alignment.Center)
-                .clip(RoundedCornerShape(50))
-                .background(Color.Black.copy(alpha = 0.22f))
-                .padding(horizontal = 10.dp, vertical = 6.dp),
+                .align(Alignment.CenterStart)
+                .padding(start = 8.dp),
         )
 
-        FloatingSettingsButton(
-            status = status,
+        if (pages.size > 1) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .clip(ControlShape)
+                    .background(InkDeep.copy(alpha = 0.62f))
+                    .border(1.dp, Hairline, ControlShape)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                PageIndicator(
+                    pages = pages,
+                    activePageId = activePageId,
+                )
+            }
+        }
+
+        SquaredSettingsButton(
             onOpenSettings = onOpenSettings,
             modifier = Modifier
                 .align(Alignment.CenterEnd)
@@ -216,37 +227,59 @@ private fun HiddenChrome(
 }
 
 @Composable
-private fun FloatingSettingsButton(
+private fun HiddenStatusChip(
     status: ConnectionStatus,
+    modifier: Modifier = Modifier,
+) {
+    val (fullLabel, color) = statusLabelAndColor(status)
+    val word = when (status) {
+        ConnectionStatus.CONNECTED -> "LIVE"
+        ConnectionStatus.CONNECTING, ConnectionStatus.RECONNECTING -> "LINK"
+        ConnectionStatus.OFFLINE -> "OFF"
+    }
+
+    Row(
+        modifier = modifier
+            .clip(ControlShape)
+            .background(InkDeep.copy(alpha = 0.62f))
+            .border(1.dp, Hairline, ControlShape)
+            .semantics {
+                contentDescription = "Connection status: ${fullLabel.lowercase()}."
+            }
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ConsoleLed(color = color, size = 5.dp)
+        Spacer(Modifier.width(4.dp))
+        Text(
+            text = word,
+            color = TextSecondary,
+            fontFamily = ConsoleMono,
+            fontSize = 8.5.sp,
+            letterSpacing = 0.8.sp,
+        )
+    }
+}
+
+@Composable
+private fun SquaredSettingsButton(
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val (label, color) = statusLabelAndColor(status)
-
     Box(
         modifier = modifier
             .size(32.dp)
-            .clip(CircleShape)
-            .background(Navy900.copy(alpha = 0.55f))
-            .border(1.dp, Color.White.copy(alpha = 0.12f), CircleShape)
+            .clip(ControlShape)
+            .background(InkDeep.copy(alpha = 0.62f))
+            .border(1.dp, Hairline, ControlShape)
             .clickable(role = Role.Button, onClick = onOpenSettings)
-            .semantics {
-                contentDescription = "Open settings. Connection: $label."
-            },
+            .semantics { contentDescription = "Open settings" },
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = "⚙\uFE0E",
-            fontSize = 16.sp,
-            color = Slate300,
-        )
-        Box(
-            Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 3.dp, bottom = 3.dp)
-                .size(8.dp)
-                .clip(CircleShape)
-                .background(color),
+            fontSize = 15.sp,
+            color = TextSecondary,
         )
     }
 }
@@ -258,19 +291,17 @@ private fun DeckTopBar(
     page: DeckPage?,
     onOpenSettings: () -> Unit,
 ) {
-    // Only a soft scrim: the page background remains visible and keeps moving
-    // under the bar during a swipe, so the chrome never shows a stale colour.
+    // A near-black scrim keeps the deck content readable while the page
+    // background continues to move underneath during a swipe.
+    val deckLabel = listOfNotNull(profile?.name, page?.name)
+        .distinct()
+        .joinToString(" / ")
+        .ifBlank { "NO DECK" }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        Color.Black.copy(alpha = 0.55f),
-                        Color.Black.copy(alpha = 0.08f),
-                    ),
-                ),
-            )
+            .background(InkDeep.copy(alpha = 0.82f))
             .windowInsetsPadding(
                 WindowInsets.safeDrawing.only(
                     WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
@@ -287,16 +318,19 @@ private fun DeckTopBar(
             Column(Modifier.weight(1f)) {
                 Text(
                     text = state.pairing?.serverName ?: state.config?.serverName ?: "PhoneDeck",
-                    color = Color(0xFFE2E8F0),
+                    color = TextPrimary,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                Spacer(Modifier.height(2.dp))
                 Text(
-                    text = page?.name ?: profile?.name ?: "No deck",
-                    color = Slate500,
-                    fontSize = 10.sp,
+                    text = deckLabel,
+                    color = TextMuted,
+                    fontFamily = ConsoleMono,
+                    fontSize = 9.5.sp,
+                    letterSpacing = 0.8.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -308,28 +342,36 @@ private fun DeckTopBar(
                 modifier = Modifier.padding(horizontal = 8.dp),
             )
 
-            StatusPill(
+            StatusReadout(
                 status = state.connection,
                 onOpenSettings = onOpenSettings,
             )
 
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(6.dp))
 
             Box(
                 modifier = Modifier
-                    .size(38.dp)
-                    .clip(CircleShape)
+                    .size(34.dp)
+                    .clip(ControlShape)
+                    .background(Panel.copy(alpha = 0.55f))
+                    .border(1.dp, HairlineStrong, ControlShape)
                     .clickable(role = Role.Button, onClick = onOpenSettings)
                     .semantics { contentDescription = "Open settings" },
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = "⚙\uFE0E",
-                    fontSize = 18.sp,
-                    color = Slate300,
+                    fontSize = 15.sp,
+                    color = TextSecondary,
                 )
             }
         }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(Hairline),
+        )
     }
 }
 
@@ -353,20 +395,18 @@ private fun PageIndicator(
             pages.forEachIndexed { index, _ ->
                 Box(
                     Modifier
-                        .height(5.dp)
-                        .width(if (index == activeIndex) 15.dp else 5.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (index == activeIndex) Emerald400
-                            else Color.White.copy(alpha = 0.22f),
-                        ),
+                        .width(12.dp)
+                        .height(2.dp)
+                        .background(if (index == activeIndex) Accent else HairlineStrong),
                 )
             }
         } else {
             Text(
                 text = "${activeIndex + 1}/${pages.size}",
-                color = Slate500,
-                fontSize = 10.sp,
+                color = TextMuted,
+                fontFamily = ConsoleMono,
+                fontSize = 9.sp,
+                letterSpacing = 0.8.sp,
             )
         }
     }
@@ -374,18 +414,17 @@ private fun PageIndicator(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun StatusPill(
+private fun StatusReadout(
     status: ConnectionStatus,
     onOpenSettings: () -> Unit,
 ) {
     val (label, color) = statusLabelAndColor(status)
 
-    val shape = RoundedCornerShape(50)
     Row(
         modifier = Modifier
-            .clip(shape)
-            .background(color.copy(alpha = 0.12f))
-            .border(1.dp, color.copy(alpha = 0.35f), shape)
+            .clip(ControlShape)
+            .background(Panel.copy(alpha = 0.45f))
+            .border(1.dp, Hairline, ControlShape)
             .combinedClickable(
                 role = Role.Button,
                 onClickLabel = "Open settings",
@@ -393,32 +432,30 @@ private fun StatusPill(
                 onLongClick = onOpenSettings,
                 onClick = onOpenSettings,
             )
-            .semantics { contentDescription = "Connection status: $label. Open settings." }
-            .padding(horizontal = 9.dp, vertical = 6.dp),
+            .semantics {
+                contentDescription = "Connection status: ${label.lowercase()}. Open settings."
+            }
+            .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            Modifier
-                .size(6.dp)
-                .clip(CircleShape)
-                .background(color),
-        )
+        ConsoleLed(color = color, size = 5.dp)
         Spacer(Modifier.width(6.dp))
         Text(
             text = label,
-            color = color,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.SemiBold,
+            color = TextSecondary,
+            fontFamily = ConsoleMono,
+            fontSize = 9.sp,
+            letterSpacing = 0.8.sp,
             maxLines = 1,
         )
     }
 }
 
 private fun statusLabelAndColor(status: ConnectionStatus): Pair<String, Color> = when (status) {
-    ConnectionStatus.CONNECTED -> "Connected" to Emerald400
-    ConnectionStatus.CONNECTING -> "Connecting" to Amber400
-    ConnectionStatus.RECONNECTING -> "Reconnecting" to Amber400
-    ConnectionStatus.OFFLINE -> "Offline" to Red400
+    ConnectionStatus.CONNECTED -> "CONNECTED" to Accent
+    ConnectionStatus.CONNECTING -> "CONNECTING" to StatusWarn
+    ConnectionStatus.RECONNECTING -> "RECONNECTING" to StatusWarn
+    ConnectionStatus.OFFLINE -> "OFFLINE" to StatusDanger
 }
 
 /**
@@ -538,7 +575,7 @@ private fun DeckPageContent(
     onPress: (DeckButton) -> Unit,
 ) {
     val spec = remember(page.background, profile.theme.background, pairing) {
-        backgroundSpec(page.background ?: profile.theme.background, pairing, Navy950)
+        backgroundSpec(page.background ?: profile.theme.background, pairing, InkDeep)
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -623,21 +660,34 @@ private fun DeckEmptyState(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        if (waiting) {
-            CircularProgressIndicator(
-                color = Emerald400,
-                strokeWidth = 2.dp,
-                modifier = Modifier.size(30.dp),
+        Box(
+            modifier = Modifier
+                .size(46.dp)
+                .background(InkDeep, RoundedCornerShape(8.dp))
+                .border(1.dp, HairlineStrong, RoundedCornerShape(8.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier
+                    .size(10.dp)
+                    .background(
+                        color = if (waiting) StatusWarn else Accent,
+                        shape = RoundedCornerShape(1.dp),
+                    ),
             )
-            Spacer(Modifier.height(20.dp))
-        } else {
-            Text("📡", fontSize = 42.sp)
-            Spacer(Modifier.height(14.dp))
         }
-
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = if (waiting) "LINK / ACQUIRING" else "LINK / NO DECK",
+            color = TextMuted,
+            fontFamily = ConsoleMono,
+            fontSize = 9.sp,
+            letterSpacing = 1.4.sp,
+        )
+        Spacer(Modifier.height(8.dp))
         Text(
             text = if (waiting) "Waiting for your PC…" else "No deck loaded",
-            color = Color(0xFFE2E8F0),
+            color = TextPrimary,
             fontSize = 18.sp,
             fontWeight = FontWeight.SemiBold,
         )
@@ -648,17 +698,25 @@ private fun DeckEmptyState(
             } else {
                 "Open PhoneDeck on your PC, check that both devices are on the same Wi-Fi, then try again."
             },
-            color = Slate500,
+            color = TextMuted,
             fontSize = 13.sp,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            textAlign = TextAlign.Center,
         )
-        if (!waiting) {
+        if (waiting) {
+            Spacer(Modifier.height(18.dp))
+            CircularProgressIndicator(
+                color = Accent,
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(18.dp),
+            )
+        } else {
             Spacer(Modifier.height(20.dp))
             Button(
                 onClick = onOpenSettings,
+                shape = ControlShape,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Emerald400,
-                    contentColor = Color(0xFF03130D),
+                    containerColor = Accent,
+                    contentColor = AccentInk,
                 ),
             ) {
                 Text("Open settings")

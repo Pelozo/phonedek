@@ -18,10 +18,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.phonedek.app.util.Diag
@@ -33,32 +31,45 @@ fun DiagnosticsDialog(onDismiss: () -> Unit) {
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Navy800,
-        titleContentColor = Color(0xFFE2E8F0),
-        textContentColor = Slate300,
-        title = { Text("PhoneDeck diagnostics") },
+        shape = RoundedCornerShape(8.dp),
+        containerColor = Panel,
+        titleContentColor = TextPrimary,
+        textContentColor = TextSecondary,
+        title = {
+            Column {
+                ConsoleTitleRule(title = "Diagnostics")
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "PHONEDECK / LOG BUFFER",
+                    color = TextMuted,
+                    fontFamily = ConsoleMono,
+                    fontSize = 9.sp,
+                    letterSpacing = 1.2.sp,
+                )
+            }
+        },
         text = {
             Column {
                 Text(
                     text = "Last 40 pairing/connection events. PINs are never logged.",
-                    color = Slate500,
+                    color = TextMuted,
                     fontSize = 11.sp,
                 )
                 Spacer(Modifier.height(8.dp))
                 Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = Navy950,
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.07f)),
+                    shape = RoundedCornerShape(4.dp),
+                    color = InkDeep,
+                    border = BorderStroke(1.dp, Hairline),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     SelectionContainer {
                         Text(
                             text = logs.lines().takeLast(40).joinToString("\n")
                                 .ifBlank { "No diagnostics yet. Try pairing, then reopen this dialog." },
-                            color = Slate300,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 8.sp,
-                            lineHeight = 11.sp,
+                            color = TextSecondary,
+                            fontFamily = ConsoleMono,
+                            fontSize = 9.sp,
+                            lineHeight = 13.sp,
                             modifier = Modifier.padding(10.dp),
                         )
                     }
@@ -66,20 +77,24 @@ fun DiagnosticsDialog(onDismiss: () -> Unit) {
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = "adb logcat -s PhoneDeck",
-                    color = Slate500,
-                    fontFamily = FontFamily.Monospace,
+                    color = TextFaint,
+                    fontFamily = ConsoleMono,
                     fontSize = 9.sp,
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = TextMuted)
+            }
         },
         dismissButton = {
             TextButton(onClick = {
                 clipboard.setText(AnnotatedString(Diag.snapshot()))
                 logs = Diag.snapshot()
-            }) { Text("Copy") }
+            }) {
+                Text("Copy", color = Accent)
+            }
         },
     )
 }

@@ -298,6 +298,7 @@ export default function App() {
         <span className="brand-mark large">
           <Icon name="grid" size={26} />
         </span>
+        <span className="boot-status">Boot failure</span>
         <h1>PhoneDeck could not start</h1>
         <p className="muted">{fatal}</p>
         <button className="button primary" onClick={() => window.location.reload()}>
@@ -310,11 +311,12 @@ export default function App() {
   if (!config || !server || !profile || !page) {
     return (
       <div className="boot">
-        <span className="brand-mark large pulse">
+        <span className="brand-mark large">
           <Icon name="grid" size={26} />
         </span>
+        <span className="boot-status">Starting deck server</span>
         <h1>PhoneDeck</h1>
-        <p className="muted">Starting the deck server…</p>
+        <p className="muted">Loading profiles and the LAN server…</p>
       </div>
     )
   }

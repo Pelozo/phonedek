@@ -3,6 +3,7 @@ package com.phonedek.app.ui
 import android.os.SystemClock
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,9 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -29,10 +28,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -50,12 +50,13 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -69,6 +70,71 @@ import androidx.lifecycle.compose.LifecycleStartEffect
 import com.phonedek.app.net.DiscoveredServer
 import com.phonedek.app.net.DiscoveryClient
 import kotlinx.coroutines.delay
+
+private val FieldTextStyle = TextStyle(
+    fontFamily = ConsoleMono,
+    fontSize = 14.sp,
+    letterSpacing = 0.2.sp,
+)
+private val PinTextStyle = TextStyle(
+    fontFamily = ConsoleMono,
+    fontSize = 20.sp,
+    letterSpacing = 5.sp,
+)
+private val FieldLabelStyle = TextStyle(
+    fontFamily = ConsoleMono,
+    fontSize = 10.sp,
+    letterSpacing = 1.sp,
+)
+private val FieldPlaceholderStyle = TextStyle(
+    fontFamily = ConsoleMono,
+    fontSize = 13.sp,
+)
+private val PanelShape = RoundedCornerShape(8.dp)
+private val ControlShape = RoundedCornerShape(4.dp)
+
+@Composable
+private fun consoleFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = TextPrimary,
+    unfocusedTextColor = TextPrimary,
+    disabledTextColor = TextFaint,
+    errorTextColor = TextPrimary,
+    focusedContainerColor = PanelRaised,
+    unfocusedContainerColor = PanelRaised,
+    disabledContainerColor = Panel,
+    errorContainerColor = PanelRaised,
+    cursorColor = Accent,
+    errorCursorColor = StatusDanger,
+    focusedBorderColor = Accent,
+    unfocusedBorderColor = HairlineStrong,
+    disabledBorderColor = Hairline,
+    errorBorderColor = StatusDanger,
+    focusedLabelColor = Accent,
+    unfocusedLabelColor = TextMuted,
+    disabledLabelColor = TextFaint,
+    errorLabelColor = StatusDanger,
+    focusedPlaceholderColor = TextFaint,
+    unfocusedPlaceholderColor = TextFaint,
+    errorPlaceholderColor = TextFaint,
+    errorSupportingTextColor = StatusDanger,
+)
+
+/** Faint engraved line grid over the flat ink background. */
+private fun Modifier.engravedGrid(): Modifier = drawBehind {
+    drawRect(Ink)
+    val step = 32.dp.toPx()
+    val line = Color.White.copy(alpha = 0.035f)
+    var x = step
+    while (x < size.width) {
+        drawLine(line, Offset(x, 0f), Offset(x, size.height), 1f)
+        x += step
+    }
+    var y = step
+    while (y < size.height) {
+        drawLine(line, Offset(0f, y), Offset(size.width, y), 1f)
+        y += step
+    }
+}
 
 @Composable
 fun PairingScreen(
@@ -159,18 +225,7 @@ fun PairingScreen(
     Box(
         Modifier
             .fillMaxSize()
-            .drawBehind {
-                drawRect(Brush.verticalGradient(listOf(Navy900, Navy950, Color(0xFF05080F))))
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(Emerald400.copy(alpha = 0.15f), Color.Transparent),
-                        center = Offset(size.width * 0.86f, size.height * 0.02f),
-                        radius = size.maxDimension * 0.62f,
-                    ),
-                    radius = size.maxDimension * 0.62f,
-                    center = Offset(size.width * 0.86f, size.height * 0.02f),
-                )
-            },
+            .engravedGrid(),
     ) {
         Column(
             modifier = Modifier
@@ -178,21 +233,29 @@ fun PairingScreen(
                 .verticalScroll(rememberScrollState())
                 .imePadding()
                 .safeDrawingPadding()
-                .padding(horizontal = 22.dp)
+                .padding(horizontal = 20.dp)
                 .padding(top = 28.dp, bottom = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            DeckMark(size = 62.dp)
-            Spacer(Modifier.height(14.dp))
+            DeckMark(size = 54.dp)
+            Spacer(Modifier.height(16.dp))
             Text(
-                text = "PhoneDeck",
-                style = androidx.compose.material3.MaterialTheme.typography.displaySmall,
-                color = Color(0xFFF8FAFC),
+                text = "WIRELESS DECK CONSOLE",
+                color = TextMuted,
+                fontFamily = ConsoleMono,
+                fontSize = 9.sp,
+                letterSpacing = 1.6.sp,
             )
             Spacer(Modifier.height(5.dp))
             Text(
+                text = "PhoneDeck",
+                style = androidx.compose.material3.MaterialTheme.typography.displaySmall,
+                color = TextPrimary,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
                 text = "Your phone, as a wireless Stream Deck for your PC.",
-                color = Slate500,
+                color = TextMuted,
                 fontSize = 13.sp,
                 textAlign = TextAlign.Center,
             )
@@ -327,12 +390,24 @@ fun PairingScreen(
             Spacer(Modifier.height(16.dp))
             Text(
                 text = "Tip: scan the QR code in PhoneDeck on your PC to pair instantly.",
-                color = Slate500.copy(alpha = 0.8f),
-                fontSize = 11.sp,
+                color = TextFaint,
+                fontSize = 10.sp,
                 textAlign = TextAlign.Center,
             )
-            TextButton(onClick = { showDiagnostics = true }) {
-                Text("Diagnostics / logs", color = Slate500, fontSize = 11.sp)
+            Spacer(Modifier.height(6.dp))
+            OutlinedButton(
+                onClick = { showDiagnostics = true },
+                shape = ControlShape,
+                border = BorderStroke(1.dp, HairlineStrong),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
+                modifier = Modifier.height(38.dp),
+            ) {
+                Text(
+                    text = "DIAGNOSTICS / LOGS",
+                    fontFamily = ConsoleMono,
+                    fontSize = 10.sp,
+                    letterSpacing = 1.sp,
+                )
             }
         }
     }
@@ -349,9 +424,9 @@ private fun PairingPanel(
 ) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(22.dp),
-        color = Navy800.copy(alpha = 0.9f),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.07f)),
+        shape = PanelShape,
+        color = Panel,
+        border = BorderStroke(1.dp, Hairline),
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
@@ -379,16 +454,17 @@ private fun PairingForm(
     onToggleToken: () -> Unit,
     onSubmit: () -> Unit,
 ) {
+    ConsoleSectionLabel(index = "01", label = "DIRECT PAIRING")
+    Spacer(Modifier.height(10.dp))
     Text(
         text = "Pair with your PC",
-        color = Color(0xFFF1F5F9),
-        fontSize = 18.sp,
-        fontWeight = FontWeight.SemiBold,
+        style = androidx.compose.material3.MaterialTheme.typography.titleLarge,
+        color = TextPrimary,
     )
     Spacer(Modifier.height(3.dp))
     Text(
         text = "Use the details shown in PhoneDeck on your desktop.",
-        color = Slate500,
+        color = TextMuted,
         fontSize = 12.sp,
     )
     Spacer(Modifier.height(16.dp))
@@ -398,11 +474,13 @@ private fun PairingForm(
             value = host,
             onValueChange = onHostChange,
             modifier = Modifier.weight(1f),
-            label = { Text("Host or IP") },
-            placeholder = { Text("192.168.1.42") },
+            label = { Text("HOST OR IP", style = FieldLabelStyle) },
+            placeholder = { Text("192.168.1.42", style = FieldPlaceholderStyle) },
             singleLine = true,
             isError = hostError != null,
-            shape = RoundedCornerShape(12.dp),
+            shape = ControlShape,
+            textStyle = FieldTextStyle,
+            colors = consoleFieldColors(),
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Uri,
                 imeAction = ImeAction.Next,
@@ -411,11 +489,13 @@ private fun PairingForm(
         OutlinedTextField(
             value = port,
             onValueChange = onPortChange,
-            modifier = Modifier.width(114.dp),
-            label = { Text("Port") },
+            modifier = Modifier.width(108.dp),
+            label = { Text("PORT", style = FieldLabelStyle) },
             singleLine = true,
             isError = portError != null,
-            shape = RoundedCornerShape(12.dp),
+            shape = ControlShape,
+            textStyle = FieldTextStyle,
+            colors = consoleFieldColors(),
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Number,
                 imeAction = ImeAction.Next,
@@ -423,10 +503,10 @@ private fun PairingForm(
         )
     }
     if (hostError != null || portError != null) {
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(5.dp))
         Text(
             text = hostError ?: portError.orEmpty(),
-            color = Red400,
+            color = StatusDanger,
             fontSize = 11.sp,
         )
     }
@@ -438,11 +518,13 @@ private fun PairingForm(
         modifier = Modifier
             .fillMaxWidth()
             .focusRequester(tokenFocus),
-        label = { Text("4-digit PIN") },
-        placeholder = { Text("0000") },
+        label = { Text("4-DIGIT PIN", style = FieldLabelStyle) },
+        placeholder = { Text("0000", style = FieldPlaceholderStyle) },
         singleLine = true,
         isError = tokenError != null,
-        shape = RoundedCornerShape(12.dp),
+        shape = ControlShape,
+        textStyle = PinTextStyle,
+        colors = consoleFieldColors(),
         visualTransformation = if (showToken) {
             VisualTransformation.None
         } else {
@@ -450,12 +532,14 @@ private fun PairingForm(
         },
         trailingIcon = {
             Text(
-                text = if (showToken) "Hide" else "Show",
-                color = Slate300,
-                fontSize = 11.sp,
+                text = if (showToken) "HIDE" else "SHOW",
+                color = TextSecondary,
+                fontFamily = ConsoleMono,
+                fontSize = 10.sp,
+                letterSpacing = 1.sp,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .clickable(onClick = onToggleToken)
+                    .clip(ControlShape)
+                    .clickable(role = Role.Button, onClick = onToggleToken)
                     .padding(horizontal = 8.dp, vertical = 6.dp)
                     .semantics {
                         contentDescription = if (showToken) "Hide PIN" else "Show PIN"
@@ -469,19 +553,19 @@ private fun PairingForm(
         keyboardActions = KeyboardActions(onDone = { onSubmit() }),
     )
     if (tokenError != null) {
-        Spacer(Modifier.height(4.dp))
-        Text(tokenError, color = Red400, fontSize = 11.sp)
+        Spacer(Modifier.height(5.dp))
+        Text(tokenError, color = StatusDanger, fontSize = 11.sp)
     }
 
     if (hint != null) {
         Spacer(Modifier.height(8.dp))
-        Text(hint, color = Amber400, fontSize = 11.sp)
+        Text(hint, color = StatusWarn, fontSize = 11.sp)
     }
     if (serverError != null) {
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "⚠  $serverError",
-            color = Red400,
+            text = "Error · $serverError",
+            color = StatusDanger,
             fontSize = 12.sp,
             lineHeight = 16.sp,
         )
@@ -493,19 +577,19 @@ private fun PairingForm(
         enabled = !busy,
         modifier = Modifier
             .fillMaxWidth()
-            .height(50.dp),
-        shape = RoundedCornerShape(14.dp),
+            .height(48.dp),
+        shape = ControlShape,
         colors = ButtonDefaults.buttonColors(
-            containerColor = Emerald400,
-            contentColor = Color(0xFF03130D),
-            disabledContainerColor = Emerald400.copy(alpha = 0.35f),
-            disabledContentColor = Color(0xFF03130D).copy(alpha = 0.7f),
+            containerColor = Accent,
+            contentColor = AccentInk,
+            disabledContainerColor = Accent.copy(alpha = 0.35f),
+            disabledContentColor = AccentInk.copy(alpha = 0.65f),
         ),
     ) {
         if (busy) {
             CircularProgressIndicator(
-                modifier = Modifier.size(18.dp),
-                color = Color(0xFF03130D),
+                modifier = Modifier.size(16.dp),
+                color = AccentInk,
                 strokeWidth = 2.dp,
             )
             Spacer(Modifier.width(9.dp))
@@ -517,7 +601,7 @@ private fun PairingForm(
     Spacer(Modifier.height(9.dp))
     Text(
         text = "The token stays on your local network and is only sent to this PC.",
-        color = Slate500.copy(alpha = 0.85f),
+        color = TextFaint,
         fontSize = 10.sp,
         textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth(),
@@ -531,20 +615,24 @@ private fun DiscoveryPanel(
     error: String?,
     onSelect: (DiscoveredServer) -> Unit,
 ) {
+    ConsoleSectionLabel(index = "02", label = "NEARBY")
+    Spacer(Modifier.height(10.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             text = "Nearby PCs",
-            color = Color(0xFFF1F5F9),
-            fontSize = 18.sp,
-            fontWeight = FontWeight.SemiBold,
+            style = androidx.compose.material3.MaterialTheme.typography.titleLarge,
+            color = TextPrimary,
             modifier = Modifier.weight(1f),
         )
         if (running) {
-            Box(
-                Modifier
-                    .size(6.dp)
-                    .clip(CircleShape)
-                    .background(Emerald400),
+            ConsoleLed(color = StatusInfo, size = 5.dp)
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = "SCANNING",
+                color = TextMuted,
+                fontFamily = ConsoleMono,
+                fontSize = 9.sp,
+                letterSpacing = 1.sp,
             )
         }
     }
@@ -555,7 +643,7 @@ private fun DiscoveryPanel(
         } else {
             "${servers.size} ${if (servers.size == 1) "PC" else "PCs"} found"
         },
-        color = Slate500,
+        color = TextMuted,
         fontSize = 12.sp,
     )
     Spacer(Modifier.height(14.dp))
@@ -564,20 +652,21 @@ private fun DiscoveryPanel(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(Navy950.copy(alpha = 0.7f))
+                .clip(ControlShape)
+                .background(InkDeep)
+                .border(1.dp, Hairline, ControlShape)
                 .padding(14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             CircularProgressIndicator(
-                modifier = Modifier.size(16.dp),
-                color = Emerald400,
+                modifier = Modifier.size(14.dp),
+                color = Accent,
                 strokeWidth = 2.dp,
             )
             Spacer(Modifier.width(10.dp))
             Text(
                 text = "Looking for the desktop app on this network…",
-                color = Slate300,
+                color = TextSecondary,
                 fontSize = 12.sp,
             )
         }
@@ -586,11 +675,11 @@ private fun DiscoveryPanel(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(ControlShape)
                     .clickable { onSelect(server) },
-                shape = RoundedCornerShape(14.dp),
-                color = Navy950,
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.07f)),
+                shape = ControlShape,
+                color = PanelRaised,
+                border = BorderStroke(1.dp, Hairline),
             ) {
                 Row(
                     modifier = Modifier.padding(12.dp),
@@ -598,36 +687,46 @@ private fun DiscoveryPanel(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(Emerald400.copy(alpha = 0.12f)),
+                            .size(30.dp)
+                            .background(InkDeep, ControlShape)
+                            .border(1.dp, HairlineStrong, ControlShape),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text("🖥️", fontSize = 16.sp)
+                        Text(
+                            text = "PC",
+                            color = TextMuted,
+                            fontFamily = ConsoleMono,
+                            fontSize = 8.sp,
+                            letterSpacing = 0.5.sp,
+                        )
                     }
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         Text(
                             text = server.name,
-                            color = Color(0xFFE2E8F0),
+                            color = TextPrimary,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
+                        Spacer(Modifier.height(1.dp))
                         Text(
                             text = "${server.host}:${server.port}",
-                            color = Slate500,
-                            fontSize = 11.sp,
+                            color = TextMuted,
+                            fontFamily = ConsoleMono,
+                            fontSize = 10.5.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
                     Text(
-                        text = "Pair",
-                        color = Emerald400,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        text = "PAIR",
+                        color = Accent,
+                        fontFamily = ConsoleMono,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
                     )
                 }
             }
@@ -639,7 +738,7 @@ private fun DiscoveryPanel(
         Spacer(Modifier.height(6.dp))
         Text(
             text = error,
-            color = Amber400,
+            color = StatusWarn,
             fontSize = 11.sp,
             lineHeight = 15.sp,
         )
@@ -649,7 +748,7 @@ private fun DiscoveryPanel(
     Text(
         text = "Can't find it? Check that both devices are on the same Wi-Fi and " +
             "that PhoneDeck is running on your PC.",
-        color = Slate500.copy(alpha = 0.85f),
+        color = TextFaint,
         fontSize = 10.sp,
         lineHeight = 14.sp,
     )

@@ -9,21 +9,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -34,16 +32,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.phonedek.app.BuildConfig
 import com.phonedek.app.util.Diag
+
+private val SheetShape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp)
+private val ControlShape = RoundedCornerShape(4.dp)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,18 +64,20 @@ fun SettingsSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Navy800,
-        contentColor = Color(0xFFE2E8F0),
-        scrimColor = Color.Black.copy(alpha = 0.6f),
+        containerColor = Panel,
+        contentColor = TextSecondary,
+        scrimColor = Color.Black.copy(alpha = 0.72f),
+        shape = SheetShape,
+        tonalElevation = 0.dp,
         dragHandle = {
-            BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.18f))
+            BottomSheetDefaults.DragHandle(color = HairlineStrong)
         },
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 22.dp)
+                .padding(horizontal = 20.dp)
                 .padding(bottom = 26.dp)
                 .navigationBarsPadding(),
         ) {
@@ -83,176 +85,122 @@ fun SettingsSheet(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = "Settings",
-                    style = androidx.compose.material3.MaterialTheme.typography.headlineSmall,
+                ConsoleTitleRule(
+                    title = "Settings",
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = onDismiss) { Text("Close") }
-            }
-
-            Spacer(Modifier.height(6.dp))
-
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = Navy950,
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.07f)),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column(Modifier.padding(16.dp)) {
-                    Text(
-                        text = "SERVER",
-                        color = Slate500,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = 0.8.sp,
-                    )
-                    Spacer(Modifier.height(5.dp))
-                    Text(
-                        text = pairing?.serverName ?: "Not paired",
-                        color = Color(0xFFE2E8F0),
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (pairing != null) {
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            text = "${pairing.host}:${pairing.port}",
-                            color = Slate500,
-                            fontSize = 12.sp,
-                        )
-                    }
+                TextButton(onClick = onDismiss) {
+                    Text("Close", color = TextMuted, fontSize = 12.sp)
                 }
-            }
-
-            Spacer(Modifier.height(14.dp))
-
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(
-                    onClick = onReconnect,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("Reconnect")
-                }
-                OutlinedButton(
-                    onClick = { confirmChange = true },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Red400),
-                    border = BorderStroke(1.dp, Red400.copy(alpha = 0.4f)),
-                ) {
-                    Text("Change server")
-                }
-            }
-
-            Spacer(Modifier.height(20.dp))
-            HorizontalDivider(color = Color.White.copy(alpha = 0.07f))
-            Spacer(Modifier.height(16.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = "Keep screen on",
-                        color = Color(0xFFE2E8F0),
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    Text(
-                        text = "Prevents the phone from sleeping while the deck is open.",
-                        color = Slate500,
-                        fontSize = 12.sp,
-                    )
-                }
-                Switch(
-                    checked = state.keepScreenOn,
-                    onCheckedChange = onKeepScreenOn,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color(0xFF03130D),
-                        checkedTrackColor = Emerald400,
-                        uncheckedThumbColor = Slate300,
-                        uncheckedTrackColor = Navy700,
-                        uncheckedBorderColor = Color.White.copy(alpha = 0.16f),
-                    ),
-                )
             }
 
             Spacer(Modifier.height(18.dp))
+            ConsoleSectionLabel(index = "01", label = "SERVER")
+            Spacer(Modifier.height(10.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = "Hide top bar when connected",
-                        color = Color(0xFFE2E8F0),
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    Text(
-                        text = "Uses the full screen for the deck. A gear button stays " +
-                            "in the top-right, so Settings are always one tap away.",
-                        color = Slate500,
-                        fontSize = 12.sp,
-                    )
-                }
-                Switch(
-                    checked = state.hideTopBarWhenConnected,
-                    onCheckedChange = onHideTopBarWhenConnected,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color(0xFF03130D),
-                        checkedTrackColor = Emerald400,
-                        uncheckedThumbColor = Slate300,
-                        uncheckedTrackColor = Navy700,
-                        uncheckedBorderColor = Color.White.copy(alpha = 0.16f),
-                    ),
+            Text(
+                text = pairing?.serverName ?: "Not paired",
+                color = if (pairing != null) TextPrimary else TextMuted,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (pairing != null) {
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = "${pairing.host}:${pairing.port}",
+                    color = TextMuted,
+                    fontFamily = ConsoleMono,
+                    fontSize = 11.sp,
+                    letterSpacing = 0.3.sp,
                 )
             }
 
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(
+                    onClick = onReconnect,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(40.dp),
+                    shape = ControlShape,
+                    border = BorderStroke(1.dp, HairlineStrong),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
+                ) {
+                    Text("Reconnect", fontSize = 12.sp)
+                }
+                OutlinedButton(
+                    onClick = { confirmChange = true },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(40.dp),
+                    shape = ControlShape,
+                    border = BorderStroke(1.dp, StatusDanger.copy(alpha = 0.55f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusDanger),
+                ) {
+                    Text("Change server", fontSize = 12.sp)
+                }
+            }
+
             Spacer(Modifier.height(20.dp))
-            HorizontalDivider(color = Color.White.copy(alpha = 0.07f))
+            HorizontalDivider(color = Hairline)
             Spacer(Modifier.height(16.dp))
 
+            ConsoleSectionLabel(index = "02", label = "BEHAVIOR")
+            Spacer(Modifier.height(4.dp))
+
+            SettingToggle(
+                title = "Keep screen on",
+                description = "Prevents the phone from sleeping while the deck is open.",
+                checked = state.keepScreenOn,
+                onCheckedChange = onKeepScreenOn,
+            )
+            HorizontalDivider(color = Hairline)
+            SettingToggle(
+                title = "Hide top bar when connected",
+                description = "Uses the full screen for the deck. A squared settings " +
+                    "control stays in the top-right, so Settings are one tap away.",
+                checked = state.hideTopBarWhenConnected,
+                onCheckedChange = onHideTopBarWhenConnected,
+            )
+
+            Spacer(Modifier.height(20.dp))
+            HorizontalDivider(color = Hairline)
+            Spacer(Modifier.height(16.dp))
+
+            ConsoleSectionLabel(index = "03", label = "DIAGNOSTICS")
+            Spacer(Modifier.height(6.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = "DIAGNOSTICS",
-                        color = Slate500,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = 0.8.sp,
-                    )
-                    Text(
-                        text = "Pairing and connection events (last 25).",
-                        color = Slate500,
-                        fontSize = 11.sp,
-                    )
+                Text(
+                    text = "Pairing and connection events (last 25).",
+                    color = TextMuted,
+                    fontSize = 11.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { logs = Diag.snapshot() }) {
+                    Text("Refresh", color = TextMuted, fontSize = 11.sp)
                 }
-                TextButton(onClick = { logs = Diag.snapshot() }) { Text("Refresh") }
                 TextButton(onClick = { clipboard.setText(AnnotatedString(Diag.snapshot())) }) {
-                    Text("Copy")
+                    Text("Copy", color = Accent, fontSize = 11.sp)
                 }
             }
 
             Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = Navy950,
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.07f)),
+                shape = ControlShape,
+                color = InkDeep,
+                border = BorderStroke(1.dp, Hairline),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 SelectionContainer {
                     Text(
                         text = logs.lines().takeLast(25).joinToString("\n")
                             .ifBlank { "No diagnostics yet. Try pairing, then press Refresh." },
-                        color = Slate300,
-                        fontFamily = FontFamily.Monospace,
+                        color = TextSecondary,
+                        fontFamily = ConsoleMono,
                         fontSize = 9.sp,
                         lineHeight = 13.sp,
                         modifier = Modifier.padding(12.dp),
@@ -263,21 +211,25 @@ fun SettingsSheet(
                 TextButton(onClick = {
                     Diag.clear()
                     logs = Diag.snapshot()
-                }) { Text("Clear") }
+                }) {
+                    Text("Clear", color = TextMuted, fontSize = 11.sp)
+                }
                 Text(
                     text = "adb logcat -s PhoneDeck",
-                    color = Slate500,
+                    color = TextFaint,
                     fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = ConsoleMono,
                     modifier = Modifier.padding(top = 14.dp),
                 )
             }
 
             Spacer(Modifier.height(18.dp))
             Text(
-                text = "PhoneDeck ${BuildConfig.VERSION_NAME}  •  protocol 1",
-                color = Slate500,
-                fontSize = 11.sp,
+                text = "PhoneDeck ${BuildConfig.VERSION_NAME}  ·  protocol 1",
+                color = TextFaint,
+                fontFamily = ConsoleMono,
+                fontSize = 10.sp,
+                letterSpacing = 0.3.sp,
             )
         }
     }
@@ -285,10 +237,11 @@ fun SettingsSheet(
     if (confirmChange) {
         AlertDialog(
             onDismissRequest = { confirmChange = false },
-            containerColor = Navy800,
-            titleContentColor = Color(0xFFE2E8F0),
-            textContentColor = Slate300,
-            title = { Text("Change server?") },
+            shape = RoundedCornerShape(8.dp),
+            containerColor = Panel,
+            titleContentColor = TextPrimary,
+            textContentColor = TextSecondary,
+            title = { ConsoleTitleRule("Change server?", color = StatusDanger) },
             text = {
                 Text(
                     "The saved server and PIN will be removed from this phone. " +
@@ -302,12 +255,51 @@ fun SettingsSheet(
                         onChangeServer()
                     },
                 ) {
-                    Text("Change server", color = Red400)
+                    Text("Change server", color = StatusDanger, fontWeight = FontWeight.Medium)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { confirmChange = false }) { Text("Cancel") }
+                TextButton(onClick = { confirmChange = false }) {
+                    Text("Cancel", color = TextMuted)
+                }
             },
+        )
+    }
+}
+
+@Composable
+private fun SettingToggle(
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                color = TextPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = description,
+                color = TextMuted,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        ConsoleSwitch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            contentDescription = title,
         )
     }
 }

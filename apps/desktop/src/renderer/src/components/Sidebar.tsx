@@ -141,13 +141,18 @@ export function Sidebar({
           <strong>PhoneDeck</strong>
           <small>Stream Deck for Android</small>
         </div>
-        <span className={`dot ${status}`} title={server.error ?? (server.running ? 'Server online' : 'Server offline')} />
+        <span className="brand-status" title={server.error ?? (server.running ? 'Server online' : 'Server offline')}>
+          <span className={`dot ${status}`} />
+          {status}
+        </span>
       </div>
 
       <div className="sidebar-scroll">
         <section className="sidebar-section">
           <header className="section-header">
-            <span>Profiles</span>
+            <span>
+              <em>01</em> Profiles
+            </span>
             <button type="button" className="icon-button tiny" onClick={addNewProfile} aria-label="Add profile">
               <Icon name="plus" size={15} />
             </button>
@@ -178,6 +183,11 @@ export function Sidebar({
         </section>
 
         <section className="sidebar-section">
+          <header className="section-header">
+            <span>
+              <em>02</em> Deck
+            </span>
+          </header>
           <label className="field compact">
             <span>Profile name</span>
             <InlineName
@@ -194,20 +204,20 @@ export function Sidebar({
             </div>
             <div>
               <span>Capacity</span>
-              <strong>{profile.grid.columns * profile.grid.rows} buttons</strong>
+              <strong>{profile.grid.columns * profile.grid.rows}</strong>
             </div>
             <div>
               <span>Used</span>
-              <strong>
-                {profile.pages.reduce((count, item) => count + item.buttons.length, 0)} buttons
-              </strong>
+              <strong>{profile.pages.reduce((count, item) => count + item.buttons.length, 0)}</strong>
             </div>
           </div>
         </section>
 
         <section className="sidebar-section">
           <header className="section-header">
-            <span>Pages</span>
+            <span>
+              <em>03</em> Pages
+            </span>
             <button type="button" className="icon-button tiny" onClick={addNewPage} aria-label="Add page">
               <Icon name="plus" size={15} />
             </button>
@@ -253,9 +263,6 @@ export function Sidebar({
               <Icon name="check" size={15} /> Start on this page
             </button>
           )}
-        </section>
-
-        <section className="sidebar-section">
           <label className="field compact">
             <span>Page name</span>
             <InlineName
@@ -274,9 +281,13 @@ export function Sidebar({
           <span>
             <strong>{server.running ? 'Pair a phone' : 'Server offline'}</strong>
             <small>
-              {server.running
-                ? `${server.clients.length} connected · ${settings.port}`
-                : server.error ?? 'Check the port'}
+              {server.running ? (
+                <>
+                  {server.clients.length} online · <span className="mono">{settings.port}</span>
+                </>
+              ) : (
+                (server.error ?? 'Check the port')
+              )}
             </small>
           </span>
           <span className={`dot ${status}`} />

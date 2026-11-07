@@ -41,6 +41,10 @@ import com.phonedek.app.data.DeckProfile
 import com.phonedek.app.data.Pairing
 import com.phonedek.app.data.ProfileTheme
 
+// Deck fills are user content. Keep the historical default so existing decks
+// render exactly as before even though the surrounding chrome is now ink/orange.
+private val LegacyDeckFallback = Color(0xFF1E293B)
+
 @Composable
 fun DeckButtonView(
     button: DeckButton,
@@ -58,7 +62,7 @@ fun DeckButtonView(
             "color" -> theme.buttonBackground.color
             else -> null
         },
-        Navy700,
+        LegacyDeckFallback,
     )
     val spec = remember(background, pairing, fallback) {
         backgroundSpec(background, pairing, fallback)

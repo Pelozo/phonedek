@@ -28,6 +28,7 @@ export function DeckCanvas({
   const [overSlot, setOverSlot] = useState<number | null>(null)
   const slots = capacity(profile.grid)
   const bySlot = new Map(page.buttons.map((button) => [button.slot, button]))
+  const deckNumber = String(Math.max(1, config.profiles.findIndex((item) => item.id === profile.id) + 1)).padStart(2, '0')
 
   const addAt = (slot: number): void => {
     const button = createEmptyButton(slot)
@@ -69,88 +70,95 @@ export function DeckCanvas({
 
   return (
     <div className="deck-stage">
-      <div
-        className="deck-frame"
-        style={{ background: 'rgba(2, 6, 23, 0.55)', borderColor: `${profile.theme.accentColor}33` }}
-      >
-        <div className="deck-grid" style={gridStyle} onDragLeave={() => setOverSlot(null)}>
-          {Array.from({ length: slots }, (_, slot) => {
-            const button = bySlot.get(slot)
-            if (!button) {
+      <div className="deck-device">
+        <div className="deck-labelstrip">
+          <span className="deck-led" aria-hidden="true" />
+          <span className="deck-brand">PhoneDeck</span>
+          <span className="deck-sep" aria-hidden="true" />
+          <span>Deck {deckNumber}</span>
+          <span className="deck-meta">
+            {profile.grid.columns}×{profile.grid.rows} · {page.buttons.length}/{slots}
+          </span>
+        </div>
+        <div className="deck-frame">
+          <div className="deck-grid" style={gridStyle} onDragLeave={() => setOverSlot(null)}>
+            {Array.from({ length: slots }, (_, slot) => {
+              const button = bySlot.get(slot)
+              if (!button) {
+                return (
+                  <button
+                    // eslint-disable-next-line react/no-array-index-key
+                    key={`empty-${slot}`}
+                    type="button"
+                    className={`deck-slot empty${overSlot === slot ? ' drag-over' : ''}`}
+                    onClick={() => addAt(slot)}
+                    onDragOver={(event) => {
+                      event.preventDefault()
+                      setOverSlot(slot)
+                    }}
+                    onDrop={(event) => onDrop(event, slot)}
+                    title="Add a button here"
+                    aria-label="Add a button here"
+                  >
+                    <span className="deck-empty-index">{String(slot + 1).padStart(2, '0')}</span>
+                    <Icon name="plus" size={16} className="deck-empty-plus" />
+                  </button>
+                )
+              }
+
+              const isSelected = button.id === selectedButtonId
+              const background = buttonBackground(button, page, profile, server)
               return (
-                <button
-                  // eslint-disable-next-line react/no-array-index-key
-                  key={`empty-${slot}`}
-                  type="button"
-                  className={`deck-slot empty${overSlot === slot ? ' drag-over' : ''}`}
-                  style={{ borderRadius: `${profile.theme.buttonRadius}px` }}
-                  onClick={() => addAt(slot)}
+                <div
+                  key={button.id}
+                  className={`deck-slot${isSelected ? ' selected' : ''}${dragging === button.id ? ' dragging' : ''}${overSlot === slot ? ' drag-over' : ''}`}
+                  style={{
+                    ...background,
+                    borderRadius: `${profile.theme.buttonRadius}px`,
+                    color: textColorFor(button, profile),
+                    fontSize: `${Math.max(9, Math.min(20, profile.theme.fontSize))}px`,
+                  }}
+                  draggable
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData('text/phonedek-button', button.id)
+                    event.dataTransfer.effectAllowed = 'move'
+                    setDragging(button.id)
+                  }}
+                  onDragEnd={() => {
+                    setDragging(null)
+                    setOverSlot(null)
+                  }}
                   onDragOver={(event) => {
                     event.preventDefault()
                     setOverSlot(slot)
                   }}
                   onDrop={(event) => onDrop(event, slot)}
-                  title="Add a button here"
+                  onClick={() => onSelectButton(button.id)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') onSelectButton(button.id)
+                  }}
                 >
-                  <Icon name="plus" size={20} />
-                  <span>Add</span>
-                </button>
-              )
-            }
-
-            const isSelected = button.id === selectedButtonId
-            const background = buttonBackground(button, page, profile, server)
-            return (
-              <div
-                key={button.id}
-                className={`deck-slot${isSelected ? ' selected' : ''}${dragging === button.id ? ' dragging' : ''}${overSlot === slot ? ' drag-over' : ''}`}
-                style={{
-                  ...background,
-                  borderRadius: `${profile.theme.buttonRadius}px`,
-                  color: textColorFor(button, profile),
-                  fontSize: `${Math.max(9, Math.min(20, profile.theme.fontSize))}px`,
-                  outlineColor: profile.theme.accentColor,
-                }}
-                draggable
-                onDragStart={(event) => {
-                  event.dataTransfer.setData('text/phonedek-button', button.id)
-                  event.dataTransfer.effectAllowed = 'move'
-                  setDragging(button.id)
-                }}
-                onDragEnd={() => {
-                  setDragging(null)
-                  setOverSlot(null)
-                }}
-                onDragOver={(event) => {
-                  event.preventDefault()
-                  setOverSlot(slot)
-                }}
-                onDrop={(event) => onDrop(event, slot)}
-                onClick={() => onSelectButton(button.id)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') onSelectButton(button.id)
-                }}
-              >
-                <div className="deck-button-content">
-                  {button.icon && <span className="deck-icon">{button.icon}</span>}
-                  <span className="deck-label">{button.label || 'Untitled'}</span>
-                  {button.sublabel && <span className="deck-sublabel">{button.sublabel}</span>}
+                  <div className="deck-button-content">
+                    {button.icon && <span className="deck-icon">{button.icon}</span>}
+                    <span className="deck-label">{button.label || 'Untitled'}</span>
+                    {button.sublabel && <span className="deck-sublabel">{button.sublabel}</span>}
+                  </div>
+                  {button.actions.length === 0 && (
+                    <span className="deck-warning" title="This button has no actions">
+                      !
+                    </span>
+                  )}
+                  <span className="deck-slot-number">{slot + 1}</span>
                 </div>
-                {button.actions.length === 0 && (
-                  <span className="deck-warning" title="This button has no actions">
-                    !
-                  </span>
-                )}
-                <span className="deck-slot-number">{slot + 1}</span>
-              </div>
-            )
-          })}
+              )
+            })}
+          </div>
         </div>
       </div>
       <div className="deck-hint">
-        <Icon name="drag" size={14} /> Drag to rearrange · click an empty cell to add a button · press Esc for page settings
+        <Icon name="drag" size={13} /> Drag to rearrange · click an empty cell to add a button · Esc returns to page settings
       </div>
     </div>
   )

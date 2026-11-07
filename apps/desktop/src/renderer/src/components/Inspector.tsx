@@ -106,7 +106,7 @@ export function Inspector({
 
         <div className="inspector-scroll">
           <section className="inspector-section">
-            <div className="section-title">
+            <div className="section-heading">
               <h3>Page background</h3>
               <Toggle
                 label=""
@@ -137,7 +137,9 @@ export function Inspector({
           </section>
 
           <section className="inspector-section">
-            <h3>Profile theme</h3>
+            <div className="section-heading">
+              <h3>Profile theme</h3>
+            </div>
             <div className="field">
               <span>Deck background</span>
               <BackgroundEditor
@@ -173,7 +175,9 @@ export function Inspector({
           </section>
 
           <section className="inspector-section">
-            <h3>Grid & sizing</h3>
+            <div className="section-heading">
+              <h3>Grid &amp; sizing</h3>
+            </div>
             <div className="two-col">
               <NumberField
                 label="Columns"
@@ -319,7 +323,9 @@ export function Inspector({
 
       <div className="inspector-scroll">
         <section className="inspector-section">
-          <h3>Appearance</h3>
+          <div className="section-heading">
+            <h3>Content</h3>
+          </div>
           <label className="field">
             <span>Label</span>
             <input value={button.label} maxLength={60} onChange={(event) => update({ label: event.target.value })} />
@@ -347,6 +353,12 @@ export function Inspector({
               <span className="hint">Pick a category below or paste any emoji.</span>
             </div>
             <IconPicker key={button.id} value={button.icon} onChange={(icon) => update({ icon: icon || undefined })} />
+          </div>
+        </section>
+
+        <section className="inspector-section">
+          <div className="section-heading">
+            <h3>Appearance</h3>
           </div>
 
           <div className="section-title">
@@ -398,7 +410,7 @@ export function Inspector({
         </section>
 
         <section className="inspector-section">
-          <div className="section-title">
+          <div className="section-heading">
             <h3>
               Actions <span className="count">{button.actions.length}</span>
             </h3>

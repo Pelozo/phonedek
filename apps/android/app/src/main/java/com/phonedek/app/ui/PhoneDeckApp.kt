@@ -1,6 +1,7 @@
 package com.phonedek.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,8 +24,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -45,7 +44,7 @@ fun PhoneDeckApp(viewModel: MainViewModel, state: UiState) {
     }
 
     PhoneDeckTheme {
-        Box(Modifier.fillMaxSize().background(Navy950)) {
+        Box(Modifier.fillMaxSize().background(Ink)) {
             KeepScreenOn(state.ready && state.pairing != null && state.keepScreenOn)
 
             when {
@@ -66,13 +65,15 @@ fun PhoneDeckApp(viewModel: MainViewModel, state: UiState) {
                     .navigationBarsPadding()
                     .padding(horizontal = 14.dp, vertical = 12.dp),
             ) { data ->
+                val shape = RoundedCornerShape(4.dp)
                 Snackbar(
                     snackbarData = data,
-                    containerColor = Navy700,
-                    contentColor = Color(0xFFE2E8F0),
-                    shape = RoundedCornerShape(12.dp),
-                    actionContentColor = Emerald400,
-                    dismissActionContentColor = Slate300,
+                    modifier = Modifier.border(1.dp, Hairline, shape),
+                    shape = shape,
+                    containerColor = PanelRaised,
+                    contentColor = TextSecondary,
+                    actionContentColor = Accent,
+                    dismissActionContentColor = TextMuted,
                 )
             }
         }
@@ -93,25 +94,33 @@ private fun SplashScreen() {
     Box(
         Modifier
             .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(Navy900, Navy950))),
+            .background(Ink),
         contentAlignment = Alignment.Center,
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            DeckMark(size = 68.dp)
+            DeckMark(size = 64.dp)
             Spacer(Modifier.height(16.dp))
             Text(
                 text = "PhoneDeck",
-                color = Color(0xFFF8FAFC),
-                fontSize = 23.sp,
+                color = TextPrimary,
+                fontSize = 24.sp,
             )
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "WIRELESS DECK CONSOLE",
+                color = TextMuted,
+                fontFamily = ConsoleMono,
+                fontSize = 9.sp,
+                letterSpacing = 1.6.sp,
+            )
+            Spacer(Modifier.height(22.dp))
             CircularProgressIndicator(
-                color = Emerald400,
+                color = Accent,
                 strokeWidth = 2.dp,
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier.size(18.dp),
             )
         }
     }
