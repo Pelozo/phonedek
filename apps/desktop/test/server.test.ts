@@ -127,6 +127,7 @@ describe('DeckServer HTTP', () => {
     expect(infoBody).toMatchObject({ app: 'PhoneDeck', serverName: 'Test deck', protocol: 1 })
     expect(infoBody.capabilities).toContain('backup-export-v1')
     expect(infoBody.capabilities).toContain('input-v1')
+    expect(infoBody.capabilities).toContain('brightness-v1')
 
     expect((await fetch(`${base}/api/config`)).status).toBe(401)
     expect((await fetch(`${base}/api/config?token=wrong`)).status).toBe(401)
@@ -339,6 +340,7 @@ describe('DeckServer WebSocket', () => {
     const hello = await waitFor(() => messages.find((message) => message.type === 'hello'))
     expect(hello.config.serverName).toBe('Test deck')
     expect(hello.capabilities).toContain('input-v1')
+    expect(hello.capabilities).toContain('brightness-v1')
     expect(messages.some((message) => message.type === 'hello')).toBe(true)
 
     const helloMessage: ClientMessage = {
@@ -532,6 +534,129 @@ describe('DeckServer continuous input', () => {
       ),
     )
     expect(endResult).toMatchObject({ type: 'inputResult', ok: true })
+
+    ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+})
+
+describe('DeckServer phone brightness', () => {
+  async function hello(
+    ws: WebSocket,
+    name: string,
+    capabilities?: string[],
+  ): Promise<void> {
+    ws.send(
+      JSON.stringify({
+        type: 'hello',
+        protocol: 1,
+        device: { name },
+        ...(capabilities ? { capabilities } : {}),
+      }),
+    )
+  }
+
+  it('stores hello capabilities and sends brightness updates to that phone', async () => {
+    const h = await harness()
+    const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await waitFor(() => messages.find((message) => message.type === 'hello'))
+
+    await hello(ws, 'Pixel 8', ['brightness-v1'])
+    const client = await waitFor(() =>
+      h.server.getClients().find((candidate) => candidate.device?.name === 'Pixel 8'),
+    )
+    expect(client.capabilities).toContain('brightness-v1')
+
+    expect(h.server.setClientBrightness(client.id, 0.42)).toEqual({ ok: true })
+    const level = await waitFor(() => messages.find((message) => message.type === 'brightness'))
+    expect(level).toEqual({ type: 'brightness', level: 0.42 })
+    expect(h.server.getClients().find((candidate) => candidate.id === client.id)?.brightnessLevel).toBe(0.42)
+
+    expect(h.server.setClientBrightness(client.id, null)).toEqual({ ok: true })
+    const system = await waitFor(() =>
+      messages.find((message) => message.type === 'brightness' && message.level === null),
+    )
+    expect(system).toEqual({ type: 'brightness', level: null })
+    expect(h.server.getClients().find((candidate) => candidate.id === client.id)?.brightnessLevel).toBeNull()
+
+    ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
+  it('rejects unsupported phones, invalid levels and unknown clients', async () => {
+    const h = await harness()
+    const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await waitFor(() => messages.find((message) => message.type === 'hello'))
+    await hello(ws, 'Old phone')
+    const client = await waitFor(() =>
+      h.server.getClients().find((candidate) => candidate.device?.name === 'Old phone'),
+    )
+
+    expect(h.server.setClientBrightness(client.id, 0.5)).toEqual({
+      ok: false,
+      error: 'Update the phone app to control brightness',
+    })
+    expect(h.server.setClientBrightness(client.id, 1.1)).toEqual({
+      ok: false,
+      error: 'Brightness must be between 0 and 100%',
+    })
+    expect(h.server.setClientBrightness(client.id, Number.NaN)).toEqual({
+      ok: false,
+      error: 'Brightness must be between 0 and 100%',
+    })
+    expect(h.server.setClientBrightness('missing', 0.5)).toEqual({
+      ok: false,
+      error: 'Phone is not connected',
+    })
+    expect(messages.some((message) => message.type === 'brightness')).toBe(false)
+
+    ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
+  it('sends to one client without broadcasting', async () => {
+    const h = await harness()
+    const a = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    const b = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await waitFor(() => a.messages.find((message) => message.type === 'hello'))
+    await waitFor(() => b.messages.find((message) => message.type === 'hello'))
+    await hello(a.ws, 'Phone A', ['brightness-v1'])
+    await hello(b.ws, 'Phone B', ['brightness-v1'])
+    await waitFor(
+      () =>
+        h.server.getClients().filter((candidate) =>
+          candidate.device?.name === 'Phone A' || candidate.device?.name === 'Phone B',
+        ).length === 2,
+    )
+
+    const clientA = h.server.getClients().find((candidate) => candidate.device?.name === 'Phone A')!
+    expect(h.server.sendToClient(clientA.id, { type: 'brightness', level: 0.25 })).toBe(true)
+    const delivered = await waitFor(() => a.messages.find((message) => message.type === 'brightness'))
+    expect(delivered).toEqual({ type: 'brightness', level: 0.25 })
+    expect(b.messages.some((message) => message.type === 'brightness')).toBe(false)
+    expect(h.server.sendToClient('missing-client', { type: 'brightness', level: null })).toBe(false)
+
+    a.ws.close()
+    b.ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
+  it('rate-limits brightness updates to about 20 per second', async () => {
+    const h = await harness()
+    const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await waitFor(() => messages.find((message) => message.type === 'hello'))
+    await hello(ws, 'Pixel 8', ['brightness-v1'])
+    const client = await waitFor(() =>
+      h.server.getClients().find((candidate) => candidate.device?.name === 'Pixel 8'),
+    )
+
+    for (let index = 0; index < 20; index += 1) {
+      expect(h.server.setClientBrightness(client.id, 0.5), `update ${index}`).toEqual({ ok: true })
+    }
+    expect(h.server.setClientBrightness(client.id, 0.5)).toEqual({
+      ok: false,
+      error: 'Too many brightness updates, slow down',
+    })
 
     ws.close()
     await waitFor(() => h.server.getClients().length === 0)

@@ -8,6 +8,9 @@
 export const PROTOCOL_VERSION = 1 as const
 export const CONFIG_SCHEMA_VERSION = 1 as const
 
+/** Phone capability for transient window-brightness control (0..1 / system). */
+export const BRIGHTNESS_CAPABILITY = 'brightness-v1' as const
+
 export const DEFAULT_HTTP_PORT = 47654
 export const DISCOVERY_PORT = 47655
 export const DISCOVERY_MAGIC = 'PHONEDECK'
@@ -410,10 +413,23 @@ export interface InputMessage {
 }
 
 export type ClientMessage =
-  | { type: 'hello'; protocol: typeof PROTOCOL_VERSION; device: DeviceInfo }
+  | {
+      type: 'hello'
+      protocol: typeof PROTOCOL_VERSION
+      device: DeviceInfo
+      /** Optional feature markers advertised by the phone. */
+      capabilities?: string[]
+    }
   | PressMessage
   | InputMessage
   | { type: 'ping'; t: number }
+
+/** Transient phone window brightness; null restores system/auto brightness. */
+export interface BrightnessMessage {
+  type: 'brightness'
+  /** 0..1, or null for the system default. */
+  level: number | null
+}
 
 export type ServerMessage =
   | {
@@ -429,6 +445,7 @@ export type ServerMessage =
   | { type: 'config'; config: DeckConfig }
   | { type: 'pressResult'; requestId: string; buttonId: string; ok: boolean; error?: string; message?: string }
   | { type: 'inputResult'; requestId: string; controlId: string; ok: boolean; error?: string }
+  | BrightnessMessage
   | { type: 'navigate'; direction: 'next' | 'prev' | 'goto'; pageId?: string }
   | { type: 'error'; code: string; message: string }
   | { type: 'pong'; t: number }
@@ -452,6 +469,10 @@ export interface ConnectedClient {
   device: DeviceInfo | null
   connectedAt: number
   lastSeenAt: number
+  /** Feature markers from the phone's hello (e.g. `brightness-v1`). */
+  capabilities?: string[]
+  /** Last brightness level sent this connection; null = system. */
+  brightnessLevel?: number | null
 }
 
 /* ------------------------------------------------------------------ */

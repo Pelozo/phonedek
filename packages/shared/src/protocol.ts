@@ -12,6 +12,7 @@ export const ClientMessageSchema = z.union([
     type: z.literal('hello'),
     protocol: z.literal(PROTOCOL_VERSION),
     device: DeviceInfoSchema,
+    capabilities: z.array(z.string().min(1).max(40)).max(16).optional(),
   }),
   z.object({
     type: z.literal('press'),

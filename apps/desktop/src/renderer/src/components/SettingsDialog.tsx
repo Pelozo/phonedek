@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
-import type { DeckConfig } from '@phonedek/shared'
+import { useEffect, useRef, useState } from 'react'
+import { BRIGHTNESS_CAPABILITY } from '@phonedek/shared'
+import type { ConnectedClient, DeckConfig } from '@phonedek/shared'
 import type { ServerInfoView, SettingsView, UpdateStatus, PermissionStatus } from '../../../shared/api'
 import {
   canCheckForUpdates,
@@ -8,7 +9,121 @@ import {
   updateProgressPercent,
 } from '../../../shared/update-status'
 import { Icon } from './Icons'
-import { Modal, Toggle, useConfirm } from './Primitives'
+import { Modal, Slider, Toggle, useConfirm } from './Primitives'
+
+function PhoneBrightnessRow({
+  client,
+  onToast,
+}: {
+  client: ConnectedClient
+  onToast: (message: string, kind?: 'info' | 'success' | 'error') => void
+}) {
+  const capable = client.capabilities?.includes(BRIGHTNESS_CAPABILITY) ?? false
+  const [percent, setPercent] = useState(() => Math.round((client.brightnessLevel ?? 0.5) * 100))
+  const [usingSystem, setUsingSystem] = useState(client.brightnessLevel === null)
+  const latest = useRef(percent)
+  const lastSent = useRef(0)
+  const timer = useRef<number | null>(null)
+
+  useEffect(
+    () => () => {
+      if (timer.current !== null) window.clearTimeout(timer.current)
+    },
+    [],
+  )
+
+  const send = (level: number | null): void => {
+    void window.phonedek
+      .setPhoneBrightness(client.id, level)
+      .then((result) => {
+        if (!result.ok) onToast(result.error ?? 'Could not update phone brightness', 'error')
+      })
+      .catch((error: unknown) => {
+        onToast(error instanceof Error ? error.message : String(error), 'error')
+      })
+  }
+
+  const cancelPending = (): void => {
+    if (timer.current === null) return
+    window.clearTimeout(timer.current)
+    timer.current = null
+  }
+
+  const schedule = (value: number, immediate = false): void => {
+    latest.current = value
+    const now = Date.now()
+    const elapsed = now - lastSent.current
+    if (immediate || elapsed >= 100) {
+      cancelPending()
+      lastSent.current = now
+      send(value / 100)
+      return
+    }
+    if (timer.current !== null) return
+    timer.current = window.setTimeout(() => {
+      timer.current = null
+      lastSent.current = Date.now()
+      send(latest.current / 100)
+    }, 100 - elapsed)
+  }
+
+  const name = client.device?.name?.trim() || 'Connected phone'
+  const detail = [client.device?.model?.trim(), client.address].filter(Boolean).join(' · ')
+
+  return (
+    <div className="phone-row">
+      <div className="phone-head">
+        <span className="phone-icon" aria-hidden="true">
+          <Icon name="phone" size={16} />
+        </span>
+        <div>
+          <strong>{name}</strong>
+          {detail && <small>{detail}</small>}
+        </div>
+      </div>
+
+      {capable ? (
+        <>
+          <Slider
+            label="Brightness"
+            ariaLabel={`Brightness for ${name}`}
+            value={percent}
+            min={0}
+            max={100}
+            suffix="%"
+            onChange={(value) => {
+              setUsingSystem(false)
+              setPercent(value)
+              schedule(value)
+            }}
+            onCommit={(value) => {
+              setUsingSystem(false)
+              setPercent(value)
+              schedule(value, true)
+            }}
+          />
+          <div className="phone-actions">
+            <span className="phone-mode">{usingSystem ? 'System brightness' : 'Window brightness'}</span>
+            <button
+              type="button"
+              className="button ghost small"
+              onClick={() => {
+                cancelPending()
+                setUsingSystem(true)
+                latest.current = percent
+                send(null)
+              }}
+            >
+              Use system
+            </button>
+          </div>
+        </>
+      ) : (
+        <p className="phone-capability">Update the phone app to control brightness.</p>
+      )}
+    </div>
+  )
+}
 
 export function SettingsDialog({
   server,
@@ -185,6 +300,17 @@ export function SettingsDialog({
           onChange={(enabled) => void toggleLogin(enabled)}
           disabled={busy}
         />
+      </div>
+
+      <div className="settings-section">
+        <h3>Phone</h3>
+        {server.clients.length === 0 ? (
+          <p className="phone-empty">No phones connected.</p>
+        ) : (
+          server.clients.map((client) => (
+            <PhoneBrightnessRow key={client.id} client={client} onToast={onToast} />
+          ))
+        )}
       </div>
 
       {permission?.supported && (

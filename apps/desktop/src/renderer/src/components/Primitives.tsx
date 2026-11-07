@@ -297,7 +297,10 @@ export function Slider({
   max,
   step = 1,
   suffix,
+  disabled = false,
+  ariaLabel,
   onChange,
+  onCommit,
 }: {
   label: string
   value: number
@@ -305,10 +308,14 @@ export function Slider({
   max: number
   step?: number
   suffix?: string
+  disabled?: boolean
+  ariaLabel?: string
   onChange: (value: number) => void
+  onCommit?: (value: number) => void
 }) {
+  const commit = (element: HTMLInputElement): void => onCommit?.(Number(element.value))
   return (
-    <label className="slider-field">
+    <label className={`slider-field${disabled ? ' disabled' : ''}`}>
       <span>
         {label}
         <em>
@@ -316,7 +323,19 @@ export function Slider({
           {suffix}
         </em>
       </span>
-      <input type="range" value={value} min={min} max={max} step={step} onChange={(event) => onChange(Number(event.target.value))} />
+      <input
+        type="range"
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        disabled={disabled}
+        aria-label={ariaLabel ?? label}
+        onChange={(event) => onChange(Number(event.target.value))}
+        onPointerUp={(event) => commit(event.currentTarget)}
+        onKeyUp={(event) => commit(event.currentTarget)}
+        onBlur={(event) => commit(event.currentTarget)}
+      />
     </label>
   )
 }

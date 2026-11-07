@@ -5,10 +5,12 @@ import { join } from 'node:path'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { WebSocket, WebSocketServer } from 'ws'
 import {
+  BRIGHTNESS_CAPABILITY,
   PROTOCOL_VERSION,
   parseClientMessage,
 } from '@phonedek/shared'
 import type {
+  BrightnessMessage,
   ClientMessage,
   ConnectedClient,
   ControlSpec,
@@ -26,8 +28,8 @@ import type { AssetStore } from './assets'
 import { writeBackupFile } from './backup'
 import type { Logger } from './logger'
 
-/** LAN endpoints advertised to clients that understand optional features. */
-export const SERVER_CAPABILITIES = ['backup-export-v1', 'input-v1'] as const
+/** LAN endpoints and features advertised to clients. */
+export const SERVER_CAPABILITIES = ['backup-export-v1', 'input-v1', BRIGHTNESS_CAPABILITY] as const
 
 export interface PressContext {
   profile: DeckProfile
@@ -58,6 +60,7 @@ interface ClientRecord {
   alive: boolean
   pressTimes: number[]
   inputTimes: number[]
+  brightnessTimes: number[]
 }
 
 interface AuthResult {
@@ -69,6 +72,7 @@ const AUTH_WINDOW_MS = 60_000
 const AUTH_MAX_FAILURES = 6
 const AUTH_BLOCK_MS = 60_000
 const INPUT_RATE_LIMIT = 60
+const BRIGHTNESS_RATE_LIMIT = 20
 
 function bearerToken(request: IncomingMessage, url: URL): string | undefined {
   const query = url.searchParams.get('token')
@@ -322,8 +326,60 @@ export class DeckServer {
 
   getClients(): ConnectedClient[] {
     return [...this.clients.values()]
-      .map((record) => ({ ...record.info, device: record.info.device ? { ...record.info.device } : null }))
+      .map((record) => ({
+        ...record.info,
+        device: record.info.device ? { ...record.info.device } : null,
+        capabilities: record.info.capabilities ? [...record.info.capabilities] : undefined,
+      }))
       .sort((a, b) => a.connectedAt - b.connectedAt)
+  }
+
+  /** Send a message to one connected phone. Returns false when it is gone. */
+  sendToClient(clientId: string, message: ServerMessage): boolean {
+    const record = this.clients.get(clientId)
+    if (!record || record.ws.readyState !== WebSocket.OPEN) return false
+    try {
+      record.ws.send(JSON.stringify(message))
+      return true
+    } catch (error) {
+      this.options.logger?.warn(`Could not send WebSocket message: ${String(error)}`)
+      return false
+    }
+  }
+
+  /**
+   * Set transient window brightness on one phone (0..1, or null = system).
+   * Only clients that advertised `brightness-v1` can be controlled.
+   */
+  setClientBrightness(clientId: string, level: number | null): { ok: boolean; error?: string } {
+    if (level !== null && (!Number.isFinite(level) || level < 0 || level > 1)) {
+      return { ok: false, error: 'Brightness must be between 0 and 100%' }
+    }
+
+    const record = this.clients.get(clientId)
+    if (!record || record.ws.readyState !== WebSocket.OPEN) {
+      return { ok: false, error: 'Phone is not connected' }
+    }
+    if (!record.info.capabilities?.includes(BRIGHTNESS_CAPABILITY)) {
+      return { ok: false, error: 'Update the phone app to control brightness' }
+    }
+
+    const now = Date.now()
+    record.brightnessTimes = record.brightnessTimes.filter((time) => now - time < 1000)
+    if (record.brightnessTimes.length >= BRIGHTNESS_RATE_LIMIT) {
+      return { ok: false, error: 'Too many brightness updates, slow down' }
+    }
+    record.brightnessTimes.push(now)
+
+    const message: BrightnessMessage = { type: 'brightness', level }
+    if (!this.sendToClient(clientId, message)) {
+      return { ok: false, error: 'Phone is not connected' }
+    }
+    record.info.brightnessLevel = level
+    this.options.logger?.info(
+      `Phone brightness ${level === null ? 'restored to system' : `${Math.round(level * 100)}%`} for ${record.info.address}`,
+    )
+    return { ok: true }
   }
 
   private handleConnection(ws: WebSocket, request: IncomingMessage): void {
@@ -336,7 +392,7 @@ export class DeckServer {
       connectedAt: now,
       lastSeenAt: now,
     }
-    const record: ClientRecord = { ws, info, alive: true, pressTimes: [], inputTimes: [] }
+    const record: ClientRecord = { ws, info, alive: true, pressTimes: [], inputTimes: [], brightnessTimes: [] }
     this.clients.set(id, record)
     this.options.logger?.info(`Phone connected from ${info.address}`)
 
@@ -390,6 +446,7 @@ export class DeckServer {
     switch (message.type) {
       case 'hello':
         record.info.device = { ...message.device }
+        record.info.capabilities = message.capabilities ? [...message.capabilities] : []
         this.notifyClients()
         break
       case 'ping':

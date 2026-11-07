@@ -332,6 +332,27 @@ function registerIpc(): void {
     return { ok: true, state: await buildState() }
   })
 
+  ipcMain.handle(
+    IPC.setPhoneBrightness,
+    async (_event, clientId: unknown, level: unknown): Promise<OperationResult> => {
+      if (typeof clientId !== 'string' || !clientId.trim()) {
+        return { ok: false, error: 'Phone is not connected' }
+      }
+      const id = clientId.trim()
+      if (
+        !(
+          level === null ||
+          (typeof level === 'number' && Number.isFinite(level) && level >= 0 && level <= 1)
+        )
+      ) {
+        return { ok: false, error: 'Brightness must be between 0 and 100%' }
+      }
+      if (!server) return { ok: false, error: 'Phone is not connected' }
+      const result = server.setClientBrightness(id, level)
+      return result.ok ? { ok: true } : { ok: false, error: result.error }
+    },
+  )
+
   ipcMain.handle(IPC.setLaunchAtLogin, async (_event, enabled: boolean): Promise<OperationResult> => {
     settings.update({ launchAtLogin: enabled })
     if (process.platform === 'win32' || process.platform === 'darwin') {

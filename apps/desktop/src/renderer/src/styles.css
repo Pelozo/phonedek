@@ -630,6 +630,10 @@ input[type="range"]::-webkit-slider-thumb {
   border: 1px solid var(--accent-ink);
 }
 
+input[type="range"]:disabled {
+  opacity: 0.45;
+}
+
 /* Color */
 .color-field {
   display: flex;
@@ -3883,6 +3887,83 @@ input[type="range"]::-webkit-slider-thumb {
   font-family: var(--mono);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+.phone-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 0 2px;
+}
+
+.phone-row + .phone-row {
+  margin-top: 2px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.phone-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  min-width: 0;
+}
+
+.phone-head > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.phone-head strong {
+  font-size: 12.5px;
+}
+
+.phone-head small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.03em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phone-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.phone-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.phone-mode {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.phone-capability,
+.phone-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .update-card {

@@ -101,6 +101,7 @@ export interface PhoneDeckApi {
   setDiscovery(enabled: boolean): Promise<OperationResult>
   setLaunchAtLogin(enabled: boolean): Promise<OperationResult>
   setPairHost(host: string): Promise<OperationResult>
+  setPhoneBrightness(clientId: string, level: number | null): Promise<OperationResult>
   exportConfig(): Promise<OperationResult>
   importConfig(): Promise<SaveConfigResult>
   openLogs(): Promise<void>
@@ -130,6 +131,7 @@ export const IPC = {
   setDiscovery: 'phonedek:set-discovery',
   setLaunchAtLogin: 'phonedek:set-launch-at-login',
   setPairHost: 'phonedek:set-pair-host',
+  setPhoneBrightness: 'phonedek:set-phone-brightness',
   exportConfig: 'phonedek:export-config',
   importConfig: 'phonedek:import-config',
   openLogs: 'phonedek:open-logs',

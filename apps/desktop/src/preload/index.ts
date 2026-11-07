@@ -24,6 +24,8 @@ const api: PhoneDeckApi = {
   setDiscovery: (enabled: boolean): Promise<OperationResult> => ipcRenderer.invoke(IPC.setDiscovery, enabled),
   setLaunchAtLogin: (enabled: boolean): Promise<OperationResult> => ipcRenderer.invoke(IPC.setLaunchAtLogin, enabled),
   setPairHost: (host: string): Promise<OperationResult> => ipcRenderer.invoke(IPC.setPairHost, host),
+  setPhoneBrightness: (clientId: string, level: number | null): Promise<OperationResult> =>
+    ipcRenderer.invoke(IPC.setPhoneBrightness, clientId, level),
   exportConfig: (): Promise<OperationResult> => ipcRenderer.invoke(IPC.exportConfig),
   importConfig: (): Promise<SaveConfigResult> => ipcRenderer.invoke(IPC.importConfig),
   openLogs: (): Promise<void> => ipcRenderer.invoke(IPC.openLogs),

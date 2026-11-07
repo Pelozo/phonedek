@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { isInputMessage, isPressMessage, parseClientMessage } from '../src/protocol'
+import type { BrightnessMessage, ServerMessage } from '../src/types'
 
 const press = {
   type: 'press',
@@ -7,6 +8,12 @@ const press = {
   profileId: 'profile-desktop',
   pageId: 'page-main',
   buttonId: 'btn-vol-down',
+}
+
+const hello = {
+  type: 'hello',
+  protocol: 1,
+  device: { name: 'Pixel 8', model: 'Google Pixel 8' },
 }
 
 const input = {
@@ -56,5 +63,29 @@ describe('client protocol', () => {
     expect(parseClientMessage({ ...input, delta: -100.01 }).ok).toBe(false)
     expect(parseClientMessage({ ...input, delta: Number.NaN }).ok).toBe(false)
     expect(parseClientMessage({ ...input, type: 'unknown' }).ok).toBe(false)
+  })
+
+  it('accepts bounded hello capability lists', () => {
+    expect(parseClientMessage(hello).ok).toBe(true)
+    expect(parseClientMessage({ ...hello, capabilities: ['brightness-v1', 'input-v1'] }).ok).toBe(true)
+    expect(parseClientMessage({ ...hello, capabilities: Array.from({ length: 16 }, (_, i) => `cap-${i}`) }).ok).toBe(
+      true,
+    )
+    expect(parseClientMessage({ ...hello, capabilities: Array.from({ length: 17 }, (_, i) => `cap-${i}`) }).ok).toBe(
+      false,
+    )
+    expect(parseClientMessage({ ...hello, capabilities: [''] }).ok).toBe(false)
+    expect(parseClientMessage({ ...hello, capabilities: ['x'.repeat(41)] }).ok).toBe(false)
+    expect(parseClientMessage({ ...hello, capabilities: 'brightness-v1' }).ok).toBe(false)
+  })
+
+  it('defines the brightness server message shape', () => {
+    const level: BrightnessMessage = { type: 'brightness', level: 0.45 }
+    const system: BrightnessMessage = { type: 'brightness', level: null }
+    const messages: ServerMessage[] = [level, system]
+    expect(messages).toEqual([
+      { type: 'brightness', level: 0.45 },
+      { type: 'brightness', level: null },
+    ])
   })
 })
