@@ -77,6 +77,6 @@ Page actions are handled locally in the phone, so navigation stays responsive ev
 ## Known limitations / next steps
 
 - Recording macros only captures keys while the PhoneDeck window is focused (no global low-level hook).
-- Config export is JSON-only; referenced images stay in the local asset store.
+- Backups are ZIP archives containing the config plus every background image; legacy JSON configs import without images.
 - No multi-user accounts, no cloud sync, no TLS.
 - Windows installer is unsigned, so SmartScreen warns on first run.
