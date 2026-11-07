@@ -671,6 +671,9 @@ export class DeckServer {
     }
 
     this.importInProgress = true
+    this.options.logger?.info(
+      `Phone import upload started from ${remoteAddress(request)} (${Number.isFinite(declared) ? `${declared} bytes` : 'unknown size'})`,
+    )
     let tempDir = ''
     try {
       tempDir = mkdtempSync(join(tmpdir(), IMPORT_TEMP_PREFIX))
@@ -688,7 +691,15 @@ export class DeckServer {
       let preview: BackupPreview
       try {
         preview = previewBackup(readBackupFile(tempPath))
+        this.options.logger?.info(
+          `Phone import validated "${preview.serverName}": ` +
+            `${preview.profiles} profiles, ${preview.pages} pages, ${preview.buttons} buttons, ` +
+            `${preview.assets} assets, ${preview.bytes} bytes`,
+        )
       } catch (error) {
+        this.options.logger?.warn(
+          `Phone import rejected: ${error instanceof Error ? error.message : String(error)}`,
+        )
         json(response, 400, {
           ok: false,
           error: error instanceof Error ? error.message : String(error),
@@ -708,6 +719,7 @@ export class DeckServer {
         result = { ok: false, error: error instanceof Error ? error.message : String(error) }
       }
       if (!result.ok) {
+        this.options.logger?.warn(`Phone import not applied: ${result.error ?? 'Import failed'}`)
         json(response, 500, { ok: false, error: result.error ?? 'Import failed' })
         return
       }

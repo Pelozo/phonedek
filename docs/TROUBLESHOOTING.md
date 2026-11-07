@@ -64,6 +64,32 @@ Symptoms: key/text/media actions return an error mentioning PowerShell or the he
 - Use **Settings → Export backup** (ZIP) to keep images with the config. A legacy JSON export does not include images; copy the `assets` folder or re-import the images after moving to another PC.
 - The phone must keep the session PIN/token to load `/assets/...`.
 
+## Phone backup import fails
+
+The phone uploads to the PC it is currently paired with. Confirm the server name in the Android
+Settings / deck top bar matches the Windows PC you are importing into.
+
+- **Phone says “Waiting for approval on PC…”** — the Windows approval dialog may be behind the
+  window or the app may be in the tray. PhoneDeck now restores/focuses the window before showing
+  it; check the taskbar and Alt-Tab. The dialog has **Replace deck** and **Cancel**.
+- **404** — the desktop is older than 0.2.0. Update PhoneDeck on the PC.
+- **401/403** — the PIN changed; rescan the QR or re-enter the current 4-digit PIN.
+- **409** — another import is pending. Approve/cancel the existing dialog, then retry.
+- **413** — the ZIP is over 300 MB compressed; remove unused video assets or export a smaller
+  profile.
+- **400 / invalid ZIP** — use a ZIP produced by **Save backup to phone** or the desktop
+  **Export backup**; a raw config JSON is not accepted by the phone upload path.
+- **No dialog / generic failure** — open **Settings → Diagnostics → Open logs** on the PC
+  (`%APPDATA%\PhoneDeck\phonedek.log`) and look for `Phone import upload started`,
+  `Phone import validated`, `Showing phone import approval`, and `Phone import approval`.
+  On Android, open **Settings → Diagnostics** and copy the log.
+- **Isolate file vs network** — copy the same ZIP to the PC and use **Settings → Import backup**.
+  If that succeeds, the ZIP is valid and the issue is the upload/pairing target.
+
+The import is staged and validated before approval; a pre-import backup is written to
+`%APPDATA%\PhoneDeck\backups\phonedek-pre-import-<timestamp>.zip`. The target PC name, PIN, port
+and settings are preserved.
+
 ## Build errors
 
 ### Desktop

@@ -816,16 +816,30 @@ async function bootstrap(): Promise<void> {
       }
       detailLines.push('A pre-import backup will be saved first.')
 
-      const choice = await dialog.showMessageBox(mainWindow, {
-        type: 'question',
-        buttons: ['Replace deck', 'Cancel'],
-        defaultId: 1,
-        cancelId: 1,
-        noLink: true,
-        title: 'Import deck from phone',
-        message: `Replace this PC's deck with "${preview.serverName}"?`,
-        detail: detailLines.join('\n\n'),
-      })
+      // The window may be hidden to the tray; surface it so the approval
+      // dialog is not shown behind an invisible parent (or not shown at all).
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      if (!mainWindow.isVisible()) mainWindow.show()
+      mainWindow.focus()
+      mainWindow.setAlwaysOnTop(true, 'screen-saver')
+      logger.info(`Showing phone import approval dialog for "${preview.serverName}"`)
+      const choice = await (async () => {
+        try {
+          return await dialog.showMessageBox(mainWindow, {
+            type: 'question',
+            buttons: ['Replace deck', 'Cancel'],
+            defaultId: 1,
+            cancelId: 1,
+            noLink: true,
+            title: 'Import deck from phone',
+            message: `Replace this PC's deck with "${preview.serverName}"?`,
+            detail: detailLines.join('\n\n'),
+          })
+        } finally {
+          mainWindow.setAlwaysOnTop(false)
+        }
+      })()
+      logger.info(`Phone import approval: ${choice.response === 0 ? 'approved' : 'cancelled'}`)
       if (choice.response !== 0) {
         return { ok: false, error: 'Import cancelled on the PC.' }
       }
