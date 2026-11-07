@@ -17,7 +17,7 @@ export function SettingsDialog({
   updateStatus,
   permission,
   onGrantPermission,
-  onOpenPermissionSettings,
+  onOpenPermissionSetup,
   onCheckForUpdates,
   onInstallUpdate,
   onRenameServer,
@@ -32,7 +32,7 @@ export function SettingsDialog({
   updateStatus: UpdateStatus | null
   permission: PermissionStatus | null
   onGrantPermission: () => Promise<void>
-  onOpenPermissionSettings: () => Promise<void>
+  onOpenPermissionSetup: () => Promise<void>
   onCheckForUpdates: () => Promise<UpdateStatus>
   onInstallUpdate: () => Promise<void>
   onRenameServer: (name: string) => void
@@ -205,24 +205,17 @@ export function SettingsDialog({
                   <button
                     type="button"
                     className="button primary small"
+                    onClick={() => void onOpenPermissionSetup()}
+                  >
+                    <Icon name="folder" size={14} /> Open permission setup
+                  </button>
+                  <button
+                    type="button"
+                    className="button secondary small"
                     onClick={() => void grantPermission()}
                     disabled={busy}
                   >
-                    <Icon name="check" size={14} /> Grant permission
-                  </button>
-                  <button
-                    type="button"
-                    className="button secondary small"
-                    onClick={() => void onOpenPermissionSettings()}
-                  >
-                    Open {permission.paneName}
-                  </button>
-                  <button
-                    type="button"
-                    className="button secondary small"
-                    onClick={() => void window.phonedek.revealPermissionFile('app')}
-                  >
-                    <Icon name="folder" size={14} /> Show app file
+                    <Icon name="check" size={14} /> Try macOS prompt
                   </button>
                 </div>
 

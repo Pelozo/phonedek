@@ -17,6 +17,7 @@
     "build:mac-helper": "bash scripts/build-mac-helper.sh",
     "make-signing-cert": "bash scripts/make-signing-cert.sh",
     "dist:mac": "npm run build && npm run build:mac-helper && electron-builder --mac --arm64 --publish never",
+    "dist:mac:signed": "npm run build && npm run build:mac-helper && electron-builder --mac --arm64 --publish never --config electron-builder.signed.yml",
     "dist:mac:universal": "npm run build && MAC_HELPER_ARCH=universal npm run build:mac-helper && electron-builder --mac --universal --publish never",
     "pack:mac": "npm run build && npm run build:mac-helper && electron-builder --mac dir --arm64 --publish never"
   },

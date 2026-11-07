@@ -109,6 +109,7 @@ export interface PhoneDeckApi {
   copyText(text: string): Promise<void>
   getPermissionStatus(): Promise<PermissionStatus>
   requestPermission(): Promise<PermissionStatus>
+  openPermissionSetup(): Promise<void>
   revealPermissionFile(kind: 'app' | 'helper'): Promise<void>
   getUpdateStatus(): Promise<UpdateStatus>
   checkForUpdates(): Promise<UpdateStatus>
@@ -137,6 +138,7 @@ export const IPC = {
   copyText: 'phonedek:copy-text',
   getPermissionStatus: 'phonedek:get-permission-status',
   requestPermission: 'phonedek:request-permission',
+  openPermissionSetup: 'phonedek:open-permission-setup',
   revealPermissionFile: 'phonedek:reveal-permission-file',
   getUpdateStatus: 'phonedek:update-get-status',
   checkForUpdates: 'phonedek:update-check',

@@ -1,0 +1,73 @@
+# Developer ID signed + notarized variant of electron-builder.yml.
+# Keep this file in sync with the base config. Selected by CI when
+# CSC_LINK is present (see `npm run dist:mac:signed`).
+appId: com.phonedek.desktop
+productName: PhoneDeck
+copyright: Copyright © 2026 Pelozo
+asar: true
+npmRebuild: false
+directories:
+  output: release
+  buildResources: build
+afterPack: scripts/after-pack.cjs
+files:
+  - out/**
+  - package.json
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.png
+  executableName: PhoneDeck
+  extraResources:
+    - from: resources/keyboard-helper.ps1
+      to: keyboard-helper.ps1
+publish:
+  provider: github
+  owner: Pelozo
+  repo: phonedek
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: PhoneDeck
+  artifactName: PhoneDeck-${version}-Setup.${ext}
+linux:
+  target:
+    - AppImage
+  category: Utility
+  icon: build/icon.png
+mac:
+  # Apple Silicon first. Universal builds can be produced locally with
+  # scripts/build-mac-helper.sh universal and `electron-builder --mac --universal`,
+  # but the CI artifact is deliberately small and arm64-only.
+  target:
+    - target: dmg
+      arch:
+        - arm64
+    - target: zip
+      arch:
+        - arm64
+  category: public.app-category.utilities
+  icon: build/icon.png
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  # Requires CSC_LINK + CSC_KEY_PASSWORD (Developer ID Application) and
+  # APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID. electron-builder
+  # signs, hardens and notarizes; macOS then shows the normal one-time
+  # permission prompt and keeps the grant across updates.
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
+  gatekeeperAssess: false
+  notarize: true
+  binaries:
+    - Contents/Resources/keyboard-helper
+  extraResources:
+    - from: resources/mac/keyboard-helper
+      to: keyboard-helper
+  extendInfo:
+    NSLocalNetworkUsageDescription: PhoneDeck uses your local network to connect to the Android remote app and discover this desktop.

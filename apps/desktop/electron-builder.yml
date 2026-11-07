@@ -52,21 +52,13 @@ mac:
   category: public.app-category.utilities
   icon: build/icon.png
   artifactName: ${productName}-${version}-${arch}.${ext}
-  # Signed releases: provide CSC_LINK + CSC_KEY_PASSWORD (Developer ID
-  # Application) and APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID.
-  # electron-builder then signs, hardens and notarizes; macOS shows the normal
-  # one-time permission prompt and keeps the grant across updates.
-  #
-  # Without those secrets the build stays unsigned: set
-  # CSC_IDENTITY_AUTO_DISCOVERY=false (CI already does) to skip signing, and
-  # after-pack.cjs applies ad-hoc signatures for local testing.
-  hardenedRuntime: true
-  entitlements: build/entitlements.mac.plist
-  entitlementsInherit: build/entitlements.mac.inherit.plist
+  # Unsigned community build. CI sets CSC_IDENTITY_AUTO_DISCOVERY=false and
+  # after-pack.cjs applies ad-hoc signatures. Developer ID releases use
+  # electron-builder.signed.yml (`npm run dist:mac:signed`).
+  identity: null
+  hardenedRuntime: false
   gatekeeperAssess: false
-  # Signed by electron-builder with the real identity when one is available.
-  binaries:
-    - Contents/Resources/keyboard-helper
+  notarize: false
   extraResources:
     - from: resources/mac/keyboard-helper
       to: keyboard-helper

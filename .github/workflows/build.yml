@@ -60,7 +60,7 @@ jobs:
       # Empty secrets keep the community build unsigned; when a Developer ID
       # and notarization credentials are present, electron-builder signs,
       # hardens and notarizes instead.
-      CSC_IDENTITY_AUTO_DISCOVERY: false
+      CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' && 'true' || 'false' }}
       CSC_LINK: ${{ secrets.CSC_LINK }}
       CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
       APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -86,7 +86,12 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - name: Build macOS DMG and ZIP
-        run: npm run dist:mac -w @phonedek/desktop
+        run: |
+          if [ -n "${CSC_LINK:-}" ]; then
+            npm run dist:mac:signed -w @phonedek/desktop
+          else
+            npm run dist:mac -w @phonedek/desktop
+          fi
       - name: Verify macOS artifacts
         run: |
           set -euo pipefail

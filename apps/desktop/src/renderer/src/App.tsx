@@ -163,17 +163,9 @@ export default function App() {
     }
   }, [showToast])
 
-  const openPermissionSettings = useCallback(async (): Promise<void> => {
+  const openPermissionSetup = useCallback(async (): Promise<void> => {
     try {
-      await window.phonedek.openAccessibility()
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error')
-    }
-  }, [showToast])
-
-  const revealPermissionFile = useCallback(async (kind: 'app' | 'helper'): Promise<void> => {
-    try {
-      await window.phonedek.revealPermissionFile(kind)
+      await window.phonedek.openPermissionSetup()
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), 'error')
     }
@@ -397,8 +389,7 @@ export default function App() {
             permission={permission}
             busy={permissionBusy}
             onGrant={() => void grantPermission()}
-            onOpenSettings={() => void openPermissionSettings()}
-            onRevealApp={() => void revealPermissionFile('app')}
+            onOpenSetup={() => void openPermissionSetup()}
             onDismiss={() => setPermissionDismissed(true)}
           />
         )}
@@ -459,7 +450,7 @@ export default function App() {
           updateStatus={updateStatus}
           permission={permission}
           onGrantPermission={grantPermission}
-          onOpenPermissionSettings={openPermissionSettings}
+          onOpenPermissionSetup={openPermissionSetup}
           onCheckForUpdates={checkForUpdates}
           onInstallUpdate={installUpdate}
           onRenameServer={(name) => setConfig({ ...config, serverName: name })}

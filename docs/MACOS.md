@@ -182,13 +182,18 @@ Program, $99/year). Then macOS shows the standard one-time prompt, keeps the
 grant across updates, Gatekeeper stops blocking the app, and Squirrel.Mac
 auto-update can be enabled.
 
-The build is already wired for it:
+The build is already wired for it in `apps/desktop/electron-builder.signed.yml`
+(selected with `npm run dist:mac:signed`; CI picks it automatically when
+`CSC_LINK` is set):
 
 - `hardenedRuntime: true`, with `build/entitlements.mac.plist` and
   `build/entitlements.mac.inherit.plist` (Electron JIT entitlements).
 - `mac.binaries` signs `Contents/Resources/keyboard-helper` with the same
   Developer ID.
 - Notarization runs automatically when credentials are present.
+
+The default `electron-builder.yml` stays unsigned exactly as before, so the
+community build keeps working without secrets.
 
 Remaining work, all repository/CI configuration:
 

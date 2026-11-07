@@ -393,6 +393,18 @@ function registerIpc(): void {
     if (process.platform === 'darwin') requestAccessibilityPermission(true)
     return buildPermissionStatus()
   })
+  /**
+   * One action for the unsigned build path: open the privacy pane, then reveal
+   * the exact executable in Finder so it can be dragged into the list. Opening
+   * Finder last keeps the file visible instead of hiding it behind Settings.
+   */
+  ipcMain.handle(IPC.openPermissionSetup, async (): Promise<void> => {
+    if (process.platform !== 'darwin') return
+    await shell.openExternal(ACCESSIBILITY_SETTINGS_URL)
+    setTimeout(() => {
+      if (existsSync(process.execPath)) shell.showItemInFolder(process.execPath)
+    }, 700)
+  })
   ipcMain.handle(IPC.revealPermissionFile, async (_event, kind: unknown): Promise<void> => {
     if (process.platform !== 'darwin') return
     const target = kind === 'app' ? process.execPath : kind === 'helper' ? helperPath() : null

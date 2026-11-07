@@ -32,6 +32,7 @@ const api: PhoneDeckApi = {
   copyText: (text: string): Promise<void> => ipcRenderer.invoke(IPC.copyText, text),
   getPermissionStatus: (): Promise<PermissionStatus> => ipcRenderer.invoke(IPC.getPermissionStatus),
   requestPermission: (): Promise<PermissionStatus> => ipcRenderer.invoke(IPC.requestPermission),
+  openPermissionSetup: (): Promise<void> => ipcRenderer.invoke(IPC.openPermissionSetup),
   revealPermissionFile: (kind: 'app' | 'helper'): Promise<void> =>
     ipcRenderer.invoke(IPC.revealPermissionFile, kind),
   getUpdateStatus: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.getUpdateStatus),
