@@ -28,4 +28,5 @@ apps/desktop/dist/
 apps/desktop/release/
 
 # Agent scratch
+.opencode/
 .agent/STOP
