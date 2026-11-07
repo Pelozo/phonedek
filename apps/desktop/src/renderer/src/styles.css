@@ -590,6 +590,19 @@ input[type="range"]::-webkit-slider-thumb {
   color: var(--muted);
 }
 
+.pin-input {
+  font-family: var(--mono) !important;
+  font-size: 20px !important;
+  letter-spacing: 0.45em;
+  text-align: center;
+  max-width: 180px;
+}
+
+.field-hint {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .color-control {
   display: flex;
   align-items: center;

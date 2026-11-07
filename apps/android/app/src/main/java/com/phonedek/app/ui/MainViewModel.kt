@@ -21,6 +21,7 @@ import com.phonedek.app.net.FetchResult
 import com.phonedek.app.net.HttpApi
 import com.phonedek.app.net.createHttpClient
 import com.phonedek.app.net.createWebSocketClient
+import com.phonedek.app.util.Diag
 import com.phonedek.app.util.parseEndpoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -129,6 +130,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             override fun onServerError(code: String, message: String) {
+                Diag.w("Server error code=$code message=\"$message\"")
                 emit(message.ifBlank { "The desktop reported an error." })
             }
 
@@ -145,6 +147,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onForeground() {
+        Diag.i("App foregrounded; pairing=${_state.value.pairing != null}")
         foreground = true
         if (!loaded) return
         val pairing = _state.value.pairing ?: return
@@ -152,6 +155,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onBackground() {
+        Diag.i("App backgrounded; stopping WebSocket")
         foreground = false
         connection.stop()
     }
@@ -164,16 +168,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         if (_state.value.pairingBusy) return
         val token = tokenInput.trim()
+        Diag.i("Pairing attempt: hostInput=\"$hostInput\" port=$port token=${Diag.maskToken(token)}")
         val endpoint = parseEndpoint(hostInput, port)
         if (endpoint == null) {
+            Diag.w("Pairing rejected: parseEndpoint returned null")
+            Diag.w("  rawHost=\"$hostInput\" rawPort=$port")
             _state.update { it.copy(pairingError = "Enter a valid host name or IP address.") }
             return
         }
-        if (token.isEmpty()) {
-            _state.update { it.copy(pairingError = "Enter the pairing token shown on your PC.") }
+        if (!Regex("^\\d{4}$").matches(token) && token.length < 8) {
+            Diag.w("Pairing rejected: PIN is not 4 digits and token is too short (${Diag.maskToken(token)})")
+            _state.update { it.copy(pairingError = "Enter the 4-digit PIN shown on your PC.") }
             return
         }
         if (port !in 1..65535 && !hostInput.contains(':')) {
+            Diag.w("Pairing rejected: invalid port $port")
             _state.update { it.copy(pairingError = "Enter a port between 1 and 65535.") }
             return
         }
@@ -183,6 +192,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         fetchJob?.cancel()
         pairJob = viewModelScope.launch {
             _state.update { it.copy(pairingBusy = true, pairingError = null) }
+            Diag.i("Fetching config from ${endpoint.host}:${endpoint.port}")
             when (val result = http.fetchConfig(endpoint.host, endpoint.port, token)) {
                 is FetchResult.Success -> {
                     val serverName = result.config.serverName
@@ -220,14 +230,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                     runCatching { prefs.setLastPage(active.first, active.second) }
+                    Diag.i("Pairing saved: ${endpoint.host}:${endpoint.port} server=\"$serverName\"")
                     emit(if (hadPairing) "Switched to $serverName" else "Paired with $serverName")
 
                     if (foreground) {
+                        Diag.i("Starting WebSocket after pairing")
                         connection.start(pairing.host, pairing.port, pairing.token)
                     }
                 }
 
                 is FetchResult.Failure -> {
+                    Diag.w("Config fetch failed: ${result.message}")
                     _state.update {
                         it.copy(
                             pairingBusy = false,
@@ -243,6 +256,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun handleDeepLink(host: String, port: Int, token: String, name: String?) {
         val endpoint = parseEndpoint(host, port)
+        Diag.i("Deep-link pairing: host=\"$host\" port=$port token=${Diag.maskToken(token)} parsed=${endpoint?.host ?: "null"}:${endpoint?.port ?: 0}")
         if (endpoint == null) {
             emit("That pairing link is missing a valid server address.")
             return
@@ -256,9 +270,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(pairingDraft = draft) }
         if (token.isBlank()) {
             _state.update {
-                it.copy(pairingError = "The pairing link did not include a token.")
+                it.copy(pairingError = "The pairing link did not include a PIN.")
             }
-            emit("The pairing link did not include a token.")
+            emit("The pairing link did not include a PIN.")
             return
         }
         connect(endpoint.host, endpoint.port, token, name)
@@ -383,10 +397,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             when (val result = http.fetchConfig(pairing.host, pairing.port, pairing.token)) {
                 is FetchResult.Success -> ingestConfig(result.raw)
                 is FetchResult.Failure -> {
+                    Diag.w("Refreshing config failed: ${result.message}")
                     // The WebSocket may still be healthy; only surface auth failures.
                     if (result.unauthorized && !authWarningShown) {
                         authWarningShown = true
-                        emit("${result.message} Re-pair if the desktop token was rotated.")
+                        emit("${result.message} Re-pair if the desktop PIN was changed.")
                     }
                 }
             }

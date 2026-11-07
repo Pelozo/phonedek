@@ -4,6 +4,7 @@ import android.os.SystemClock
 import com.phonedek.app.data.DeckJson
 import com.phonedek.app.data.DeviceInfo
 import com.phonedek.app.data.PROTOCOL_VERSION
+import com.phonedek.app.util.Diag
 import java.util.UUID
 import kotlin.math.min
 import kotlin.random.Random
@@ -71,6 +72,7 @@ class DeckConnection(
 
     fun start(host: String, port: Int, token: String) {
         if (active && this.host == host && this.port == port && this.token == token) return
+        Diag.i("WS start host=\"$host\" port=$port token=${Diag.maskToken(token)}")
         stopInternal(notify = false)
         this.host = host
         this.port = port
@@ -104,7 +106,10 @@ class DeckConnection(
         buttonId: String,
     ): Boolean {
         val socket = webSocketRef
-        if (!active || !connected || socket == null) return false
+        if (!active || !connected || socket == null) {
+            Diag.w("sendPress dropped: connected=$connected active=$active socket=${socket != null}")
+            return false
+        }
         val payload = buildJsonObject {
             put("type", "press")
             put("requestId", requestId)
@@ -120,7 +125,7 @@ class DeckConnection(
     private fun connect() {
         if (!active) return
         val generation = ++socketGeneration
-        val url = runCatching {
+        val urlResult = runCatching {
             okhttp3.HttpUrl.Builder()
                 .scheme("ws")
                 .host(host)
@@ -128,14 +133,17 @@ class DeckConnection(
                 .addPathSegment("ws")
                 .addQueryParameter("token", token)
                 .build()
-        }.getOrNull()
+        }
+        val url = urlResult.getOrNull()
 
         if (url == null) {
-            listener.onServerError("bad_address", "The server address is not valid.")
+            Diag.e("WS URL build failed for host=\"$host\" port=$port", urlResult.exceptionOrNull())
+            listener.onServerError("bad_address", "The server address is not valid (\"$host:$port\").")
             scheduleReconnect(generation)
             return
         }
 
+        Diag.d("WS URL ${Diag.redactUrl(url.toString())}")
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", "PhoneDeck-Android")
@@ -148,6 +156,7 @@ class DeckConnection(
                         webSocket.close(1000, "stale connection")
                         return@launch
                     }
+                    Diag.i("WS connected to \"$host:$port\"")
                     webSocketRef = webSocket
                     connected = true
                     attempt = 0
@@ -172,10 +181,12 @@ class DeckConnection(
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                Diag.w("WS closed code=$code reason=\"$reason\"")
                 scope.launch { handleDisconnect(generation) }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                Diag.e("WS failure (http=${response?.code ?: "-"})", t)
                 scope.launch { handleDisconnect(generation) }
             }
         })
@@ -208,6 +219,7 @@ class DeckConnection(
         attempt++
         val exponential = 1_000L shl min(attempt - 1, 4)
         val delayMs = min(MAX_BACKOFF_MS, exponential) + Random.nextLong(0, 400)
+        Diag.i("WS reconnect #$attempt in ${delayMs}ms")
         reconnectJob = scope.launch {
             delay(delayMs)
             if (active && generation == socketGeneration) {
@@ -266,14 +278,16 @@ class DeckConnection(
             DeckJson.format.parseToJsonElement(text) as? JsonObject
         }.getOrNull() ?: return
 
-        when (obj.string("type")) {
+        val type = obj.string("type") ?: "unknown"
+        Diag.d("WS <- type=$type bytes=${text.length}")
+        when (type) {
             "hello" -> {
                 val config = obj["config"]
                 if (config != null) listener.onConfig(config.toString())
-                listener.onServerHello(
-                    obj.string("serverName") ?: "PhoneDeck",
-                    obj.int("protocol") ?: PROTOCOL_VERSION,
-                )
+                val serverName = obj.string("serverName") ?: "PhoneDeck"
+                val protocol = obj.int("protocol") ?: PROTOCOL_VERSION
+                Diag.i("WS hello from=\"$serverName\" protocol=$protocol config=${config != null}")
+                listener.onServerHello(serverName, protocol)
             }
 
             "config" -> {
@@ -289,10 +303,12 @@ class DeckConnection(
                 )
             }
 
-            "error" -> listener.onServerError(
-                code = obj.string("code") ?: "error",
-                message = obj.string("message") ?: "The desktop reported an error.",
-            )
+            "error" -> {
+                val code = obj.string("code") ?: "error"
+                val message = obj.string("message") ?: "The desktop reported an error."
+                Diag.w("WS server error code=$code message=\"$message\"")
+                listener.onServerError(code, message)
+            }
 
             "navigate" -> {
                 obj.string("direction")?.let { direction ->

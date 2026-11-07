@@ -4,7 +4,7 @@ PhoneDeck intentionally keeps the desktop as the single source of truth.
 
 ```
 Electron main process                         Android app
-├─ ConfigStore (config.json)                  ├─ DataStore (host/port/token/page)
+├─ ConfigStore (config.json)                  ├─ DataStore (host/port/PIN/page)
 ├─ AssetStore (assets/*)                      ├─ config cache (JSON)
 ├─ DeckServer (HTTP + WebSocket)  ◄──────────►├─ DeckConnection (OkHttp WS)
 ├─ DiscoveryService (UDP beacon)  ◄──────────►├─ DiscoveryClient (UDP)
@@ -48,12 +48,12 @@ Host operations use Node's `child_process` and Electron's `shell`:
 ## Networking and security
 
 - `DeckServer` binds `0.0.0.0` on the configured port (default 47654).
-- All HTTP routes except `/api/info` and `/api/health` require `Authorization: Bearer <token>` or `?token=`.
-- WebSocket upgrades validate the token with a timing-safe comparison and reject with HTTP 401.
-- The token is generated once, stored in `settings.json`, and can be rotated (which closes all clients).
+- All HTTP routes except `/api/info` and `/api/health` require `Authorization: Bearer <pin>` or `?token=` (the query name is historical).
+- WebSocket upgrades validate the PIN with a timing-safe comparison and reject with HTTP 401. Six wrong attempts per address within a minute trigger a 60-second 429 block.
+- The 4-digit PIN is generated once, stored in `settings.json`, and can be regenerated (which closes all clients). Old long tokens migrate to a PIN on first launch.
 - `/api/config` emits an ETag; clients may use `If-None-Match` for cheap refreshes.
 - Assets are resolved through `AssetStore.pathFor`, which rejects traversal and only serves known image extensions.
-- UDP discovery (port 47655) is optional and carries only the server name, port, and version. No token.
+- UDP discovery (port 47655) is optional and carries only the server name, port, and version. No PIN.
 - There is intentionally no TLS: the design target is a trusted home LAN. Do not port-forward the server.
 
 ## Android state machine

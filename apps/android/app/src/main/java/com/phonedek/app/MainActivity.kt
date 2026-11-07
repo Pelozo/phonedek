@@ -16,6 +16,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.phonedek.app.data.DEFAULT_HTTP_PORT
 import com.phonedek.app.ui.MainViewModel
 import com.phonedek.app.ui.PhoneDeckApp
+import com.phonedek.app.util.Diag
 
 class MainActivity : ComponentActivity() {
 
@@ -35,21 +36,25 @@ class MainActivity : ComponentActivity() {
             PhoneDeckApp(viewModel = viewModel, state = state)
         }
 
+        Diag.i("MainActivity created; deep-link=${intent.data != null}")
         handleIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        Diag.i("New intent received; deep-link=${intent.data != null}")
         handleIntent(intent)
     }
 
     override fun onStart() {
         super.onStart()
+        Diag.i("Activity start")
         viewModel.onForeground()
     }
 
     override fun onStop() {
+        Diag.i("Activity stop")
         viewModel.onBackground()
         super.onStop()
     }
@@ -78,6 +83,11 @@ class MainActivity : ComponentActivity() {
         val name = data.getQueryParameter("name")
         val version = data.getQueryParameter("v")
 
+        Diag.i(
+            "Pairing link: scheme=${data.scheme} uriHost=${data.host} hostParam=\"$host\" " +
+                "port=$port token=${Diag.maskToken(token)} name=\"${name ?: ""}\" v=${version ?: "?"}",
+        )
+
         // Consume the link so an activity recreation cannot trigger pairing again.
         intent.data = null
 
@@ -88,6 +98,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (host.isBlank()) {
+            Diag.w("Pairing link has a blank host parameter")
             viewModel.reportMessage("The pairing link is missing the server address.")
             return
         }

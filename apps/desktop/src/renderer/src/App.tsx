@@ -317,7 +317,7 @@ export default function App() {
             {server.running ? `LAN server on ${server.port}` : (server.error ?? 'Server offline')}
           </span>
           <span>
-            <Icon name="lock" size={13} /> Token pairing
+            <Icon name="lock" size={13} /> PIN pairing
           </span>
           <span>
             <Icon name="phone" size={13} /> {server.clients.length} device{server.clients.length === 1 ? '' : 's'}

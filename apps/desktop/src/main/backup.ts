@@ -20,7 +20,7 @@ This ZIP contains:
   assets/               background images referenced by the config
 
 Import it from PhoneDeck Desktop -> Settings -> Import.
-The pairing token and port are not included; pairing is per installation.
+The pairing PIN and port are not included; pairing is per installation.
 `
 
 export interface BackupReadResult {

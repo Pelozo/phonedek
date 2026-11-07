@@ -3,6 +3,8 @@ package com.phonedek.app.net
 import com.phonedek.app.data.DEFAULT_HTTP_PORT
 import com.phonedek.app.data.DeckConfig
 import com.phonedek.app.data.DeckJson
+import android.os.SystemClock
+import com.phonedek.app.util.Diag
 import java.io.IOException
 import java.io.InterruptedIOException
 import java.util.concurrent.TimeUnit
@@ -23,6 +25,20 @@ fun createHttpClient(): OkHttpClient = OkHttpClient.Builder()
     .writeTimeout(15, TimeUnit.SECONDS)
     .callTimeout(25, TimeUnit.SECONDS)
     .retryOnConnectionFailure(true)
+    .addInterceptor { chain ->
+        val request = chain.request()
+        val safeUrl = Diag.redactUrl(request.url.toString())
+        Diag.d("HTTP ${request.method} $safeUrl")
+        val started = SystemClock.elapsedRealtime()
+        try {
+            val response = chain.proceed(request)
+            Diag.d("HTTP ${response.code} $safeUrl (${SystemClock.elapsedRealtime() - started} ms)")
+            response
+        } catch (error: IOException) {
+            Diag.e("HTTP failed $safeUrl after ${SystemClock.elapsedRealtime() - started} ms", error)
+            throw error
+        }
+    }
     .build()
 
 /**
@@ -56,7 +72,8 @@ fun assetUrl(host: String, port: Int, asset: String): String? = runCatching {
 class HttpApi(private val client: OkHttpClient) {
     suspend fun fetchConfig(host: String, port: Int, token: String): FetchResult =
         withContext(Dispatchers.IO) {
-            val url = runCatching {
+            Diag.i("fetchConfig: host=\"$host\" port=$port token=${Diag.maskToken(token)}")
+            val urlResult = runCatching {
                 HttpUrl.Builder()
                     .scheme("http")
                     .host(host)
@@ -64,9 +81,13 @@ class HttpApi(private val client: OkHttpClient) {
                     .addPathSegment("api")
                     .addPathSegment("config")
                     .build()
-            }.getOrNull() ?: return@withContext FetchResult.Failure(
-                "That server address is not valid.",
-            )
+            }
+            val url = urlResult.getOrNull() ?: run {
+                Diag.e("fetchConfig: could not build HTTP URL for host=\"$host\" port=$port", urlResult.exceptionOrNull())
+                return@withContext FetchResult.Failure(
+                    "That server address is not valid.",
+                )
+            }
 
             val request = Request.Builder()
                 .url(url)
@@ -75,11 +96,12 @@ class HttpApi(private val client: OkHttpClient) {
                 .header("User-Agent", "PhoneDeck-Android")
                 .build()
 
+            Diag.d("fetchConfig URL ${Diag.redactUrl(url.toString())}")
             try {
                 client.newCall(request).execute().use { response ->
                     when {
                         response.code == 401 || response.code == 403 -> FetchResult.Failure(
-                            "Token rejected. Check the token shown in PhoneDeck on your PC.",
+                            "PIN rejected. Check the 4-digit PIN shown in PhoneDeck on your PC.",
                             unauthorized = true,
                         )
 
@@ -105,14 +127,17 @@ class HttpApi(private val client: OkHttpClient) {
                     }
                 }
             } catch (error: InterruptedIOException) {
+                Diag.e("fetchConfig timeout for \"$host:$port\"", error)
                 FetchResult.Failure(
                     "Connection timed out. Check the address and that PhoneDeck is running.",
                 )
             } catch (error: IOException) {
+                Diag.e("fetchConfig IO failure for \"$host:$port\"", error)
                 FetchResult.Failure(
                     "Could not reach $host:$port. Check Wi-Fi and the server address.",
                 )
             } catch (error: Exception) {
+                Diag.e("fetchConfig unexpected failure for \"$host:$port\"", error)
                 FetchResult.Failure(
                     "Could not load the deck: ${error.message ?: "unknown error"}",
                 )

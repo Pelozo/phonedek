@@ -10,20 +10,24 @@ sends UDP discovery beacons on port `47655`.
 
 ## Pairing
 
-The desktop generates a random token once (Settings → Rotate token invalidates
+The desktop generates a random **4-digit PIN** once (Pair phone → New PIN invalidates
 old phones). It shows a QR code containing:
 
 ```
-phonedek://pair?host=192.168.1.42&port=47654&token=<token>&name=My%20PC&v=1
+phonedek://pair?host=192.168.1.42&port=47654&token=4821&name=My%20PC&v=1
 ```
 
 Android registers an intent filter for `phonedek://pair`, so scanning the QR with
 the system camera opens the app and connects. Manual entry is also supported.
 
-Every HTTP request and the WebSocket handshake must include the token:
+The PIN travels in the `token` parameter/header (the name is kept for protocol
+compatibility). Every HTTP request and the WebSocket handshake must include it:
 
-- HTTP: `Authorization: Bearer <token>` (or `?token=<token>` for image loading)
-- WebSocket: `/ws?token=<token>`
+- HTTP: `Authorization: Bearer <pin>` (or `?token=<pin>` for image loading)
+- WebSocket: `/ws?token=<pin>`
+
+The desktop answers `401` for a wrong PIN. After 6 failures from one address within a
+minute it answers `429` with `Retry-After: 60`.
 
 ## HTTP
 
@@ -39,7 +43,7 @@ executed while the WebSocket is connected.
 
 ## WebSocket
 
-Endpoint: `ws://<host>:<port>/ws?token=<token>`.
+Endpoint: `ws://<host>:<port>/ws?token=<pin>`.
 
 The server sends `hello` immediately after the connection is accepted:
 
@@ -106,7 +110,7 @@ Android may broadcast a probe:
 { "magic": "PHONEDECK", "protocol": 1, "type": "discover" }
 ```
 
-Discovery leaks only the server name and port, never the pairing token.
+Discovery leaks only the server name and port, never the pairing PIN.
 
 ## Config model
 

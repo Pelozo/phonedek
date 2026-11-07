@@ -17,7 +17,7 @@ Electron stores everything under:
 ```
 %APPDATA%\PhoneDeck\
   config.json          profiles, pages, buttons, actions
-  settings.json        port, pairing token, discovery, autostart
+  settings.json        port, 4-digit pairing PIN, discovery, autostart
   assets\              imported background images
   phonedek.log         runtime log (rotates at 4 MB)
 ```
@@ -57,7 +57,7 @@ Production build + installer:
 ```powershell
 npm run build
 npm run dist:win
-# apps/desktop/release/PhoneDeck-0.1.1-Setup.exe
+# apps/desktop/release/PhoneDeck-0.1.2-Setup.exe
 ```
 
 Requirements: Node.js 22+, Windows 10/11. No Visual Studio/native addons are required.
@@ -80,8 +80,8 @@ Windows UIPI prevents a normal process from sending input to an elevated (Admini
 ## Uninstall / reset
 
 - Uninstall from **Settings → Apps** (or the Start Menu uninstaller).
-- To reset the deck without uninstalling, close PhoneDeck and rename `%APPDATA%\PhoneDeck\config.json`; the app recreates the starter layout. Pairing tokens remain in `settings.json`.
-- To revoke phones, use **Pair phone → Rotate token**.
+- To reset the deck without uninstalling, close PhoneDeck and rename `%APPDATA%\PhoneDeck\config.json`; the app recreates the starter layout. The pairing PIN remains in `settings.json`.
+- To revoke phones, use **Pair phone → New PIN**.
 
 ## Troubleshooting
 

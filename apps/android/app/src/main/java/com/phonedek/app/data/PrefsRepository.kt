@@ -7,6 +7,8 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.phonedek.app.util.Diag
+import com.phonedek.app.util.parseEndpoint
 import java.io.IOException
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
@@ -40,14 +42,29 @@ class PrefsRepository(private val context: Context) {
 
         val host = prefs[Keys.HOST]?.trim().orEmpty()
         val token = prefs[Keys.TOKEN].orEmpty()
+        val storedPort = prefs[Keys.PORT] ?: DEFAULT_HTTP_PORT
+        val endpoint = parseEndpoint(host, storedPort)
+        val tokenValid = token.isNotEmpty()
         val pairing = if (host.isNotEmpty() && token.isNotEmpty()) {
-            Pairing(
-                host = host,
-                port = prefs[Keys.PORT] ?: DEFAULT_HTTP_PORT,
-                token = token,
-                serverName = prefs[Keys.SERVER_NAME]?.takeIf { it.isNotBlank() } ?: host,
-            )
+            if (endpoint == null) {
+                Diag.w("Stored pairing has an invalid host=\"$host\" port=$storedPort; clearing it")
+                clearPairing()
+                null
+            } else if (!tokenValid) {
+                Diag.w("Stored pairing has a blank token; clearing it")
+                clearPairing()
+                null
+            } else {
+                Diag.i("Stored pairing restored: ${endpoint.host}:${endpoint.port} token=${Diag.maskToken(token)}")
+                Pairing(
+                    host = endpoint.host,
+                    port = endpoint.port,
+                    token = token,
+                    serverName = prefs[Keys.SERVER_NAME]?.takeIf { it.isNotBlank() } ?: endpoint.host,
+                )
+            }
         } else {
+            Diag.i("No saved pairing")
             null
         }
 

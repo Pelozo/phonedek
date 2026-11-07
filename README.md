@@ -59,7 +59,7 @@ No cloud, no account, no vendor lock-in: the phone talks directly to your PC ove
 
 - **QR pairing** — scan with the normal camera app; the `phonedek://pair?...` deep link opens the app and connects.
 - **LAN discovery** — desktop beacons over UDP; the phone lists available PCs automatically.
-- **Token auth** — every HTTP/WebSocket request needs the pairing token; rotate it to revoke all phones.
+- **4-digit PIN auth** — every HTTP/WebSocket request needs the pairing PIN; generate a new PIN to revoke all phones. Wrong PINs are rate-limited.
 - **Offline cache** — the phone keeps the last config and can render while the PC is asleep/offline.
 - **Auto-reconnect** with backoff, heartbeat, and a clear connection status.
 
@@ -73,7 +73,7 @@ No cloud, no account, no vendor lock-in: the phone talks directly to your PC ove
 2. Run the installer. Windows SmartScreen may warn because the build is unsigned — choose **More info → Run anyway**.
 3. Allow PhoneDeck through **Windows Defender Firewall** for **Private networks** when prompted.
 4. Install the APK on Android (enable “Install unknown apps” for your file manager if needed).
-5. In PhoneDeck Desktop press **Pair phone**. On Android, scan the QR with the camera app, or add the host/port/token manually.
+5. In PhoneDeck Desktop press **Pair phone**. On Android, scan the QR with the camera app, or add the host/port/PIN manually.
 6. Press a button. Done.
 
 ### Manual pairing
@@ -82,7 +82,7 @@ The desktop shows:
 
 - host (for example `192.168.1.42`)
 - port (`47654` by default)
-- token (24+ characters)
+- PIN (4 digits)
 - pairing link / QR
 
 The phone and PC must be on the same Wi-Fi. Guest networks with client isolation will not work.
@@ -131,11 +131,11 @@ If the helper fails, the action result (and a hint) is shown on the phone and wr
 
 PhoneDeck is a LAN tool, not an internet service.
 
-- The HTTP/WebSocket server binds `0.0.0.0` and requires a random token.
-- Discovery beacons contain only the server name and port — never the token.
-- The QR code contains the token, so treat a screenshot of it like a password.
+- The HTTP/WebSocket server binds `0.0.0.0` and requires the 4-digit pairing PIN (rate-limited after 6 wrong attempts per minute).
+- Discovery beacons contain only the server name and port — never the PIN.
+- The QR code contains the PIN, so treat a screenshot of it like a password.
 - **Run command** and **Launch app** actions execute with your Windows account. Only import configs you trust.
-- Rotate the token in **Pair phone** to disconnect every phone immediately.
+- Generate a new PIN in **Pair phone** to disconnect every phone immediately.
 - There is no TLS: do not expose the port to the internet or to untrusted networks. Use a firewall rule limited to Private networks.
 
 ## Repository layout
@@ -153,9 +153,14 @@ docs/
   ANDROID.md        Build/install/pairing notes
 ```
 
+## Diagnostics
+
+- **Android:** Settings → Diagnostics / logs (also available from the pairing screen) shows the last pairing/network events and has **Copy**. Or use `adb logcat -s PhoneDeck`.
+- **Windows:** Settings → Open logs (`%APPDATA%\PhoneDeck\phonedek.log`).
+
 ## Manual testing
 
-A step-by-step checklist is in [docs/TESTING.md](docs/TESTING.md). The current preview is published at [v0.1.1](https://github.com/Pelozo/phonedek/releases/tag/v0.1.1).
+A step-by-step checklist is in [docs/TESTING.md](docs/TESTING.md). The current preview is published at [v0.1.2](https://github.com/Pelozo/phonedek/releases/tag/v0.1.2).
 
 ## Status
 

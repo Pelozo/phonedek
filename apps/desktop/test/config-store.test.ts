@@ -97,7 +97,7 @@ describe('SettingsStore', () => {
     const dir = tempDir()
     const settings = new SettingsStore(dir)
     const token = settings.get().token
-    expect(token.length).toBeGreaterThan(10)
+    expect(token).toMatch(/^\d{4}$/)
     expect(new SettingsStore(dir).get().token).toBe(token)
 
     settings.update({ port: 49000, discovery: false, pairHost: '192.168.1.50' })
@@ -117,6 +117,6 @@ describe('SettingsStore', () => {
     writeFileSync(join(dir, 'settings.json'), JSON.stringify({ port: 1, token: 'x' }))
     const settings = new SettingsStore(dir)
     expect(settings.get().port).toBe(47654)
-    expect(settings.get().token.length).toBeGreaterThan(10)
+    expect(settings.get().token).toMatch(/^\d{4}$/)
   })
 })

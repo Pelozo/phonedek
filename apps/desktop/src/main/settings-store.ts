@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { randomBytes } from 'node:crypto'
+import { randomInt } from 'node:crypto'
 import { DEFAULT_HTTP_PORT } from '@phonedek/shared'
 import type { Logger } from './logger'
 
@@ -13,8 +13,9 @@ export interface AppSettings {
   pairHost: string
 }
 
+/** Four-digit pairing PIN (the QR/link is the low-friction path). */
 export function createToken(): string {
-  return randomBytes(18).toString('base64url')
+  return randomInt(0, 10_000).toString().padStart(4, '0')
 }
 
 export function defaultSettings(): AppSettings {
@@ -34,8 +35,9 @@ function sanitize(input: Partial<AppSettings> | null | undefined): AppSettings {
     typeof input.port === 'number' && Number.isInteger(input.port) && input.port >= 1024 && input.port <= 65535
       ? input.port
       : defaults.port
+  // Old installs had a long random token; migrate them to a 4-digit PIN.
   const token =
-    typeof input.token === 'string' && input.token.length >= 8 && input.token.length <= 128
+    typeof input.token === 'string' && /^\d{4}$/.test(input.token)
       ? input.token
       : defaults.token
   const pairHost =
@@ -74,7 +76,10 @@ export class SettingsStore {
   }
 
   rotateToken(): string {
-    const token = createToken()
+    let token = createToken()
+    for (let attempt = 0; attempt < 8 && token === this.settings.token; attempt += 1) {
+      token = createToken()
+    }
     this.settings = { ...this.settings, token }
     this.write()
     return token

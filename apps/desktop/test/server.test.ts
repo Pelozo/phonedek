@@ -113,6 +113,19 @@ describe('DeckServer HTTP', () => {
     expect(cached.status).toBe(304)
   })
 
+  it('throttles wrong PIN attempts', async () => {
+    const h = await harness()
+    const base = `http://127.0.0.1:${h.port}`
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      expect((await fetch(`${base}/api/config?token=0000`)).status).toBe(401)
+    }
+    const blocked = await fetch(`${base}/api/config?token=0000`)
+    expect(blocked.status).toBe(429)
+    expect(blocked.headers.get('retry-after')).toBe('60')
+    // Even the correct PIN stays blocked until the window expires.
+    expect((await fetch(`${base}/api/config`, { headers: { Authorization: `Bearer ${h.token}` } })).status).toBe(429)
+  })
+
   it('serves imported assets with auth and blocks traversal', async () => {
     const h = await harness()
     const source = join(tmpdir(), `phonedek-${Date.now()}.png`)

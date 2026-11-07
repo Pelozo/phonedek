@@ -3,16 +3,26 @@
 ## The phone cannot connect
 
 1. Confirm the desktop is listening: **Pair phone** should say “Listening on port …”.
-2. Open `http://<host>:<port>/api/info` from another device on the same Wi-Fi. It must return JSON without a token.
+2. Open `http://<host>:<port>/api/info` from another device on the same Wi-Fi. It must return JSON without a PIN.
 3. Windows: allow PhoneDeck on **Private** networks. Public-network profiles block inbound connections by default.
 4. Check for VPNs, virtual adapters, or a Wi-Fi guest network with **client isolation**.
-5. If the token was rotated, rescan the QR code.
+5. If the PIN was regenerated, rescan the QR code.
 6. If the port is busy, change it in **Pair phone → Apply** (1024–65535).
+
+## “The server address is not valid”
+
+This message comes from the WebSocket URL builder and now includes the exact host/port. Open **Diagnostics / logs** on the phone (Settings or pairing screen) and check:
+
+- the `Pairing link` line — is `hostParam` the PC’s actual Wi-Fi IPv4 address?
+- the `Pairing attempt` / `fetchConfig` lines — did HTTP succeed first?
+- the `WS URL` line — which host and port was used?
+
+On PCs with VPN/Docker/Hyper-V adapters, pick the Wi-Fi address in **Pair phone → Advertised host**. If you upgraded from 0.1.x, remove the saved pairing once (**Change server**) so stale host data cannot be reused. Share the copied diagnostics if it still fails.
 
 ## Discovery does not find the PC
 
 - Discovery needs UDP **47655**; some routers/APs drop broadcasts.
-- Use the QR code or manual host/port/token instead — it is the most reliable option.
+- Use the QR code or manual host/port/PIN instead — it is the most reliable option.
 - Windows Firewall may allow TCP but block UDP; check both.
 - Multiple PCs: the phone lists every beacon it hears.
 
@@ -52,7 +62,7 @@ Symptoms: key/text/media actions return an error mentioning PowerShell or the he
 
 - Imported images live in `%APPDATA%\PhoneDeck\assets\` and are referenced by file name.
 - Use **Settings → Export backup** (ZIP) to keep images with the config. A legacy JSON export does not include images; copy the `assets` folder or re-import the images after moving to another PC.
-- The phone must keep the token to load `/assets/...`.
+- The phone must keep the session PIN/token to load `/assets/...`.
 
 ## Build errors
 
@@ -72,5 +82,5 @@ Symptoms: key/text/media actions return an error mentioning PowerShell or the he
 ## Reset everything
 
 - Desktop config: close the app, rename `%APPDATA%\PhoneDeck\config.json`.
-- Pairing/ports/autostart: rename `%APPDATA%\PhoneDeck\settings.json` (new token is generated).
-- Android pairing: in the app, **Change server** clears host/port/token; or clear app storage in Android settings.
+- Pairing/ports/autostart: rename `%APPDATA%\PhoneDeck\settings.json` (new PIN is generated).
+- Android pairing: in the app, **Change server** clears host/port/PIN; or clear app storage in Android settings.

@@ -61,18 +61,18 @@ still 8.5.2 and Kotlin/Compose are 2.0.20 / BOM 2024.12.01 as specified.
 There are three ways to pair:
 
 1. **QR code / deep link** – scanning the desktop's QR code opens
-   `phonedek://pair?host=192.168.1.42&port=47654&token=…&name=My%20PC&v=1`.
-   The app validates the token by fetching `/api/config` and saves the pairing
+   `phonedek://pair?host=192.168.1.42&port=47654&token=4821&name=My%20PC&v=1`.
+   The app validates the 4-digit PIN by fetching `/api/config` and saves the pairing
    automatically. Cold starts and `onNewIntent` (singleTop) are both handled.
 2. **Nearby PCs** – while the pairing screen is visible the app listens on UDP
    47655 and broadcasts a `discover` probe every 2 seconds. Tap a discovered PC
-   to fill in its address, then enter the token. If a token was already supplied
+   to fill in its address, then enter the PIN. If a token was already supplied
    (for example by a deep link), tapping a discovered PC connects immediately.
-3. **Manual entry** – host/IP, port (default 47654) and the token shown in the
+3. **Manual entry** – host/IP, port (default 47654) and the 4-digit PIN shown in the
    desktop app.
 
-The token is validated with `GET /api/config` using
-`Authorization: Bearer <token>`. A 401/403, timeout, or unreachable host is shown
+The PIN is validated with `GET /api/config` using
+`Authorization: Bearer <pin>`. A 401/403, timeout, or unreachable host is shown
 inline with a concrete message.
 
 ## Using the deck
@@ -80,7 +80,7 @@ inline with a concrete message.
 - The active profile/page grid comes from the desktop config. `slot` is
   row-major; empty slots are blank.
 - Button backgrounds support color, angled gradients, and desktop-hosted images
-  loaded with Coil (with the bearer token). Overlay scrim, text color, radius,
+  loaded with Coil (with the bearer PIN). Overlay scrim, text color, radius,
   font size, grid gap and padding all follow the config, with theme fallbacks.
 - Pressing a button gives a scale/ripple animation and haptic feedback. Presses
   are only sent while the WebSocket is connected; otherwise the offline badge is
@@ -99,7 +99,7 @@ app/src/main/java/com/phonedek/app/
 ├── MainActivity.kt          edge-to-edge/immersive activity, deep links, lifecycle
 ├── data/
 │   ├── DeckModels.kt        lenient kotlinx.serialization model + normalization
-│   ├── PrefsRepository.kt   DataStore Preferences (host/port/token/name/page)
+│   ├── PrefsRepository.kt   DataStore Preferences (host/port/PIN/name/page)
 │   └── ConfigCache.kt       raw last-good config JSON in filesDir (offline cold start)
 ├── net/
 │   ├── HttpApi.kt           OkHttp config fetch, typed failures, asset URLs
@@ -111,7 +111,7 @@ app/src/main/java/com/phonedek/app/
 │   ├── DeckScreen.kt        grid, page indicator, status pill, empty state
 │   ├── DeckButtonView.kt    responsive button rendering + press feedback
 │   ├── SettingsSheet.kt     bottom sheet
-│   ├── Backgrounds.kt       colors, CSS-angle gradients, token-auth images
+│   ├── Backgrounds.kt       colors, CSS-angle gradients, PIN-auth images
 │   ├── Theme.kt             deep navy / emerald dark theme
 │   ├── Brand.kt             in-app logo
 │   └── PhoneDeckApp.kt      root composition + snackbars

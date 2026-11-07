@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -33,12 +34,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.phonedek.app.BuildConfig
+import com.phonedek.app.util.Diag
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,6 +55,8 @@ fun SettingsSheet(
     onKeepScreenOn: (Boolean) -> Unit,
 ) {
     var confirmChange by remember { mutableStateOf(false) }
+    var logs by remember { mutableStateOf(Diag.snapshot()) }
+    val clipboard = LocalClipboardManager.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val pairing = state.pairing
 
@@ -172,7 +179,67 @@ fun SettingsSheet(
                 )
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(20.dp))
+            HorizontalDivider(color = Color.White.copy(alpha = 0.07f))
+            Spacer(Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = "DIAGNOSTICS",
+                        color = Slate500,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 0.8.sp,
+                    )
+                    Text(
+                        text = "Pairing and connection events (last 25).",
+                        color = Slate500,
+                        fontSize = 11.sp,
+                    )
+                }
+                TextButton(onClick = { logs = Diag.snapshot() }) { Text("Refresh") }
+                TextButton(onClick = { clipboard.setText(AnnotatedString(Diag.snapshot())) }) {
+                    Text("Copy")
+                }
+            }
+
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Navy950,
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.07f)),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                SelectionContainer {
+                    Text(
+                        text = logs.lines().takeLast(25).joinToString("\n")
+                            .ifBlank { "No diagnostics yet. Try pairing, then press Refresh." },
+                        color = Slate300,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 9.sp,
+                        lineHeight = 13.sp,
+                        modifier = Modifier.padding(12.dp),
+                    )
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                TextButton(onClick = {
+                    Diag.clear()
+                    logs = Diag.snapshot()
+                }) { Text("Clear") }
+                Text(
+                    text = "adb logcat -s PhoneDeck",
+                    color = Slate500,
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(top = 14.dp),
+                )
+            }
+
+            Spacer(Modifier.height(18.dp))
             Text(
                 text = "PhoneDeck ${BuildConfig.VERSION_NAME}  •  protocol 1",
                 color = Slate500,
@@ -190,8 +257,8 @@ fun SettingsSheet(
             title = { Text("Change server?") },
             text = {
                 Text(
-                    "The saved server and token will be removed from this phone. " +
-                        "You will need the QR code or token to pair again.",
+                    "The saved server and PIN will be removed from this phone. " +
+                        "You will need the QR code or PIN to pair again.",
                 )
             },
             confirmButton = {

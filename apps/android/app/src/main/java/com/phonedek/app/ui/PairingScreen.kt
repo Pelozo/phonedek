@@ -95,6 +95,7 @@ fun PairingScreen(
     val tokenFocus = remember { FocusRequester() }
     val servers = remember { mutableStateMapOf<String, DiscoveredServer>() }
     var discoveryRunning by remember { mutableStateOf(false) }
+    var showDiagnostics by rememberSaveable { mutableStateOf(false) }
     val discovery = remember { DiscoveryClient(context) }
 
     LifecycleStartEffect(Unit) {
@@ -141,7 +142,11 @@ fun PairingScreen(
         } else {
             null
         }
-        val tokenProblem = if (tokenValue.isEmpty()) "Enter the pairing token." else null
+        val tokenProblem = when {
+            tokenValue.isEmpty() -> "Enter the 4-digit PIN."
+            !Regex("^\\d{4}$").matches(tokenValue) -> "The PIN is exactly 4 digits."
+            else -> null
+        }
         hostError = hostProblem
         portError = portProblem
         tokenError = tokenProblem
@@ -226,7 +231,7 @@ fun PairingScreen(
                                     onClearError()
                                 },
                                 onTokenChange = {
-                                    token = it
+                                    token = it.filter(Char::isDigit).take(4)
                                     tokenError = null
                                     hint = null
                                     onClearError()
@@ -247,7 +252,7 @@ fun PairingScreen(
                                     hostError = null
                                     portError = null
                                     if (token.isBlank()) {
-                                        hint = "Enter the token shown in PhoneDeck on ${server.name}."
+                                        hint = "Enter the 4-digit PIN shown in PhoneDeck on ${server.name}."
                                         tokenFocus.requestFocus()
                                     } else {
                                         keyboard?.hide()
@@ -284,7 +289,7 @@ fun PairingScreen(
                                     onClearError()
                                 },
                                 onTokenChange = {
-                                    token = it
+                                    token = it.filter(Char::isDigit).take(4)
                                     tokenError = null
                                     hint = null
                                     onClearError()
@@ -306,7 +311,7 @@ fun PairingScreen(
                                     hostError = null
                                     portError = null
                                     if (token.isBlank()) {
-                                        hint = "Enter the token shown in PhoneDeck on ${server.name}."
+                                        hint = "Enter the 4-digit PIN shown in PhoneDeck on ${server.name}."
                                         tokenFocus.requestFocus()
                                     } else {
                                         keyboard?.hide()
@@ -319,14 +324,21 @@ fun PairingScreen(
                 }
             }
 
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(16.dp))
             Text(
                 text = "Tip: scan the QR code in PhoneDeck on your PC to pair instantly.",
                 color = Slate500.copy(alpha = 0.8f),
                 fontSize = 11.sp,
                 textAlign = TextAlign.Center,
             )
+            TextButton(onClick = { showDiagnostics = true }) {
+                Text("Diagnostics / logs", color = Slate500, fontSize = 11.sp)
+            }
         }
+    }
+
+    if (showDiagnostics) {
+        DiagnosticsDialog(onDismiss = { showDiagnostics = false })
     }
 }
 
@@ -426,8 +438,8 @@ private fun PairingForm(
         modifier = Modifier
             .fillMaxWidth()
             .focusRequester(tokenFocus),
-        label = { Text("Pairing token") },
-        placeholder = { Text("Paste the token from your PC") },
+        label = { Text("4-digit PIN") },
+        placeholder = { Text("0000") },
         singleLine = true,
         isError = tokenError != null,
         shape = RoundedCornerShape(12.dp),
@@ -446,12 +458,12 @@ private fun PairingForm(
                     .clickable(onClick = onToggleToken)
                     .padding(horizontal = 8.dp, vertical = 6.dp)
                     .semantics {
-                        contentDescription = if (showToken) "Hide token" else "Show token"
+                        contentDescription = if (showToken) "Hide PIN" else "Show PIN"
                     },
             )
         },
         keyboardOptions = KeyboardOptions(
-            keyboardType = KeyboardType.Password,
+            keyboardType = KeyboardType.NumberPassword,
             imeAction = ImeAction.Done,
         ),
         keyboardActions = KeyboardActions(onDone = { onSubmit() }),

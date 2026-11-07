@@ -17,7 +17,6 @@ export function PairDialog({
   onServerUpdate: (server: ServerInfoView) => void
   onToast: (message: string, kind?: 'info' | 'success' | 'error') => void
 }) {
-  const [reveal, setReveal] = useState(false)
   const [port, setPort] = useState(String(settings.port))
   const [busy, setBusy] = useState(false)
 
@@ -50,13 +49,13 @@ export function PairDialog({
   }
 
   const rotate = async (): Promise<void> => {
-    if (!window.confirm('Rotate the pairing token? Every paired phone will be disconnected and must scan the new QR code.')) return
+    if (!window.confirm('Generate a new 4-digit PIN? Every paired phone will be disconnected and must pair again.')) return
     setBusy(true)
     try {
       const result = await window.phonedek.rotateToken()
       if (result.state) onServerUpdate(result.state.server)
-      if (result.ok) onToast('Pairing token rotated', 'success')
-      else onToast(result.error ?? 'Could not rotate the token', 'error')
+      if (result.ok) onToast('New pairing PIN generated', 'success')
+      else onToast(result.error ?? 'Could not generate a new PIN', 'error')
     } finally {
       setBusy(false)
     }
@@ -176,16 +175,14 @@ export function PairDialog({
               </label>
             </div>
             <label className="field">
-              <span>Pairing token</span>
+              <span>Pairing PIN</span>
               <div className="row gap">
-                <input readOnly type={reveal ? 'text' : 'password'} value={server.token} />
-                <button type="button" className="button ghost" onClick={() => setReveal((value) => !value)}>
-                  {reveal ? 'Hide' : 'Show'}
-                </button>
-                <button type="button" className="icon-button bordered" onClick={() => void copy(server.token, 'Token')} aria-label="Copy token">
+                <input readOnly className="pin-input" value={server.token} onFocus={(event) => event.target.select()} />
+                <button type="button" className="icon-button bordered" onClick={() => void copy(server.token, 'PIN')} aria-label="Copy PIN">
                   <Icon name="copy" size={15} />
                 </button>
               </div>
+              <small className="field-hint">4 digits, only needed when pairing manually.</small>
             </label>
             <div className="row between">
               <Toggle
@@ -196,7 +193,7 @@ export function PairDialog({
                 disabled={busy}
               />
               <button type="button" className="button danger ghost" onClick={() => void rotate()} disabled={busy}>
-                <Icon name="refresh" size={15} /> Rotate token
+                <Icon name="refresh" size={15} /> New PIN
               </button>
             </div>
           </div>

@@ -2,7 +2,7 @@ import { PROTOCOL_VERSION, type PairPayload } from './types'
 
 /**
  * Pairing URI embedded in the desktop's QR code:
- *   phonedek://pair?host=192.168.1.20&port=47654&token=...&name=My%20PC&v=1
+ *   phonedek://pair?host=192.168.1.20&port=47654&token=4821&name=My%20PC&v=1
  *
  * Android registers an intent filter for the `phonedek` scheme so scanning the
  * QR code with the normal camera app opens PhoneDeck and pairs immediately.
@@ -13,7 +13,7 @@ export function buildPairUri(payload: PairPayload): string {
   if (!Number.isInteger(payload.port) || payload.port < 1 || payload.port > 65535) {
     throw new Error('Pairing port is invalid')
   }
-  if (!payload.token || payload.token.length > 128) throw new Error('Pairing token is invalid')
+  if (!/^\d{4}$/.test(payload.token)) throw new Error('Pairing PIN must be exactly 4 digits')
 
   const url = new URL('phonedek://pair')
   url.searchParams.set('host', host)
@@ -41,7 +41,7 @@ export function parsePairUri(uri: string): PairPayload | null {
 
   if (!host || /\s/.test(host)) return null
   if (!Number.isInteger(port) || port < 1 || port > 65535) return null
-  if (!token || token.length > 128) return null
+  if (!/^\d{4}$/.test(token)) return null
   if (version !== PROTOCOL_VERSION) return null
 
   return {

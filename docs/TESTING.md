@@ -8,7 +8,7 @@ Report issues with `%APPDATA%\PhoneDeck\phonedek.log`, the Windows version and t
 - [ ] Installer runs; Windows SmartScreen → **More info → Run anyway**.
 - [ ] App opens with the starter deck and **Saved** in the top bar.
 - [ ] Server pill/status bar shows **LAN server on 47654**.
-- [ ] **Pair phone** shows a QR, host, port and token; **Copy** puts the link on the clipboard.
+- [ ] **Pair phone** shows a QR, host, port and 4-digit PIN; **Copy** puts the link on the clipboard.
 - [ ] **Advertised host** lists the detected LAN addresses; choosing another adapter changes the QR host.
 - [ ] Change the port to `47655`-ish (e.g. 49000), Apply → status updates; the QR host/port changes.
 - [ ] Change the deck name in **Settings** → the QR/name updates.
@@ -28,22 +28,22 @@ Report issues with `%APPDATA%\PhoneDeck\phonedek.log`, the Windows version and t
 - [ ] Update the phone over Wi-Fi; allow **Private networks** in the Windows firewall prompt.
 - [ ] Install the APK (allow unknown apps) and open it.
 - [ ] Scan the QR with the normal camera app → PhoneDeck opens and connects (green status).
-- [ ] Or tap **Add server manually** and enter host/port/token → connects.
-- [ ] Discovery: with the pairing screen open, the PC appears in the list (tap → enter token).
+- [ ] Or tap **Add server manually** and enter host/port/PIN → connects.
+- [ ] Discovery: with the pairing screen open, the PC appears in the list (tap → enter PIN).
 - [ ] Press Copy/Paste/Undo in Notepad → the PC receives the shortcut.
 - [ ] Press Play/Pause → media toggles; volume buttons change volume.
 - [ ] Edit a button label/background on the desktop → phone updates live without re-pairing.
 - [ ] Press a page button → phone switches instantly; page indicator/state is correct.
 - [ ] Lock the phone screen and unlock → deck still works; screen stays on while deck is open.
 - [ ] Rotate the phone → grid reflows and remains usable.
-- [ ] Rotate the desktop token → phone disconnects; re-pairing works.
+- [ ] Generate a new PIN on the desktop → phone disconnects; re-pairing works.
 - [ ] Close PhoneDeck on the PC → phone shows **offline** and still renders the cached deck.
 - [ ] Reopen PhoneDeck → phone reconnects and fetches the current config.
 - [ ] Change Wi-Fi/disable Wi-Fi → phone shows reconnecting; enable Wi-Fi → recovers.
 
 ## Edge cases
 
-- [ ] Wrong token → pairing shows a clear "token rejected" message, no crash.
+- [ ] Wrong PIN → pairing shows a clear rejection message; six wrong attempts get a 60s rate-limit message, no crash.
 - [ ] Wrong port/host → timeout message.
 - [ ] Empty button (no actions) → pressing shows no action and does not crash.
 - [ ] Button with a `goto` page action removed on the desktop → phone falls back to the default page.

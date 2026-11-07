@@ -13,7 +13,7 @@ export interface DiscoveryOptions {
 
 /**
  * Small UDP beacon so the phone can find desktops without typing an IP.
- * Never broadcasts the pairing token.
+ * Never broadcasts the pairing PIN.
  */
 export class DiscoveryService {
   private socket: Socket | null = null

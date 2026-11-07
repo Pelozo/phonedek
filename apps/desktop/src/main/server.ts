@@ -45,6 +45,15 @@ interface ClientRecord {
   pressTimes: number[]
 }
 
+interface AuthResult {
+  ok: boolean
+  blocked: boolean
+}
+
+const AUTH_WINDOW_MS = 60_000
+const AUTH_MAX_FAILURES = 6
+const AUTH_BLOCK_MS = 60_000
+
 function bearerToken(request: IncomingMessage, url: URL): string | undefined {
   const query = url.searchParams.get('token')
   if (query) return query
@@ -112,6 +121,8 @@ export class DeckServer {
   private wss: WebSocketServer | null = null
   private heartbeat: NodeJS.Timeout | null = null
   private readonly clients = new Map<string, ClientRecord>()
+  private readonly authFailures = new Map<string, number[]>()
+  private readonly authBlockedUntil = new Map<string, number>()
   private actualPort = 0
 
   constructor(options: DeckServerOptions) {
@@ -153,8 +164,10 @@ export class DeckServer {
         socket.destroy()
         return
       }
-      if (!tokenMatches(this.token, bearerToken(request, url))) {
-        socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
+      const auth = this.authorize(request, url)
+      if (!auth.ok) {
+        const status = auth.blocked ? '429 Too Many Requests' : '401 Unauthorized'
+        socket.write(`HTTP/1.1 ${status}\r\nRetry-After: 60\r\nConnection: close\r\n\r\n`)
         socket.destroy()
         return
       }
@@ -225,9 +238,11 @@ export class DeckServer {
 
   setToken(token: string): void {
     this.token = token
+    this.authFailures.clear()
+    this.authBlockedUntil.clear()
     for (const record of this.clients.values()) {
       try {
-        record.ws.close(1008, 'Pairing token changed')
+        record.ws.close(1008, 'Pairing PIN changed')
       } catch {
         // ignore
       }
@@ -383,8 +398,13 @@ export class DeckServer {
       return
     }
 
-    if (!tokenMatches(this.token, bearerToken(request, url))) {
-      json(response, 401, { error: 'Pairing token required' })
+    const auth = this.authorize(request, url)
+    if (!auth.ok) {
+      if (auth.blocked) {
+        json(response, 429, { error: 'Too many wrong PIN attempts. Wait a minute and try again.' }, { 'Retry-After': '60' })
+      } else {
+        json(response, 401, { error: 'Pairing PIN required' })
+      }
       return
     }
 
@@ -465,6 +485,30 @@ export class DeckServer {
     }
 
     json(response, 404, { error: 'Not found' })
+  }
+
+  private authorize(request: IncomingMessage, url: URL): AuthResult {
+    const ip = remoteAddress(request)
+    const now = Date.now()
+    const blockedUntil = this.authBlockedUntil.get(ip) ?? 0
+    if (blockedUntil > now) return { ok: false, blocked: true }
+
+    const failures = (this.authFailures.get(ip) ?? []).filter((time) => now - time < AUTH_WINDOW_MS)
+    if (tokenMatches(this.token, bearerToken(request, url))) {
+      this.authFailures.delete(ip)
+      this.authBlockedUntil.delete(ip)
+      return { ok: true, blocked: false }
+    }
+
+    failures.push(now)
+    if (failures.length >= AUTH_MAX_FAILURES) {
+      this.authFailures.delete(ip)
+      this.authBlockedUntil.set(ip, now + AUTH_BLOCK_MS)
+      this.options.logger?.warn(`Too many wrong pairing PIN attempts from ${ip}; temporarily blocked`)
+    } else {
+      this.authFailures.set(ip, failures)
+    }
+    return { ok: false, blocked: false }
   }
 
   private send(ws: WebSocket, message: ServerMessage): void {

@@ -7,7 +7,7 @@ describe('pairing URI', () => {
     const payload = {
       host: '192.168.1.25',
       port: 47654,
-      token: 'abc123',
+      token: '4821',
       name: 'Gaming PC',
       version: 1 as const,
     }
@@ -16,7 +16,9 @@ describe('pairing URI', () => {
 
   it('rejects other schemes and invalid ports', () => {
     expect(parsePairUri('https://example.com')).toBeNull()
-    expect(parsePairUri('phonedek://pair?host=x&port=0&token=a&v=1')).toBeNull()
+    expect(parsePairUri('phonedek://pair?host=x&port=0&token=1234&v=1')).toBeNull()
+    expect(parsePairUri('phonedek://pair?host=x&port=47654&token=abcd&v=1')).toBeNull()
+    expect(parsePairUri('phonedek://pair?host=x&port=47654&token=123&v=1')).toBeNull()
     expect(parsePairUri('not a url')).toBeNull()
   })
 })
