@@ -78,12 +78,19 @@ function requestAccessibilityPermission(prompt: boolean): boolean {
   }
 }
 
-function buildPermissionStatus(): PermissionStatus {
+async function buildPermissionStatus(): Promise<PermissionStatus> {
   const supported = process.platform === 'darwin'
+  const granted = supported ? requestAccessibilityPermission(false) : true
+  let helperGranted: boolean | null = null
+  if (supported) {
+    if (!granted) helperGranted = false
+    else if (keySender?.probeAccessibility) helperGranted = await keySender.probeAccessibility()
+  }
   return {
     platform: process.platform,
     supported,
-    granted: supported ? requestAccessibilityPermission(false) : true,
+    granted,
+    helperGranted,
     paneName: macPrivacyPaneName(),
     appPath: process.execPath ?? null,
     helperPath: supported ? helperPath() : null,

@@ -171,6 +171,14 @@ export default function App() {
     }
   }, [showToast])
 
+  const revealPermissionHelper = useCallback(async (): Promise<void> => {
+    try {
+      await window.phonedek.revealPermissionHelper()
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error')
+    }
+  }, [showToast])
+
   const save = useCallback(
     async (target: DeckConfig) => {
       const nonce = ++saveNonce.current
@@ -390,6 +398,7 @@ export default function App() {
             busy={permissionBusy}
             onGrant={() => void grantPermission()}
             onOpenSettings={() => void openPermissionSettings()}
+            onRevealHelper={() => void revealPermissionHelper()}
             onDismiss={() => setPermissionDismissed(true)}
           />
         )}

@@ -25,6 +25,16 @@
   color: var(--accent);
 }
 
+.permission-banner.helper {
+  border-left-color: var(--warn);
+  background: linear-gradient(90deg, rgba(217, 164, 65, 0.08), transparent 60%), var(--surface);
+}
+
+.permission-banner.helper .permission-banner-icon {
+  color: var(--warn);
+  border-color: rgba(217, 164, 65, 0.4);
+}
+
 .permission-banner-copy {
   display: flex;
   flex-direction: column;
@@ -127,27 +137,18 @@
   line-height: 1.4;
 }
 
-.permission-help {
+.permission-helper-path {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   padding-top: 8px;
   border-top: 1px solid var(--line);
+}
+
+.permission-helper-path > span {
   color: var(--muted);
   font-size: 11px;
-}
-
-.permission-help summary {
-  cursor: pointer;
-  color: var(--text-soft);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.permission-help summary:hover {
-  color: var(--text);
-}
-
-.permission-help p {
-  margin: 8px 0;
-  line-height: 1.5;
+  line-height: 1.4;
 }
 
 @media (max-width: 1200px) {

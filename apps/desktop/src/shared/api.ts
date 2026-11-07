@@ -84,6 +84,8 @@ export interface PermissionStatus {
   /** False on platforms that do not gate synthetic input. */
   supported: boolean
   granted: boolean
+  /** Whether the helper itself can inject input; null while unknown. */
+  helperGranted: boolean | null
   /** Localized pane name: "Device Control and Data Access" on macOS 27+. */
   paneName: string
   /** Main executable inside the app bundle. */

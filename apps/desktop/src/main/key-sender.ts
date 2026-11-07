@@ -5,6 +5,8 @@ import type { Logger } from './logger'
 
 export interface KeySender {
   send(step: KeyboardPlanStep): Promise<void>
+  /** Whether the helper can inject input right now (macOS TCC check). */
+  probeAccessibility?(): Promise<boolean>
   dispose?(): void
 }
 
@@ -66,6 +68,24 @@ export class HelperKeySender implements KeySender {
   }
 
   async send(step: KeyboardPlanStep): Promise<void> {
+    await this.sendRaw(step)
+  }
+
+  /**
+   * Ask the running helper whether it can inject input. On macOS this is the
+   * authoritative check: TCC may authorize the app while still denying the
+   * helper process, and only the helper can see that.
+   */
+  async probeAccessibility(): Promise<boolean> {
+    try {
+      await this.sendRaw({ kind: 'check' })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  private async sendRaw(step: object): Promise<void> {
     await this.ensureStarted()
     const child = this.child
     if (!child) throw new Error('Keyboard helper is not running')

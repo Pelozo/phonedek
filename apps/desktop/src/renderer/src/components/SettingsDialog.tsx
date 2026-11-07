@@ -143,6 +143,9 @@ export function SettingsDialog({
   const updatePercent = updateStatus?.state === 'downloading' ? updateProgressPercent(updateStatus) : null
   const checkDisabled = busy || !updateStatus || !canCheckForUpdates(updateStatus)
 
+  const permissionOk = !permission || (permission.granted && permission.helperGranted !== false)
+  const helperBlocked = Boolean(permission?.granted && permission.helperGranted === false)
+
   return (
     <Modal
       title="Settings"
@@ -184,32 +187,42 @@ export function SettingsDialog({
       {permission?.supported && (
         <div className="settings-section">
           <h3>Input permission</h3>
-          <div className={`permission-card ${permission.granted ? 'ok' : 'warn'}`}>
+          <div className={`permission-card ${permissionOk ? 'ok' : 'warn'}`}>
             <div className="permission-card-head">
               <span className="permission-card-icon" aria-hidden="true">
-                <Icon name={permission.granted ? 'check' : 'lock'} size={17} />
+                <Icon name={permissionOk ? 'check' : 'lock'} size={17} />
               </span>
               <div>
-                <strong>{permission.granted ? 'Input control allowed' : 'Input control blocked'}</strong>
+                <strong>
+                  {permissionOk
+                    ? 'Input control allowed'
+                    : permission.granted
+                      ? 'Helper approval needed'
+                      : 'Input control blocked'}
+                </strong>
                 <small>
-                  {permission.granted
+                  {permissionOk
                     ? 'PhoneDeck can send keystrokes, clicks and media keys.'
-                    : `macOS needs PhoneDeck allowed in ${permission.paneName}. The phone can connect, but actions fail until it is enabled.`}
+                    : permission.granted
+                      ? `The app is allowed, but macOS is still blocking PhoneDeck’s input helper. Add it in ${permission.paneName}.`
+                      : `macOS needs PhoneDeck allowed in ${permission.paneName}. The phone can connect, but actions fail until it is enabled.`}
                 </small>
               </div>
             </div>
 
-            {!permission.granted && (
+            {!permissionOk && (
               <>
                 <div className="row gap">
-                  <button
-                    type="button"
-                    className="button primary small"
-                    onClick={() => void grantPermission()}
-                    disabled={busy}
-                  >
-                    <Icon name="check" size={14} /> Grant permission
-                  </button>
+                  {!permission.granted && (
+                    <button
+                      type="button"
+                      className="button primary small"
+                      onClick={() => void grantPermission()}
+                      disabled={busy}
+                    >
+                      <Icon name="check" size={14} /> Grant permission
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="button secondary small"
@@ -217,29 +230,32 @@ export function SettingsDialog({
                   >
                     Open {permission.paneName}
                   </button>
+                  {permission.granted && (
+                    <button
+                      type="button"
+                      className="button secondary small"
+                      onClick={() => void window.phonedek.revealPermissionHelper()}
+                    >
+                      <Icon name="folder" size={14} /> Show helper
+                    </button>
+                  )}
                 </div>
 
-                <details className="permission-help">
-                  <summary>Already enabled but still blocked?</summary>
-                  <p>
-                    macOS may attribute the permission to PhoneDeck&apos;s helper instead of the app. Add this file to
-                    the same list, then relaunch PhoneDeck:
-                  </p>
-                  {permission.helperPath && (
+                {permission.helperPath && (
+                  <div className="permission-helper-path">
+                    <span>{helperBlocked ? 'Add this file to the same list:' : 'If it still fails, add this file too:'}</span>
                     <div className="path-box" title={permission.helperPath}>
                       <Icon name="folder" size={15} />
                       <code>{permission.helperPath}</code>
                     </div>
-                  )}
-                  <div className="row gap">
-                    <button
-                      type="button"
-                      className="button ghost small"
-                      onClick={() => void window.phonedek.revealPermissionHelper()}
-                    >
-                      <Icon name="folder" size={14} /> Show in Finder
-                    </button>
-                    {permission.helperPath && (
+                    <div className="row gap">
+                      <button
+                        type="button"
+                        className="button ghost small"
+                        onClick={() => void window.phonedek.revealPermissionHelper()}
+                      >
+                        <Icon name="folder" size={14} /> Show in Finder
+                      </button>
                       <button
                         type="button"
                         className="button ghost small"
@@ -247,9 +263,9 @@ export function SettingsDialog({
                       >
                         <Icon name="copy" size={14} /> Copy path
                       </button>
-                    )}
+                    </div>
                   </div>
-                </details>
+                )}
               </>
             )}
           </div>

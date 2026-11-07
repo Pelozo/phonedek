@@ -131,6 +131,8 @@ final class KeyboardHelper {
         }
 
         switch kind {
+        case "check":
+            try requireAccessibility()
         case "keys":
             try sendKeys(step)
         case "text":
