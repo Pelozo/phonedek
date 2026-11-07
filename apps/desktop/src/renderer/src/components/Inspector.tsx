@@ -920,7 +920,7 @@ export function Inspector({
               <Icon name="bolt" size={22} />
               <p>
                 {button.control
-                  ? 'No tap actions. This control sends relative input while you drag it.'
+                  ? 'No tap action needed. Drag this control on the phone to send volume or scroll steps; use Test − / Test + above to verify it on this PC.'
                   : 'No actions yet. This button will do nothing when pressed.'}
               </p>
             </div>
