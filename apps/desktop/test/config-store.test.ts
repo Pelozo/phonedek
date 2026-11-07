@@ -119,4 +119,27 @@ describe('SettingsStore', () => {
     expect(settings.get().port).toBe(47654)
     expect(settings.get().token).toMatch(/^\d{4}$/)
   })
+
+  it('persists the screenshot directory and resets to the Desktop default', () => {
+    const dir = tempDir()
+    const settings = new SettingsStore(dir)
+    expect(settings.get().screenshotDirectory).toBe('')
+
+    const folder = join(dir, 'captures')
+    settings.update({ screenshotDirectory: `  ${folder}  ` })
+    expect(settings.get().screenshotDirectory).toBe(folder)
+    expect(new SettingsStore(dir).get().screenshotDirectory).toBe(folder)
+
+    settings.update({ screenshotDirectory: '' })
+    expect(settings.get().screenshotDirectory).toBe('')
+    expect(new SettingsStore(dir).get().screenshotDirectory).toBe('')
+  })
+
+  it('falls back for invalid persisted screenshot directories', () => {
+    const dir = tempDir()
+    for (const value of [42, 'relative/captures', `/${'x'.repeat(5000)}`, null]) {
+      writeFileSync(join(dir, 'settings.json'), JSON.stringify({ screenshotDirectory: value }))
+      expect(new SettingsStore(dir).get().screenshotDirectory, String(value).slice(0, 30)).toBe('')
+    }
+  })
 })

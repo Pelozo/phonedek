@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, shell, systemPreferences, Tray } from 'electron'
 import type { MenuItemConstructorOptions, OpenDialogOptions, SaveDialogOptions } from 'electron'
 import { existsSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { basename, isAbsolute, join } from 'node:path'
 import { z } from 'zod'
 import { ActionSchema, validateConfig } from '@phonedek/shared'
 import type { Action, AssetKind, DeckConfig, PressResult } from '@phonedek/shared'
@@ -169,6 +169,7 @@ async function buildServerInfo(): Promise<ServerInfoView> {
       launchAtLogin: currentSettings.launchAtLogin,
       minimizeToTray: currentSettings.minimizeToTray,
       pairHost: currentSettings.pairHost,
+      screenshotDirectory: currentSettings.screenshotDirectory,
     },
     clients: server?.getClients() ?? [],
     error: serverError,
@@ -189,6 +190,7 @@ async function buildState(): Promise<AppState> {
       launchAtLogin: settings.get().launchAtLogin,
       minimizeToTray: settings.get().minimizeToTray,
       pairHost: settings.get().pairHost,
+      screenshotDirectory: settings.get().screenshotDirectory,
     },
   }
 }
@@ -439,6 +441,33 @@ function registerIpc(): void {
     },
   )
 
+  ipcMain.handle(IPC.pickScreenshotDirectory, async (): Promise<string | null> => {
+    const result = await showOpen({
+      title: 'Choose a screenshot folder',
+      properties: ['openDirectory', 'createDirectory'],
+    })
+    return result.canceled ? null : (result.filePaths[0] ?? null)
+  })
+
+  ipcMain.handle(
+    IPC.setScreenshotDirectory,
+    async (_event, input: unknown): Promise<OperationResult> => {
+      if (typeof input !== 'string') {
+        return { ok: false, error: 'Screenshot folder must be a path' }
+      }
+      const clean = input.trim()
+      if (clean.length > 4096) {
+        return { ok: false, error: 'Screenshot folder path is too long' }
+      }
+      if (clean && !isAbsolute(clean)) {
+        return { ok: false, error: 'Choose an absolute folder path' }
+      }
+      settings.update({ screenshotDirectory: clean })
+      await pushServerInfo()
+      return { ok: true, state: await buildState() }
+    },
+  )
+
   ipcMain.handle(IPC.setLaunchAtLogin, async (_event, enabled: boolean): Promise<OperationResult> => {
     settings.update({ launchAtLogin: enabled })
     if (process.platform === 'win32' || process.platform === 'darwin') {
@@ -676,6 +705,7 @@ async function bootstrap(): Promise<void> {
     logger,
     openPath: async (path) => shell.openPath(path),
     openExternal: async (url) => shell.openExternal(url),
+    getScreenshotDirectory: () => settings.get().screenshotDirectory || app.getPath('desktop'),
   })
   executor = new ActionExecutor(keySender, host, logger, {
     onScreenshot: (path) => {

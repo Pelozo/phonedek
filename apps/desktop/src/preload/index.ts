@@ -28,6 +28,10 @@ const api: PhoneDeckApi = {
   setPairHost: (host: string): Promise<OperationResult> => ipcRenderer.invoke(IPC.setPairHost, host),
   setPhoneBrightness: (clientId: string, level: number | null): Promise<OperationResult> =>
     ipcRenderer.invoke(IPC.setPhoneBrightness, clientId, level),
+  setScreenshotDirectory: (path: string): Promise<OperationResult> =>
+    ipcRenderer.invoke(IPC.setScreenshotDirectory, path),
+  pickScreenshotDirectory: (): Promise<string | null> =>
+    ipcRenderer.invoke(IPC.pickScreenshotDirectory),
   exportConfig: (): Promise<OperationResult> => ipcRenderer.invoke(IPC.exportConfig),
   importConfig: (): Promise<SaveConfigResult> => ipcRenderer.invoke(IPC.importConfig),
   openLogs: (): Promise<void> => ipcRenderer.invoke(IPC.openLogs),

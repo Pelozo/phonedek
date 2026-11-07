@@ -179,6 +179,39 @@ export function SettingsDialog({
     }
   }
 
+  const applyScreenshotFolder = async (path: string): Promise<void> => {
+    const result = await window.phonedek.setScreenshotDirectory(path)
+    if (result.state) onServerUpdate(result.state.server)
+    if (!result.ok) {
+      onToast(result.error ?? 'Could not update the screenshot folder', 'error')
+      return
+    }
+    onToast(path ? 'Screenshot folder updated' : 'Screenshots will use the Desktop', 'success')
+  }
+
+  const chooseScreenshotFolder = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      const path = await window.phonedek.pickScreenshotDirectory()
+      if (path) await applyScreenshotFolder(path)
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : String(error), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const useDesktopScreenshotFolder = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      await applyScreenshotFolder('')
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : String(error), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const toggleTray = async (enabled: boolean): Promise<void> => {
     setBusy(true)
     try {
@@ -333,6 +366,38 @@ export function SettingsDialog({
             <PhoneBrightnessRow key={client.id} client={client} onToast={onToast} />
           ))
         )}
+      </div>
+
+      <div className="settings-section">
+        <h3>Screenshots</h3>
+        <div className="settings-row">
+          <div>
+            <strong>Capture folder</strong>
+            <small>Used for full-screen captures on macOS. Windows uses the Snipping Tool.</small>
+          </div>
+        </div>
+        <div className="path-box" title={settings.screenshotDirectory || 'Desktop (default)'}>
+          <Icon name="folder" size={15} />
+          <code>{settings.screenshotDirectory || 'Desktop (default)'}</code>
+        </div>
+        <div className="row gap">
+          <button
+            type="button"
+            className="button secondary small"
+            onClick={() => void chooseScreenshotFolder()}
+            disabled={busy}
+          >
+            <Icon name="folder" size={14} /> Choose folder…
+          </button>
+          <button
+            type="button"
+            className="button ghost small"
+            onClick={() => void useDesktopScreenshotFolder()}
+            disabled={busy || !settings.screenshotDirectory}
+          >
+            Use Desktop
+          </button>
+        </div>
       </div>
 
       {permission?.supported && (

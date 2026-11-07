@@ -31,6 +31,8 @@ export interface SettingsView {
   launchAtLogin: boolean
   minimizeToTray: boolean
   pairHost: string
+  /** macOS capture folder; empty = OS Desktop. */
+  screenshotDirectory: string
 }
 
 export type UpdateState =
@@ -104,6 +106,8 @@ export interface PhoneDeckApi {
   setMinimizeToTray(enabled: boolean): Promise<OperationResult>
   setPairHost(host: string): Promise<OperationResult>
   setPhoneBrightness(clientId: string, level: number | null): Promise<OperationResult>
+  setScreenshotDirectory(path: string): Promise<OperationResult>
+  pickScreenshotDirectory(): Promise<string | null>
   exportConfig(): Promise<OperationResult>
   importConfig(): Promise<SaveConfigResult>
   openLogs(): Promise<void>
@@ -136,6 +140,8 @@ export const IPC = {
   setMinimizeToTray: 'phonedek:set-minimize-to-tray',
   setPairHost: 'phonedek:set-pair-host',
   setPhoneBrightness: 'phonedek:set-phone-brightness',
+  setScreenshotDirectory: 'phonedek:set-screenshot-directory',
+  pickScreenshotDirectory: 'phonedek:pick-screenshot-directory',
   exportConfig: 'phonedek:export-config',
   importConfig: 'phonedek:import-config',
   openLogs: 'phonedek:open-logs',

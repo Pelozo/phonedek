@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { randomInt } from 'node:crypto'
 import { DEFAULT_HTTP_PORT } from '@phonedek/shared'
 import type { Logger } from './logger'
@@ -13,6 +13,8 @@ export interface AppSettings {
   minimizeToTray: boolean
   /** Optional LAN address to advertise in the QR code. Empty = auto. */
   pairHost: string
+  /** macOS full-screen capture folder. Empty = OS Desktop. */
+  screenshotDirectory: string
 }
 
 /** Four-digit pairing PIN (the QR/link is the low-friction path). */
@@ -28,6 +30,7 @@ export function defaultSettings(): AppSettings {
     launchAtLogin: false,
     minimizeToTray: false,
     pairHost: '',
+    screenshotDirectory: '',
   }
 }
 
@@ -47,6 +50,14 @@ function sanitize(input: Partial<AppSettings> | null | undefined): AppSettings {
     typeof input.pairHost === 'string' && /^[A-Za-z0-9.-]{1,253}$/.test(input.pairHost.trim())
       ? input.pairHost.trim()
       : ''
+  const rawScreenshotDirectory =
+    typeof input.screenshotDirectory === 'string' ? input.screenshotDirectory.trim() : ''
+  const screenshotDirectory =
+    rawScreenshotDirectory &&
+    rawScreenshotDirectory.length <= 4096 &&
+    isAbsolute(rawScreenshotDirectory)
+      ? rawScreenshotDirectory
+      : ''
   return {
     port,
     token,
@@ -55,6 +66,7 @@ function sanitize(input: Partial<AppSettings> | null | undefined): AppSettings {
     minimizeToTray:
       typeof input.minimizeToTray === 'boolean' ? input.minimizeToTray : defaults.minimizeToTray,
     pairHost,
+    screenshotDirectory,
   }
 }
 

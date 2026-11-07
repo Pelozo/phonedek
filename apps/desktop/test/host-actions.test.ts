@@ -112,6 +112,68 @@ describe('macOS screenshot', () => {
     }
   })
 
+  it('creates and uses a configured screenshot folder', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'phonedek-shot-'))
+    tempDirs.push(home)
+    const folder = join(home, 'captures', 'nested')
+    const captured: string[] = []
+    const host = createHostActions({
+      platform: 'darwin',
+      homeDir: home,
+      screenshotDirectory: ` ${folder} `,
+      captureScreen: async (path) => {
+        captured.push(path)
+      },
+    })
+
+    const saved = await host.screenshot()
+    expect(saved).toBe(captured[0])
+    expect(dirname(saved)).toBe(folder)
+    expect(existsSync(folder)).toBe(true)
+    expect(basename(saved)).toMatch(/^PhoneDeck Screenshot \d{4}-\d{2}-\d{2} at \d{2}\.\d{2}\.\d{2}\.png$/)
+  })
+
+  it('reads the screenshot folder at capture time', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'phonedek-shot-'))
+    tempDirs.push(home)
+    let folder = join(home, 'first')
+    const captured: string[] = []
+    const host = createHostActions({
+      platform: 'darwin',
+      homeDir: home,
+      getScreenshotDirectory: () => folder,
+      captureScreen: async (path) => {
+        captured.push(path)
+      },
+    })
+
+    const first = await host.screenshot()
+    folder = join(home, 'second')
+    const second = await host.screenshot()
+    expect(dirname(first)).toBe(join(home, 'first'))
+    expect(dirname(second)).toBe(join(home, 'second'))
+    expect(captured).toEqual([first, second])
+  })
+
+  it('includes the destination folder when a configured capture fails', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'phonedek-shot-'))
+    tempDirs.push(home)
+    const folder = join(home, 'captures')
+    const host = createHostActions({
+      platform: 'darwin',
+      homeDir: home,
+      screenshotDirectory: folder,
+      captureScreen: async () => {
+        throw new Error('xpc connection interrupted')
+      },
+    })
+
+    const error = await host.screenshot().catch((value: unknown) => value)
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toContain(folder)
+    expect((error as Error).message).toMatch(/Screen Recording/)
+  })
+
   it('turns capture failures into an actionable error', async () => {
     const home = mkdtempSync(join(tmpdir(), 'phonedek-shot-'))
     tempDirs.push(home)
