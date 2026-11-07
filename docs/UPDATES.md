@@ -34,6 +34,7 @@ The updater cannot install itself into a build that does not contain it.
 - **0.1.3 is the first updater-enabled Windows build.** Users on 0.1.2 or older
   must install the 0.1.3 `PhoneDeck-<version>-Setup.exe` manually once.
 - From 0.1.3 onward, later versions can be installed from inside the app.
+- **0.1.4 is the first release delivered through the updater** (from 0.1.3).
 
 Keep the version in the root `package.json`, `apps/desktop/package.json`, and the
 desktop `APP_VERSION` value in sync with the release tag. The updater compares

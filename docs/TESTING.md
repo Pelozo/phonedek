@@ -59,3 +59,11 @@ Report issues with `%APPDATA%\PhoneDeck\phonedek.log`, the Windows version and t
 - PhoneDeck cannot send input to an app running as Administrator unless PhoneDeck is elevated.
 - Games with anti-cheat may ignore synthetic input.
 - The installer is unsigned; SmartScreen warns on first run.
+
+## macOS preview
+
+- [ ] Drag the arm64 DMG to Applications, open once via Gatekeeper.
+- [ ] Grant Accessibility; key/text/media/mouse actions work.
+- [ ] Grant Local Network; QR pairing/discovery works.
+- [ ] Launch `.app` with arguments, URL and shell command actions.
+- [ ] Close the window; dock icon reopens it and the server stays alive; Cmd+Q stops it.

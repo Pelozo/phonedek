@@ -81,3 +81,14 @@
 - Next: when macOS agent finishes, run desktop gates + CI (macos job), commit, then
   release v0.1.4 (macOS + Windows/Android). v0.1.4 will also be the first real
   auto-update test from 0.1.3. Keep latest.yml/blockmap in every Windows release.
+
+
+## 2026-11-07 23:45
+
+- macOS implementation complete and CI-green (Swift CGEvent helper, mac arm64 DMG/ZIP,
+  app menu/lifecycle, host .app args, Accessibility handling, unsigned updater disabled).
+- Icon picker shipped: 8 categories / 180+ emoji choices, custom input, clear.
+- anti-ai-ui skill copied to project `.opencode`; `.opencode/` is gitignored and untracked.
+- v0.1.4 release prepared (Windows installer + latest.yml/blockmap, Windows/Android/updater,
+  Android APK, mac arm64 DMG/ZIP + latest-mac.yml/blockmaps, checksums).
+- v0.1.4 is the first release delivered through the v0.1.3 in-app updater.

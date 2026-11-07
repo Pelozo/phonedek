@@ -2,13 +2,13 @@
 
 [![Build](https://github.com/Pelozo/phonedek/actions/workflows/build.yml/badge.svg)](https://github.com/Pelozo/phonedek/actions/workflows/build.yml)
 
-**Turn an Android phone into a wireless Stream Deck for your Windows PC.**
+**Turn an Android phone into a wireless Stream Deck for your Windows PC or Mac.**
 
 PhoneDeck is two apps that work together:
 
 | App | Platform | What it does |
 | --- | --- | --- |
-| **PhoneDeck Desktop** | Windows (Electron) | Owns the configuration, hosts a LAN server, records macros, and executes shortcuts/app launches/commands on the PC. |
+| **PhoneDeck Desktop** | Windows 10/11 · macOS 12+ Apple Silicon (unsigned preview) | Owns the configuration, hosts a LAN server, records macros, and executes shortcuts/app launches/commands on the computer. |
 | **PhoneDeck Android** | Android 8+ (Kotlin/Compose) | Renders the deck fullscreen, pairs over Wi-Fi, sends presses, and handles page navigation instantly. |
 
 No cloud, no account, no vendor lock-in: the phone talks directly to your PC over the local network.
@@ -19,7 +19,7 @@ No cloud, no account, no vendor lock-in: the phone talks directly to your PC ove
 
 ```
 ┌──────────────────────────┐        Wi-Fi / LAN         ┌──────────────────────────┐
-│  Android phone           │  HTTP config + WebSocket   │  Windows PC              │
+│  Android phone           │  HTTP config + WebSocket   │  Windows PC / Mac        │
 │  - fullscreen deck       │ ◄────────────────────────► │  - deck editor           │
 │  - QR pairing            │      button presses        │  - macro recorder        │
 │  - offline config cache  │                            │  - action executor       │
@@ -28,7 +28,7 @@ No cloud, no account, no vendor lock-in: the phone talks directly to your PC ove
                                                      SendInput / app launch /
                                                      URL / shell command
                                                                   ▼
-                                                            Windows apps
+                                                            Desktop apps
 ```
 
 ## Features
@@ -37,7 +37,7 @@ No cloud, no account, no vendor lock-in: the phone talks directly to your PC ove
 
 - **Profiles and pages** — multiple PCs/layouts, up to 20 pages per profile, instant page switching.
 - **Any grid you want** — 1×1 to 10×10 cells; buttons snap to slots; drag to rearrange or swap.
-- **Buttons** — label, sublabel, emoji icon, solid/gradient/image background, dark overlay, custom text color, per-button radius.
+- **Buttons** — label, sublabel, 130+ categorized emoji icons (or paste your own), solid/gradient/image background, dark overlay, custom text color, per-button radius.
 - **Backgrounds** — curated gradients, color presets, or import your own PNG/JPG/WEBP/GIF/BMP (up to 25 MB). Images are copied into the app's data folder and served to the phone.
 - **Live preview** — the editor canvas is the same grid the phone renders, including slots and overflow warnings.
 - **Backups** — export/import a ZIP containing the config and every background image; legacy JSON configs still import.
@@ -65,10 +65,11 @@ No cloud, no account, no vendor lock-in: the phone talks directly to your PC ove
 
 ## Quick start (Windows)
 
-> The easiest path is the [latest release](https://github.com/Pelozo/phonedek/releases/latest) or a GitHub Actions artifact. Every push builds a Windows installer and a debug APK.
+> The easiest path is the [latest release](https://github.com/Pelozo/phonedek/releases/latest) or a GitHub Actions artifact. Every push builds a Windows installer, a macOS arm64 DMG/ZIP, and a debug APK.
 
 1. Open the **Actions** tab → latest **Build** run → download:
    - `PhoneDeck-Windows` (installer `.exe`)
+   - `PhoneDeck-macOS-arm64` (unsigned `.dmg` / `.zip`)
    - `PhoneDeck-Android` (`app-debug.apk`)
 2. Run the installer. Windows SmartScreen may warn because the build is unsigned — choose **More info → Run anyway**.
 3. Allow PhoneDeck through **Windows Defender Firewall** for **Private networks** when prompted.
@@ -91,7 +92,7 @@ The phone and PC must be on the same Wi-Fi. Guest networks with client isolation
 
 ### Desktop
 
-Requirements: **Node.js 22+**, npm, Windows 10/11 for the final app (development also works on Linux/macOS for the UI, but key injection is Windows-first).
+Requirements: **Node.js 22+**, npm. Final apps: Windows 10/11 x64 or macOS 12+ Apple Silicon (unsigned arm64 DMG). Development also works on Linux for the UI; Linux key injection uses xdotool.
 
 ```bash
 npm install
@@ -102,7 +103,9 @@ npm run build
 npm run dist:win   # NSIS installer in apps/desktop/release
 ```
 
-On Linux, `npm install` may need a filesystem that supports `chmod` (avoid NTFS/FUSE mounts for `node_modules`). On Windows this is not an issue.
+On macOS, build the CGEvent helper before packaging: `npm run build:mac-helper -w @phonedek/desktop`, then `npm run dist:mac -w @phonedek/desktop`. The first app launch requires **Accessibility** permission; see [docs/MACOS.md](docs/MACOS.md).
+
+On Linux, `npm install` may need a filesystem that supports `chmod` (avoid NTFS/FUSE mounts for `node_modules`).
 
 ### Android
 
@@ -170,6 +173,15 @@ docs/
 
 - **Android:** Settings → Diagnostics / logs (also available from the pairing screen) shows the last pairing/network events and has **Copy**. Or use `adb logcat -s PhoneDeck`.
 - **Windows:** Settings → Open logs (`%APPDATA%\PhoneDeck\phonedek.log`).
+
+## macOS (unsigned preview)
+
+1. Download `PhoneDeck-0.1.4-arm64.dmg` from the release and drag PhoneDeck to **Applications**.
+2. Gatekeeper: right-click the app → **Open**, or use **System Settings → Privacy & Security → Open Anyway**.
+3. Allow **Accessibility** (System Settings → Privacy & Security → Accessibility) for key/mouse actions, and **Local Network** on macOS 15+ for pairing/discovery.
+4. Pair with the 4-digit PIN or QR exactly like Windows.
+
+The macOS build is unsigned and arm64-only; in-app auto-update is disabled there until Developer ID signing/notarization. See [docs/MACOS.md](docs/MACOS.md).
 
 ## Manual testing
 
