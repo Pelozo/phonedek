@@ -20,6 +20,9 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -247,8 +250,11 @@ fun VideoSurface(
     onError: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     var failed by remember(url) { mutableStateOf(false) }
     val currentOnError by rememberUpdatedState(onError)
+    val currentActive by rememberUpdatedState(isActive)
+    val currentFailed by rememberUpdatedState(failed)
     val exoPlayer = remember(url) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(url))
@@ -262,7 +268,7 @@ fun VideoSurface(
         exoPlayer.prepare()
     }
 
-    DisposableEffect(exoPlayer) {
+    DisposableEffect(exoPlayer, lifecycleOwner) {
         val listener = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 val message = error.message?.let(Diag::redactUrl) ?: "no message"
@@ -272,8 +278,19 @@ fun VideoSurface(
                 currentOnError()
             }
         }
+        val lifecycleObserver = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> exoPlayer.pause()
+                Lifecycle.Event.ON_START -> {
+                    if (currentActive && autoplay && !currentFailed) exoPlayer.play()
+                }
+                else -> Unit
+            }
+        }
         exoPlayer.addListener(listener)
+        lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
             exoPlayer.removeListener(listener)
             exoPlayer.release()
         }
@@ -295,6 +312,9 @@ fun VideoSurface(
             factory = { viewContext ->
                 PlayerView(viewContext).apply {
                     useController = false
+                    isClickable = false
+                    isFocusable = false
+                    importantForAccessibility = android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
                     resizeMode = resizeModeFor(fit)
                     setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
                     player = exoPlayer
