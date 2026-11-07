@@ -4,25 +4,56 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.graphics.Color
 import android.os.Bundle
+import android.view.OrientationEventListener
+import android.view.Surface
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.phonedek.app.data.DEFAULT_HTTP_PORT
+import com.phonedek.app.ui.LocalButtonContentRotation
 import com.phonedek.app.ui.MainViewModel
 import com.phonedek.app.ui.PhoneDeckApp
+import com.phonedek.app.ui.buttonContentRotation
 import com.phonedek.app.util.Diag
 
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
+
+    // Physical device orientation in degrees (0/90/180/270), independent of the
+    // landscape-locked activity configuration.
+    private var physicalOrientation by mutableIntStateOf(
+        OrientationEventListener.ORIENTATION_UNKNOWN,
+    )
+    private var lastOrientationBucket = Int.MIN_VALUE
+    private val orientationListener by lazy {
+        object : OrientationEventListener(this) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == OrientationEventListener.ORIENTATION_UNKNOWN) {
+                    physicalOrientation = OrientationEventListener.ORIENTATION_UNKNOWN
+                    lastOrientationBucket = Int.MIN_VALUE
+                    return
+                }
+                val bucket = ((orientation + 45) / 90) % 4
+                if (bucket != lastOrientationBucket) {
+                    lastOrientationBucket = bucket
+                    physicalOrientation = bucket * 90
+                }
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,6 +66,18 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val state by viewModel.state.collectAsStateWithLifecycle()
+            val view = LocalView.current
+            val displayRotation = view.display?.rotation ?: Surface.ROTATION_0
+            val contentRotation = if (state.ready) {
+                buttonContentRotation(
+                    physicalOrientation = physicalOrientation,
+                    displayRotation = displayRotation,
+                    lockLandscape = state.lockLandscape,
+                    enabled = state.rotateContentInPortrait,
+                )
+            } else {
+                0f
+            }
             LaunchedEffect(state.lockLandscape) {
                 this@MainActivity.requestedOrientation = if (state.lockLandscape) {
                     ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
@@ -43,7 +86,11 @@ class MainActivity : ComponentActivity() {
                 }
                 Diag.i("Orientation lock landscape=${state.lockLandscape}")
             }
-            PhoneDeckApp(viewModel = viewModel, state = state)
+            CompositionLocalProvider(
+                LocalButtonContentRotation provides contentRotation,
+            ) {
+                PhoneDeckApp(viewModel = viewModel, state = state)
+            }
         }
 
         Diag.i("MainActivity created; deep-link=${intent.data != null}")
@@ -55,6 +102,21 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         Diag.i("New intent received; deep-link=${intent.data != null}")
         handleIntent(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (orientationListener.canDetectOrientation()) {
+            orientationListener.enable()
+        } else {
+            physicalOrientation = OrientationEventListener.ORIENTATION_UNKNOWN
+            lastOrientationBucket = Int.MIN_VALUE
+        }
+    }
+
+    override fun onPause() {
+        orientationListener.disable()
+        super.onPause()
     }
 
     override fun onStart() {

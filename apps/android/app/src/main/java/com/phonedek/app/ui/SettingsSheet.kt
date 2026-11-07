@@ -67,6 +67,7 @@ fun SettingsSheet(
     onKeepScreenOn: (Boolean) -> Unit,
     onHideTopBarWhenConnected: (Boolean) -> Unit,
     onLockLandscape: (Boolean) -> Unit,
+    onRotateContentInPortrait: (Boolean) -> Unit,
     confirmChangeOnOpen: Boolean = false,
 ) {
     val configuration = LocalConfiguration.current
@@ -97,6 +98,7 @@ fun SettingsSheet(
             onKeepScreenOn = onKeepScreenOn,
             onHideTopBarWhenConnected = onHideTopBarWhenConnected,
             onLockLandscape = onLockLandscape,
+            onRotateContentInPortrait = onRotateContentInPortrait,
             onRefreshLogs = refreshLogs,
             onCopyLogs = copyLogs,
             onClearLogs = clearLogs,
@@ -111,6 +113,7 @@ fun SettingsSheet(
             onKeepScreenOn = onKeepScreenOn,
             onHideTopBarWhenConnected = onHideTopBarWhenConnected,
             onLockLandscape = onLockLandscape,
+            onRotateContentInPortrait = onRotateContentInPortrait,
             onRefreshLogs = refreshLogs,
             onCopyLogs = copyLogs,
             onClearLogs = clearLogs,
@@ -139,6 +142,7 @@ private fun SettingsBottomSheet(
     onKeepScreenOn: (Boolean) -> Unit,
     onHideTopBarWhenConnected: (Boolean) -> Unit,
     onLockLandscape: (Boolean) -> Unit,
+    onRotateContentInPortrait: (Boolean) -> Unit,
     onRefreshLogs: () -> Unit,
     onCopyLogs: () -> Unit,
     onClearLogs: () -> Unit,
@@ -180,6 +184,7 @@ private fun SettingsBottomSheet(
                 onKeepScreenOn = onKeepScreenOn,
                 onHideTopBarWhenConnected = onHideTopBarWhenConnected,
                 onLockLandscape = onLockLandscape,
+                onRotateContentInPortrait = onRotateContentInPortrait,
             )
             Spacer(Modifier.height(20.dp))
             HorizontalDivider(color = Hairline)
@@ -206,6 +211,7 @@ private fun SettingsConsolePanel(
     onKeepScreenOn: (Boolean) -> Unit,
     onHideTopBarWhenConnected: (Boolean) -> Unit,
     onLockLandscape: (Boolean) -> Unit,
+    onRotateContentInPortrait: (Boolean) -> Unit,
     onRefreshLogs: () -> Unit,
     onCopyLogs: () -> Unit,
     onClearLogs: () -> Unit,
@@ -266,6 +272,7 @@ private fun SettingsConsolePanel(
                                 onKeepScreenOn = onKeepScreenOn,
                                 onHideTopBarWhenConnected = onHideTopBarWhenConnected,
                                 onLockLandscape = onLockLandscape,
+                                onRotateContentInPortrait = onRotateContentInPortrait,
                             )
                         }
                         Box(
@@ -377,6 +384,7 @@ private fun SettingsBehaviorSection(
     onKeepScreenOn: (Boolean) -> Unit,
     onHideTopBarWhenConnected: (Boolean) -> Unit,
     onLockLandscape: (Boolean) -> Unit,
+    onRotateContentInPortrait: (Boolean) -> Unit,
 ) {
     ConsoleSectionLabel(index = "02", label = "BEHAVIOR")
     Spacer(Modifier.height(4.dp))
@@ -387,6 +395,14 @@ private fun SettingsBehaviorSection(
             "Turn off to allow portrait.",
         checked = state.lockLandscape,
         onCheckedChange = onLockLandscape,
+    )
+    HorizontalDivider(color = Hairline)
+    SettingToggle(
+        title = "Rotate button contents in portrait",
+        description = "Keeps icon/label text upright when the phone is turned vertical; " +
+            "layout stays landscape.",
+        checked = state.rotateContentInPortrait,
+        onCheckedChange = onRotateContentInPortrait,
     )
     HorizontalDivider(color = Hairline)
     SettingToggle(

@@ -260,6 +260,7 @@ fun DeckScreen(state: UiState, viewModel: MainViewModel) {
             onKeepScreenOn = viewModel::setKeepScreenOn,
             onHideTopBarWhenConnected = viewModel::setHideTopBarWhenConnected,
             onLockLandscape = viewModel::setLockLandscape,
+            onRotateContentInPortrait = viewModel::setRotateContentInPortrait,
             confirmChangeOnOpen = settingsChangeServerOnOpen,
         )
     }

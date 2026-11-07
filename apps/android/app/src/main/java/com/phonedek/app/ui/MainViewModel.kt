@@ -47,6 +47,7 @@ data class UiState(
     val keepScreenOn: Boolean = true,
     val hideTopBarWhenConnected: Boolean = true,
     val lockLandscape: Boolean = true,
+    val rotateContentInPortrait: Boolean = true,
     val pairingBusy: Boolean = false,
     val pairingError: String? = null,
     val pairingDraft: PairingDraft? = null,
@@ -309,11 +310,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val keepScreenOn = _state.value.keepScreenOn
         val hideTopBarWhenConnected = _state.value.hideTopBarWhenConnected
         val lockLandscape = _state.value.lockLandscape
+        val rotateContentInPortrait = _state.value.rotateContentInPortrait
         _state.value = UiState(
             ready = true,
             keepScreenOn = keepScreenOn,
             hideTopBarWhenConnected = hideTopBarWhenConnected,
             lockLandscape = lockLandscape,
+            rotateContentInPortrait = rotateContentInPortrait,
             connection = ConnectionStatus.OFFLINE,
         )
         viewModelScope.launch {
@@ -335,6 +338,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setLockLandscape(enabled: Boolean) {
         _state.update { it.copy(lockLandscape = enabled) }
         viewModelScope.launch { runCatching { prefs.setLockLandscape(enabled) } }
+    }
+
+    fun setRotateContentInPortrait(enabled: Boolean) {
+        _state.update { it.copy(rotateContentInPortrait = enabled) }
+        viewModelScope.launch { runCatching { prefs.setRotateContentInPortrait(enabled) } }
     }
 
     /**
@@ -410,6 +418,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             keepScreenOn = stored.keepScreenOn,
             hideTopBarWhenConnected = stored.hideTopBarWhenConnected,
             lockLandscape = stored.lockLandscape,
+            rotateContentInPortrait = stored.rotateContentInPortrait,
         )
         loaded = true
 

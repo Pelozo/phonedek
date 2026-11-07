@@ -20,6 +20,7 @@ data class StoredSettings(
     val keepScreenOn: Boolean,
     val hideTopBarWhenConnected: Boolean,
     val lockLandscape: Boolean,
+    val rotateContentInPortrait: Boolean,
     val lastProfileId: String?,
     val lastPageId: String?,
 )
@@ -34,6 +35,8 @@ class PrefsRepository(private val context: Context) {
         val HIDE_TOP_BAR_WHEN_CONNECTED =
             booleanPreferencesKey("hide_top_bar_when_connected")
         val LOCK_LANDSCAPE = booleanPreferencesKey("lock_landscape")
+        val ROTATE_CONTENT_IN_PORTRAIT =
+            booleanPreferencesKey("rotate_content_in_portrait")
         val LAST_PROFILE = stringPreferencesKey("last_profile")
         val LAST_PAGE = stringPreferencesKey("last_page")
     }
@@ -80,6 +83,7 @@ class PrefsRepository(private val context: Context) {
             hideTopBarWhenConnected = prefs[Keys.HIDE_TOP_BAR_WHEN_CONNECTED] ?: true,
             // The deck is a landscape console by default.
             lockLandscape = prefs[Keys.LOCK_LANDSCAPE] ?: true,
+            rotateContentInPortrait = prefs[Keys.ROTATE_CONTENT_IN_PORTRAIT] ?: true,
             lastProfileId = prefs[Keys.LAST_PROFILE]?.takeIf { it.isNotBlank() },
             lastPageId = prefs[Keys.LAST_PAGE]?.takeIf { it.isNotBlank() },
         )
@@ -122,6 +126,10 @@ class PrefsRepository(private val context: Context) {
 
     suspend fun setLockLandscape(enabled: Boolean) {
         context.deckDataStore.edit { prefs -> prefs[Keys.LOCK_LANDSCAPE] = enabled }
+    }
+
+    suspend fun setRotateContentInPortrait(enabled: Boolean) {
+        context.deckDataStore.edit { prefs -> prefs[Keys.ROTATE_CONTENT_IN_PORTRAIT] = enabled }
     }
 
     suspend fun setLastPage(profileId: String, pageId: String) {

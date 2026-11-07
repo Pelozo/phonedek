@@ -1,5 +1,6 @@
 package com.phonedek.app.ui
 
+import android.view.LayoutInflater
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,6 +33,7 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.phonedek.app.R
 import com.phonedek.app.data.BackgroundDto
 import com.phonedek.app.data.Pairing
 import com.phonedek.app.net.assetUrl
@@ -246,6 +248,7 @@ fun VideoSurface(
     muted: Boolean,
     autoplay: Boolean,
     isActive: Boolean,
+    useTextureView: Boolean = false,
     modifier: Modifier = Modifier,
     onError: () -> Unit = {},
 ) {
@@ -310,7 +313,13 @@ fun VideoSurface(
         AndroidView(
             modifier = modifier,
             factory = { viewContext ->
-                PlayerView(viewContext).apply {
+                val view = if (useTextureView) {
+                    LayoutInflater.from(viewContext)
+                        .inflate(R.layout.view_video_texture, null) as PlayerView
+                } else {
+                    PlayerView(viewContext)
+                }
+                view.apply {
                     useController = false
                     isClickable = false
                     isFocusable = false

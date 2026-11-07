@@ -64,6 +64,7 @@ fun DeckButtonView(
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val haptics = LocalHapticFeedback.current
+    val contentRotation = LocalButtonContentRotation.current
 
     val media = button.iconMedia
     val mediaUrl = remember(media?.asset, pairing?.host, pairing?.port, pairing?.token) {
@@ -138,7 +139,9 @@ fun DeckButtonView(
             val mediaFit = if (media?.fit == "contain") ContentScale.Fit else ContentScale.Crop
 
             Column(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { rotationZ = contentRotation },
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -218,6 +221,7 @@ private fun ButtonMediaIcon(
             muted = media.muted,
             autoplay = true,
             isActive = isActive,
+            useTextureView = true,
             modifier = modifier,
             onError = onError,
         )
