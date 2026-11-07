@@ -65,7 +65,17 @@ describe('action packs', () => {
 
   it('exports the requested packs and presets', () => {
     expect(ACTION_PACKS.map((pack) => pack.id)).toEqual(
-      expect.arrayContaining(['chrome', 'obs', 'vscode', 'jetbrains', 'opencode', 'system', 'media']),
+      expect.arrayContaining([
+        'chrome',
+        'obs',
+        'vscode',
+        'jetbrains',
+        'opencode',
+        'wow',
+        'gw2',
+        'system',
+        'media',
+      ]),
     )
     expect(findActionPack('chrome')?.presets.length).toBeGreaterThan(10)
     expect(findActionPack('obs')?.presets.length).toBeGreaterThan(0)
@@ -149,6 +159,23 @@ describe('action packs', () => {
     ])
 
     expect(findActionPack('jetbrains')?.presets.length).toBeGreaterThanOrEqual(15)
+  })
+
+  it('includes WoW and Guild Wars 2 default gameplay keys', () => {
+    expect(resolvePresetActions(findActionPreset('wow-interact')!, 'win32')).toEqual([
+      { type: 'hotkey', keys: ['F'] },
+    ])
+    expect(resolvePresetActions(findActionPreset('wow-target-enemy')!, 'win32')).toEqual([
+      { type: 'hotkey', keys: ['TAB'] },
+    ])
+    expect(resolvePresetActions(findActionPreset('gw2-weapon-swap')!, 'win32')).toEqual([
+      { type: 'hotkey', keys: ['`'] },
+    ])
+    expect(resolvePresetActions(findActionPreset('gw2-heal')!, 'darwin')).toEqual([
+      { type: 'hotkey', keys: ['6'] },
+    ])
+    expect(findActionPack('wow')?.presets.length).toBeGreaterThanOrEqual(20)
+    expect(findActionPack('gw2')?.presets.length).toBeGreaterThanOrEqual(15)
   })
 
   it('builds OpenCode leader-sequence macros and keeps them available everywhere', () => {
@@ -300,6 +327,8 @@ describe('action packs', () => {
       'vscode',
       'jetbrains',
       'opencode',
+      'wow',
+      'gw2',
       'system',
       'media',
     ])

@@ -370,6 +370,62 @@ const opencode: ActionPack = {
   ],
 }
 
+const wow: ActionPack = {
+  id: 'wow',
+  name: 'World of Warcraft',
+  description:
+    'Common WoW default keybinds. Action-bar slots and UI keys vary by character and addons — remap in-game if needed.',
+  presets: [
+    hotkeyPreset('wow-action-1', 'Action bar 1', 'Use action bar slot 1.', '1️⃣', ['1']),
+    hotkeyPreset('wow-action-2', 'Action bar 2', 'Use action bar slot 2.', '2️⃣', ['2']),
+    hotkeyPreset('wow-action-3', 'Action bar 3', 'Use action bar slot 3.', '3️⃣', ['3']),
+    hotkeyPreset('wow-action-4', 'Action bar 4', 'Use action bar slot 4.', '4️⃣', ['4']),
+    hotkeyPreset('wow-action-5', 'Action bar 5', 'Use action bar slot 5.', '5️⃣', ['5']),
+    hotkeyPreset('wow-jump', 'Jump', 'Jump (Space).', '🦘', ['SPACE']),
+    hotkeyPreset('wow-interact', 'Interact', 'Interact with target (F).', '🤝', ['F']),
+    hotkeyPreset('wow-target-enemy', 'Target nearest enemy', 'Target nearest enemy (Tab).', '🎯', ['TAB']),
+    hotkeyPreset('wow-character', 'Character sheet', 'Open character sheet (C).', '👤', ['C']),
+    hotkeyPreset('wow-spellbook', 'Spellbook', 'Open spellbook (P).', '📖', ['P']),
+    hotkeyPreset('wow-talents', 'Talents', 'Open talents (N).', '🌟', ['N']),
+    hotkeyPreset('wow-quest-log', 'Quest log', 'Open quest log (L).', '📜', ['L']),
+    hotkeyPreset('wow-map', 'World map', 'Open world map (M).', '🗺️', ['M']),
+    hotkeyPreset('wow-inventory', 'Backpack', 'Open inventory (B).', '🎒', ['B']),
+    hotkeyPreset('wow-social', 'Social', 'Open social panel (O).', '💬', ['O']),
+    hotkeyPreset('wow-guild', 'Guild & communities', 'Open guild panel (J).', '🛡️', ['J']),
+    hotkeyPreset('wow-collections', 'Collections', 'Open collections (Shift+P).', '🐎', ['SHIFT', 'P']),
+    hotkeyPreset('wow-achievements', 'Achievements', 'Open achievements (Y).', '🏆', ['Y']),
+    hotkeyPreset('wow-dungeon-finder', 'Dungeon finder', 'Open group finder (I).', '👥', ['I']),
+    hotkeyPreset('wow-toggle-ui', 'Toggle UI', 'Hide the interface (Alt+Z).', '🖥️', ['ALT', 'Z']),
+    hotkeyPreset('wow-screenshot', 'Screenshot', 'Take a screenshot (Print Screen).', '📸', ['PRINTSCREEN']),
+  ],
+}
+
+const gw2: ActionPack = {
+  id: 'gw2',
+  name: 'Guild Wars 2',
+  description:
+    'Common Guild Wars 2 defaults. Skill slots and mount keys can be remapped in-game; adjust to your build.',
+  presets: [
+    hotkeyPreset('gw2-heal', 'Heal skill', 'Use healing skill (6).', '💚', ['6']),
+    hotkeyPreset('gw2-utility-1', 'Utility 1', 'Use utility skill 1 (7).', '7️⃣', ['7']),
+    hotkeyPreset('gw2-utility-2', 'Utility 2', 'Use utility skill 2 (8).', '8️⃣', ['8']),
+    hotkeyPreset('gw2-utility-3', 'Utility 3', 'Use utility skill 3 (9).', '9️⃣', ['9']),
+    hotkeyPreset('gw2-elite', 'Elite skill', 'Use elite skill (0).', '0️⃣', ['0']),
+    hotkeyPreset('gw2-dodge', 'Dodge', 'Dodge (V).', '💨', ['V']),
+    hotkeyPreset('gw2-interact', 'Interact', 'Interact with target (F).', '🤝', ['F']),
+    hotkeyPreset('gw2-weapon-swap', 'Weapon swap', 'Swap weapon sets (`).', '🔄', ['`']),
+    hotkeyPreset('gw2-mount', 'Mount', 'Mount up (X).', '🐎', ['X']),
+    hotkeyPreset('gw2-target-enemy', 'Target nearest enemy', 'Target nearest enemy (Tab).', '🎯', ['TAB']),
+    hotkeyPreset('gw2-jump', 'Jump', 'Jump (Space).', '🦘', ['SPACE']),
+    hotkeyPreset('gw2-inventory', 'Inventory', 'Open inventory (I).', '🎒', ['I']),
+    hotkeyPreset('gw2-hero', 'Hero panel', 'Open hero panel (H).', '👤', ['H']),
+    hotkeyPreset('gw2-map', 'World map', 'Open world map (M).', '🗺️', ['M']),
+    hotkeyPreset('gw2-guild', 'Guild', 'Open guild panel (G).', '🛡️', ['G']),
+    hotkeyPreset('gw2-options', 'Options', 'Open game options (F11).', '⚙️', ['F11']),
+    hotkeyPreset('gw2-screenshot', 'Screenshot', 'Take a screenshot (Print Screen).', '📸', ['PRINTSCREEN']),
+  ],
+}
+
 const system: ActionPack = {
   id: 'system',
   name: 'System',
@@ -451,7 +507,17 @@ const mediaPack: ActionPack = {
   ],
 }
 
-export const ACTION_PACKS: ActionPack[] = [chrome, obs, vscode, jetbrains, opencode, system, mediaPack]
+export const ACTION_PACKS: ActionPack[] = [
+  chrome,
+  obs,
+  vscode,
+  jetbrains,
+  opencode,
+  wow,
+  gw2,
+  system,
+  mediaPack,
+]
 
 export function findActionPack(packId: string): ActionPack | undefined {
   return ACTION_PACKS.find((pack) => pack.id === packId)
