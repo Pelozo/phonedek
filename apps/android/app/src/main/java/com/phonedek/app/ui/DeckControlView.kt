@@ -1,9 +1,9 @@
 package com.phonedek.app.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -62,6 +62,7 @@ fun DeckControlView(
     textColor: Color,
     onInput: (phase: String, delta: Float) -> Unit,
     onInteractingChange: (Boolean) -> Unit,
+    onTap: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val minValue = control.min ?: 0f
@@ -125,6 +126,7 @@ fun DeckControlView(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .clickable(onClick = onTap)
                 .graphicsLayer { rotationZ = contentRotation },
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -152,22 +154,8 @@ fun DeckControlView(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                // Disable the pager as soon as a finger lands, before the
-                // slider/dial drag detector crosses touch slop.
-                .pointerInput(Unit) {
-                    awaitEachGesture {
-                        awaitFirstDown(
-                            requireUnconsumed = false,
-                            pass = PointerEventPass.Initial,
-                        )
-                        onInteractingChange(true)
-                        while (true) {
-                            val event = awaitPointerEvent(PointerEventPass.Initial)
-                            if (event.changes.none { it.pressed }) break
-                        }
-                        onInteractingChange(false)
-                    }
-                }
+                // Consume the gesture in the Initial pass so the tile click and
+                // horizontal pager cannot steal it before the control updates.
                 .pointerInput(
                     control.kind,
                     control.axis,
@@ -177,46 +165,49 @@ fun DeckControlView(
                     range,
                     stepValue,
                 ) {
-                    if (control.kind == "dial") {
-                        var lastAngle = 0f
-                        var angleAccumulator = 0f
+                    awaitEachGesture {
+                        val down = awaitFirstDown(
+                            requireUnconsumed = false,
+                            pass = PointerEventPass.Initial,
+                        )
+                        down.consume()
+                        interacting = true
+                        onInteractingChange(true)
+                        onInput("start", 0f)
 
-                        fun angleAt(position: Offset): Float {
-                            val centerX = size.width / 2f
-                            val centerY = size.height / 2f
-                            return Math.toDegrees(
-                                atan2(
-                                    (position.y - centerY).toDouble(),
-                                    (position.x - centerX).toDouble(),
-                                ),
-                            ).toFloat()
-                        }
-
-                        fun applyDetents(detents: Int) {
-                            if (detents == 0) return
-                            val next = if (control.binding.type == "scroll") {
-                                val wrapped = minValue +
-                                    ((((value + detents * stepValue) - minValue) % range) +
-                                        range) % range
-                                wrapped.coerceIn(minValue, maxValue)
-                            } else {
-                                (value + detents * stepValue).coerceIn(minValue, maxValue)
+                        if (control.kind == "dial") {
+                            fun angleAt(position: Offset): Float {
+                                val centerX = size.width / 2f
+                                val centerY = size.height / 2f
+                                return Math.toDegrees(
+                                    atan2(
+                                        (position.y - centerY).toDouble(),
+                                        (position.x - centerX).toDouble(),
+                                    ),
+                                ).toFloat()
                             }
-                            if (next == value) return
-                            value = next
-                            onInput("move", detents.toFloat())
-                            performDetentHaptic()
-                        }
 
-                        detectDragGestures(
-                            onDragStart = { position ->
-                                interacting = true
-                                onInteractingChange(true)
-                                onInput("start", 0f)
-                                lastAngle = angleAt(position)
-                                angleAccumulator = 0f
-                            },
-                            onDrag = { change, _ ->
+                            fun applyDetents(detents: Int) {
+                                if (detents == 0) return
+                                val next = if (control.binding.type == "scroll") {
+                                    val wrapped = minValue +
+                                        ((((value + detents * stepValue) - minValue) % range) +
+                                            range) % range
+                                    wrapped.coerceIn(minValue, maxValue)
+                                } else {
+                                    (value + detents * stepValue).coerceIn(minValue, maxValue)
+                                }
+                                if (next == value) return
+                                value = next
+                                onInput("move", detents.toFloat())
+                                performDetentHaptic()
+                            }
+
+                            var lastAngle = angleAt(down.position)
+                            var angleAccumulator = 0f
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
                                 change.consume()
                                 val angle = angleAt(change.position)
                                 var delta = angle - lastAngle
@@ -229,75 +220,61 @@ fun DeckControlView(
                                     angleAccumulator -= detents * DIAL_DETENT_DEGREES
                                     applyDetents(detents)
                                 }
-                            },
-                            onDragEnd = {
-                                if (abs(angleAccumulator) >= DIAL_DETENT_DEGREES / 2f) {
-                                    applyDetents(if (angleAccumulator > 0f) 1 else -1)
+                                if (!change.pressed) {
+                                    if (abs(angleAccumulator) >= DIAL_DETENT_DEGREES / 2f) {
+                                        applyDetents(if (angleAccumulator > 0f) 1 else -1)
+                                    }
+                                    break
                                 }
-                                angleAccumulator = 0f
-                                finishGesture()
-                            },
-                            onDragCancel = {
-                                angleAccumulator = 0f
-                                finishGesture()
-                            },
-                        )
-                    } else {
-                        val vertical = control.axis == "vertical"
-                        var lastFraction = fractionOf(value)
-                        var pendingWireDelta = 0f
-
-                        fun flushWholeWire(force: Boolean) {
-                            val whole = pendingWireDelta.toInt().toFloat()
-                            if (whole != 0f) {
-                                pendingWireDelta -= whole
-                                onInput("move", whole)
-                                performDetentHaptic()
-                            } else if (force && abs(pendingWireDelta) >= 0.5f) {
-                                onInput("move", pendingWireDelta)
-                                pendingWireDelta = 0f
-                                performDetentHaptic()
                             }
-                        }
+                        } else {
+                            val vertical = control.axis == "vertical"
+                            var lastFraction = fractionOf(value)
+                            var pendingWireDelta = 0f
 
-                        fun updateFrom(position: Offset) {
-                            val fraction = if (vertical) {
-                                1f - (position.y / size.height.toFloat()).coerceIn(0f, 1f)
-                            } else {
-                                (position.x / size.width.toFloat()).coerceIn(0f, 1f)
+                            fun flushWholeWire(force: Boolean) {
+                                val whole = pendingWireDelta.toInt().toFloat()
+                                if (whole != 0f) {
+                                    pendingWireDelta -= whole
+                                    onInput("move", whole)
+                                    performDetentHaptic()
+                                } else if (force && abs(pendingWireDelta) >= 0.5f) {
+                                    onInput("move", pendingWireDelta)
+                                    pendingWireDelta = 0f
+                                    performDetentHaptic()
+                                }
                             }
-                            val snapped = snap(minValue + fraction * range)
-                            val newFraction = fractionOf(snapped)
-                            val fractionDelta = newFraction - lastFraction
-                            if (fractionDelta == 0f) return
-                            value = snapped
-                            lastFraction = newFraction
-                            pendingWireDelta += fractionDelta * sliderWireScale
-                            flushWholeWire(force = false)
-                        }
 
-                        detectDragGestures(
-                            onDragStart = { position ->
-                                interacting = true
-                                onInteractingChange(true)
-                                onInput("start", 0f)
-                                lastFraction = fractionOf(value)
-                                pendingWireDelta = 0f
-                                updateFrom(position)
-                            },
-                            onDrag = { change, _ ->
+                            fun updateFrom(position: Offset) {
+                                val fraction = if (vertical) {
+                                    1f - (position.y / size.height.toFloat()).coerceIn(0f, 1f)
+                                } else {
+                                    (position.x / size.width.toFloat()).coerceIn(0f, 1f)
+                                }
+                                val snapped = snap(minValue + fraction * range)
+                                val newFraction = fractionOf(snapped)
+                                val fractionDelta = newFraction - lastFraction
+                                if (fractionDelta == 0f) return
+                                value = snapped
+                                lastFraction = newFraction
+                                pendingWireDelta += fractionDelta * sliderWireScale
+                                flushWholeWire(force = false)
+                            }
+
+                            updateFrom(down.position)
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
                                 change.consume()
                                 updateFrom(change.position)
-                            },
-                            onDragEnd = {
-                                flushWholeWire(force = true)
-                                finishGesture()
-                            },
-                            onDragCancel = {
-                                pendingWireDelta = 0f
-                                finishGesture()
-                            },
-                        )
+                                if (!change.pressed) {
+                                    flushWholeWire(force = true)
+                                    break
+                                }
+                            }
+                        }
+
+                        finishGesture()
                     }
                 },
             contentAlignment = Alignment.Center,

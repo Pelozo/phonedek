@@ -103,6 +103,7 @@ fun DeckButtonView(
         .joinToString(", ")
         .ifBlank { "Button" }
 
+    val control = button.control
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -113,20 +114,28 @@ fun DeckButtonView(
             .clip(shape)
             .background(fallback)
             .border(1.dp, Color.White.copy(alpha = 0.07f), shape)
-            .clickable(
-                interactionSource = interaction,
-                indication = LocalIndication.current,
-                role = Role.Button,
-                onClickLabel = button.label.ifBlank { "Press button" },
-            ) {
-                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                onPress()
-            }
+            // A control owns the whole tile gesture surface; its label remains
+            // tappable for the optional tap action. Keeping clickable on the
+            // parent would steal the slider/dial drag.
+            .then(
+                if (control == null) {
+                    Modifier.clickable(
+                        interactionSource = interaction,
+                        indication = LocalIndication.current,
+                        role = Role.Button,
+                        onClickLabel = button.label.ifBlank { "Press button" },
+                    ) {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onPress()
+                    }
+                } else {
+                    Modifier
+                },
+            )
             .semantics { contentDescription = description },
     ) {
         BackgroundLayer(spec, Modifier.fillMaxSize(), isActive = isActive)
 
-        val control = button.control
         if (control != null) {
             DeckControlView(
                 control = control,
@@ -134,6 +143,7 @@ fun DeckButtonView(
                 textColor = textColor,
                 onInput = { phase, delta -> onControlInput(button.id, phase, delta) },
                 onInteractingChange = onControlInteracting,
+                onTap = onPress,
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
