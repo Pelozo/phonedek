@@ -568,11 +568,19 @@ private fun SettingsBackupSection(
     onLaunchBackup: () -> Unit,
     onLaunchImport: () -> Unit,
 ) {
-    val unavailableReason = when {
+    val saveUnavailableReason = when {
         state.pairing == null -> "Pair with a PC before using backups."
-        state.connection != ConnectionStatus.CONNECTED -> "Connect to your PC to use backups."
+        state.connection != ConnectionStatus.CONNECTED -> "Connect to your PC to save a backup."
         else -> null
     }
+    // The upload is HTTP and can proceed while the WebSocket is reconnecting
+    // after the system document picker; only pairing is required.
+    val importUnavailableReason = if (state.pairing == null) {
+        "Pair with a PC before sending a backup."
+    } else {
+        null
+    }
+    val targetName = state.pairing?.serverName?.takeIf { it.isNotBlank() } ?: "this PC"
     val saveError = state.backupError
     val savedName = state.backupSavedName
     val downloadTotal = state.backupTotalBytes
@@ -602,7 +610,7 @@ private fun SettingsBackupSection(
 
     Button(
         onClick = onLaunchBackup,
-        enabled = unavailableReason == null && !anyBusy,
+        enabled = saveUnavailableReason == null && !anyBusy,
         modifier = Modifier
             .fillMaxWidth()
             .height(48.dp),
@@ -624,7 +632,7 @@ private fun SettingsBackupSection(
     Spacer(Modifier.height(8.dp))
     OutlinedButton(
         onClick = onLaunchImport,
-        enabled = unavailableReason == null && !anyBusy,
+        enabled = importUnavailableReason == null && !anyBusy,
         modifier = Modifier
             .fillMaxWidth()
             .height(48.dp),
@@ -633,8 +641,14 @@ private fun SettingsBackupSection(
         colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
     ) {
         Text(
-            text = if (state.importBusy) "Sending backup…" else "Send backup to this PC…",
+            text = if (state.importBusy) {
+                "Sending backup…"
+            } else {
+                "Send backup to $targetName…"
+            },
             fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 
@@ -749,9 +763,9 @@ private fun SettingsBackupSection(
             )
         }
 
-        unavailableReason != null -> {
+        saveUnavailableReason != null && importUnavailableReason != null -> {
             Text(
-                text = unavailableReason,
+                text = saveUnavailableReason,
                 color = TextMuted,
                 fontSize = 11.sp,
                 lineHeight = 15.sp,

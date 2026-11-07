@@ -759,8 +759,20 @@ export class DeckServer {
       return
     }
 
+    if (url.pathname === '/api/import') {
+      this.options.logger?.info(
+        `Phone import HTTP ${request.method} from ${remoteAddress(request)} ` +
+          `(${request.headers['content-length'] ?? 'chunked'} bytes)`,
+      )
+    }
+
     const auth = this.authorize(request, url)
     if (!auth.ok) {
+      if (url.pathname === '/api/import') {
+        this.options.logger?.warn(
+          `Phone import rejected: ${auth.blocked ? 'rate limited' : 'PIN rejected'}`,
+        )
+      }
       if (auth.blocked) {
         json(response, 429, { error: 'Too many wrong PIN attempts. Wait a minute and try again.' }, { 'Retry-After': '60' })
       } else {

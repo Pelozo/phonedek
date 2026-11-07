@@ -595,10 +595,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             failImport("Pair with a PC before sending a backup.")
             return
         }
-        if (snapshot.connection != ConnectionStatus.CONNECTED) {
-            failImport("Connect to your PC to send a backup.")
-            return
-        }
+        // The import is a one-shot HTTP upload; do not require the WebSocket to
+        // have finished reconnecting after the Android document picker returns.
 
         _state.update {
             it.copy(
