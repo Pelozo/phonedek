@@ -3,14 +3,15 @@
  *
  * With `mac.identity: null` electron-builder skips signing, so the main
  * executable keeps the prebuilt Electron signature (identifier "Electron").
- * macOS TCC then attributes the Swift keyboard helper to that identity while
- * the privacy pane stores the grant under the bundle ID, so the toggle misses
- * the helper.
+ * macOS TCC then attributes the keyboard helper to that identity while the
+ * privacy pane stores the grant under the bundle ID, so the toggle misses the
+ * app.
  *
- * We always ad-hoc sign the two executables with explicit identifiers. If a
- * local self-signed "PhoneDeck Local Signing" certificate exists (see
- * scripts/make-signing-cert.sh), we use it instead: TCC then records a
- * certificate-based requirement that survives rebuilds.
+ * We always sign the two executables with explicit identifiers. If the local
+ * self-signed "PhoneDeck Local Signing" certificate exists (see
+ * scripts/make-signing-cert.sh), we use it: TCC then records a
+ * certificate-based requirement that survives rebuilds. If that identity is
+ * unusable we fall back to ad-hoc signing instead of failing the build.
  */
 const { execFileSync } = require('node:child_process')
 const { existsSync } = require('node:fs')
@@ -36,6 +37,22 @@ function sign(target, identifier, identity) {
   })
 }
 
+function signWithFallback(target, identifier, identity) {
+  try {
+    sign(target, identifier, identity)
+  } catch (error) {
+    if (identity === '-') throw error
+    console.warn(
+      `[after-pack] Could not sign with "${identity}"; falling back to an ad-hoc signature.`,
+    )
+    console.warn(
+      '  Fix the key access once with:\n' +
+        '  security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "<login-password>" ~/Library/Keychains/login.keychain-db',
+    )
+    sign(target, identifier, '-')
+  }
+}
+
 module.exports = async function afterPack(context) {
   if (context.electronPlatformName !== 'darwin') return
 
@@ -46,6 +63,6 @@ module.exports = async function afterPack(context) {
   const helper = path.join(appPath, 'Contents', 'Resources', 'keyboard-helper')
   const identity = resolveIdentity()
 
-  if (existsSync(executable)) sign(executable, appId, identity)
-  if (existsSync(helper)) sign(helper, `${appId}.keyboard-helper`, identity)
+  if (existsSync(executable)) signWithFallback(executable, appId, identity)
+  if (existsSync(helper)) signWithFallback(helper, `${appId}.keyboard-helper`, identity)
 }

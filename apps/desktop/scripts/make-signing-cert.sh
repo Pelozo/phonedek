@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create a local self-signed code-signing identity for PhoneDeck builds.
+# Create (or repair) a local self-signed code-signing identity for PhoneDeck.
 #
 # Why: TCC records ad-hoc signatures by cdhash, so every rebuild invalidates
 # the macOS privacy grant. Signed with a stable certificate, TCC records
@@ -16,38 +16,63 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
-if security find-identity -v -p codesigning | grep -qF "\"$NAME\""; then
-  echo "Signing identity already exists: $NAME"
-  exit 0
-fi
-
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-# OpenSSL 3 + macOS Security need legacy PKCS#12 algorithms for import.
-openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
-  -keyout "$TMP/key.pem" -out "$TMP/cert.pem" \
-  -subj "/CN=$NAME" \
-  -addext "basicConstraints=critical,CA:false" \
-  -addext "keyUsage=critical,digitalSignature" \
-  -addext "extendedKeyUsage=critical,codeSigning"
+if security find-identity -v -p codesigning | grep -qF "\"$NAME\""; then
+  echo "Signing identity already exists: $NAME"
+else
+  # OpenSSL 3 + macOS Security need legacy PKCS#12 algorithms for import.
+  openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+    -keyout "$TMP/key.pem" -out "$TMP/cert.pem" \
+    -subj "/CN=$NAME" \
+    -addext "basicConstraints=critical,CA:false" \
+    -addext "keyUsage=critical,digitalSignature" \
+    -addext "extendedKeyUsage=critical,codeSigning"
 
-openssl pkcs12 -export -out "$TMP/identity.p12" \
-  -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
-  -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 \
-  -passout pass:phonedek
+  openssl pkcs12 -export -out "$TMP/identity.p12" \
+    -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
+    -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 \
+    -passout pass:phonedek
 
-security import "$TMP/identity.p12" -k "$KEYCHAIN" -P phonedek -T /usr/bin/codesign
-security add-trusted-cert -d -r trustRoot -p codeSign -k "$KEYCHAIN" "$TMP/cert.pem" || {
-  echo "warning: could not mark the certificate trusted for code signing." >&2
-  echo "         Open Keychain Access → $NAME → Trust → Code Signing → Always Trust." >&2
-}
+  security import "$TMP/identity.p12" -k "$KEYCHAIN" -P phonedek -T /usr/bin/codesign
+  security add-trusted-cert -d -r trustRoot -p codeSign -k "$KEYCHAIN" "$TMP/cert.pem" || {
+    echo "warning: could not mark the certificate trusted for code signing." >&2
+    echo "         Open Keychain Access → $NAME → Trust → Code Signing → Always Trust." >&2
+  }
+  echo "Created: $NAME"
+fi
 
-# Avoid a keychain prompt on every codesign invocation. This may ask for your
-# login password once; failure here only means codesign will prompt instead.
-security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" "$KEYCHAIN" >/dev/null 2>&1 || true
+# The imported private key is guarded by a keychain ACL. codesign runs
+# non-interactively, so without an "always allow" partition list it reports
+# "no identity found". Authorize it once here.
+KEYCHAIN_PASS=""
+if [[ -t 0 ]]; then
+  read -rsp "macOS login password (authorizes codesign to use the key; blank to skip): " KEYCHAIN_PASS
+  echo
+fi
+
+if [[ -n "$KEYCHAIN_PASS" ]]; then
+  security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN" >/dev/null
+  echo "Authorized codesign to access the private key."
+else
+  echo "Skipped key authorization. If the build says 'no identity found', re-run this and enter the password." >&2
+fi
+unset KEYCHAIN_PASS
+
+# Prove that codesign can actually use the identity before a full build.
+TEST_BINARY="$TMP/probe"
+cp /bin/ls "$TEST_BINARY"
+if codesign --force --sign "$NAME" "$TEST_BINARY" >/dev/null 2>"$TMP/sign.err"; then
+  echo "Verified: codesign can use $NAME."
+else
+  echo "warning: codesign still cannot use the identity:" >&2
+  sed 's/^/  /' "$TMP/sign.err" >&2
+  echo "         Open Keychain Access → $NAME → expand the key → Access Control →" >&2
+  echo "         'Allow all applications to access this item' → Save." >&2
+  exit 1
+fi
 
 echo
-echo "Created: $NAME"
 echo "Rebuild with: npm run dist:mac -w @phonedek/desktop"
 echo "after-pack.cjs will pick it up automatically."

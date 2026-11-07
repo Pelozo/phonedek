@@ -99,11 +99,13 @@ npm run make-signing-cert -w @phonedek/desktop
 ```
 
 Then package normally. `after-pack.cjs` detects `PhoneDeck Local Signing` (or
-`PHONEDEK_SIGN_IDENTITY`) and signs with it; electron-builder auto-discovers the
-same identity and signs the whole bundle. TCC then stores a certificate-based
-requirement that survives rebuilds. The certificate is trusted only in your
-login keychain; nothing is committed, and Gatekeeper still treats the app as
-unsigned (not notarized).
+`PHONEDEK_SIGN_IDENTITY`) and signs the two executables with it; TCC then
+stores a certificate-based requirement that survives rebuilds. The script asks
+for your login password once to authorize `codesign` to use the private key
+(the keychain ACL otherwise makes it report “no identity found”). If the
+identity is unusable, packaging falls back to ad-hoc signing with a warning
+instead of failing. Nothing is committed, and Gatekeeper still treats the app
+as unsigned (not notarized).
 
 ## CI
 
