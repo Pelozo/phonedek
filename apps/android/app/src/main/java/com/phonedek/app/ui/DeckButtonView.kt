@@ -59,7 +59,12 @@ fun DeckButtonView(
     theme: ProfileTheme,
     pairing: Pairing?,
     onPress: () -> Unit,
-    onControlInput: (controlId: String, phase: String, delta: Float) -> Unit = { _, _, _ -> },
+    onControlInput: (
+        controlId: String,
+        phase: String,
+        delta: Float?,
+        value: Float?,
+    ) -> Unit = { _, _, _, _ -> },
     onControlInteracting: (Boolean) -> Unit = {},
     isActive: Boolean = true,
 ) {
@@ -141,7 +146,9 @@ fun DeckButtonView(
                 control = control,
                 label = button.label,
                 textColor = textColor,
-                onInput = { phase, delta -> onControlInput(button.id, phase, delta) },
+                onInput = { phase, delta, value ->
+                    onControlInput(button.id, phase, delta, value)
+                },
                 onInteractingChange = onControlInteracting,
                 onTap = onPress,
                 modifier = Modifier.fillMaxSize(),

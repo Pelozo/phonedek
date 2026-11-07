@@ -155,6 +155,72 @@ class DeckModelsTest {
     }
 
     @Test
+    fun parsesAbsoluteVolumeControlWithDefaults() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [{
+                    "id": "absolute",
+                    "slot": 0,
+                    "label": "Volume",
+                    "control": {
+                      "kind": "slider",
+                      "emit": "value",
+                      "binding": { "type": "volume", "mode": "absolute" }
+                    }
+                  }]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val control = DeckJson.parse(raw)!!.profiles.single().pages.single()
+            .buttons.single().control
+        assertNotNull(control)
+        assertEquals("slider", control!!.kind)
+        assertEquals("value", control.emit)
+        assertEquals("volume", control.binding.type)
+        assertEquals("absolute", control.binding.mode)
+        assertNull(control.binding.stepPercent)
+        assertEquals(0f, control.min!!, 0.001f)
+        assertEquals(100f, control.max!!, 0.001f)
+        assertEquals(1f, control.step!!, 0.001f)
+        assertEquals(50f, control.initial!!, 0.001f)
+        assertEquals("%", control.unit)
+    }
+
+    @Test
+    fun absoluteVolumeRequiresValueEmit() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [{
+                    "id": "bad",
+                    "slot": 0,
+                    "control": {
+                      "kind": "slider",
+                      "emit": "delta",
+                      "binding": { "type": "volume", "mode": "absolute" }
+                    }
+                  }]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        assertNull(
+            DeckJson.parse(raw)!!.profiles.single().pages.single()
+                .buttons.single().control,
+        )
+    }
+
+    @Test
     fun unsupportedControlFallsBackToATapTile() {
         val raw = """
             {

@@ -170,21 +170,22 @@ class DeckConnection(
         controlId: String,
         phase: String,
         delta: Float? = null,
+        value: Float? = null,
     ): Boolean {
         val socket = webSocketRef
         if (!active || !connected || socket == null) {
             Diag.w("sendInput dropped: connected=$connected active=$active socket=${socket != null}")
             return false
         }
-        val payload = buildJsonObject {
-            put("type", "input")
-            put("requestId", requestId)
-            put("profileId", profileId)
-            put("pageId", pageId)
-            put("controlId", controlId)
-            put("phase", phase)
-            if (delta != null) put("delta", delta.toDouble())
-        }
+        val payload = buildInputPayload(
+            requestId = requestId,
+            profileId = profileId,
+            pageId = pageId,
+            controlId = controlId,
+            phase = phase,
+            delta = delta,
+            value = value,
+        )
         return socket.send(payload.toString())
     }
 
@@ -412,6 +413,25 @@ internal data class PressResultPayload(
     val error: String?,
     val message: String?,
 )
+
+internal fun buildInputPayload(
+    requestId: String,
+    profileId: String,
+    pageId: String,
+    controlId: String,
+    phase: String,
+    delta: Float?,
+    value: Float?,
+): JsonObject = buildJsonObject {
+    put("type", "input")
+    put("requestId", requestId)
+    put("profileId", profileId)
+    put("pageId", pageId)
+    put("controlId", controlId)
+    put("phase", phase)
+    if (delta != null) put("delta", delta.coerceIn(-100f, 100f).toDouble())
+    if (value != null) put("value", value.coerceIn(0f, 1f).toDouble())
+}
 
 internal fun parseCapabilities(obj: JsonObject): Set<String> =
     obj.stringList("capabilities").orEmpty().toSet()

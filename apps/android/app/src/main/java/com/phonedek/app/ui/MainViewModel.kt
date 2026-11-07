@@ -118,7 +118,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var importJob: Job? = null
     private var inputFlushJob: Job? = null
     private var activeControlId: String? = null
+    private var activeControlAbsolute = false
     private var pendingInputDelta = 0f
+    private var pendingInputValue: Float? = null
     private var lastInputSentAt = 0L
     private var inputUnsupportedShown = false
     private var protocolWarningShown = false
@@ -385,7 +387,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         inputFlushJob?.cancel()
         inputFlushJob = null
         activeControlId = null
+        activeControlAbsolute = false
         pendingInputDelta = 0f
+        pendingInputValue = null
         inputUnsupportedShown = false
         connection.stop()
         lastRawConfig = null
@@ -690,7 +694,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Relative slider/dial input. Moves are coalesced to about 25 Hz; `end`
      * always flushes the pending delta and is sent even when it is zero.
      */
-    fun onControlInput(controlId: String, phase: String, delta: Float) {
+    fun onControlInput(
+        controlId: String,
+        phase: String,
+        delta: Float?,
+        value: Float?,
+    ) {
         val snapshot = _state.value
         val profileId = snapshot.activeProfileId ?: return
         val pageId = snapshot.activePageId ?: return
@@ -703,6 +712,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
+        val absoluteValue = value
+            ?.takeIf { it.isFinite() }
+            ?.coerceIn(0f, 1f)
+        val relativeDelta = delta?.takeIf { it.isFinite() }
+
         when (phase) {
             "start" -> {
                 if (activeControlId != null && activeControlId != controlId) {
@@ -711,21 +725,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 inputFlushJob?.cancel()
                 inputFlushJob = null
                 activeControlId = controlId
+                activeControlAbsolute = absoluteValue != null
                 pendingInputDelta = 0f
+                pendingInputValue = absoluteValue
                 lastInputSentAt = SystemClock.elapsedRealtime()
-                sendControlInput(profileId, pageId, controlId, "start", null)
+                sendControlInput(
+                    profileId,
+                    pageId,
+                    controlId,
+                    "start",
+                    null,
+                    absoluteValue,
+                )
             }
 
             "move" -> {
-                if (activeControlId != controlId) {
+                if (
+                    activeControlId != controlId ||
+                    (absoluteValue != null && !activeControlAbsolute)
+                ) {
+                    if (activeControlId != null && activeControlId != controlId) {
+                        endActiveControl(profileId, pageId)
+                    }
                     // Defensive: a move without a start still opens a gesture.
                     activeControlId = controlId
+                    activeControlAbsolute = absoluteValue != null
                     pendingInputDelta = 0f
+                    pendingInputValue = null
                     lastInputSentAt = 0L
-                    sendControlInput(profileId, pageId, controlId, "start", null)
+                    sendControlInput(
+                        profileId,
+                        pageId,
+                        controlId,
+                        "start",
+                        null,
+                        absoluteValue,
+                    )
                 }
-                if (delta.isFinite() && delta != 0f) {
-                    pendingInputDelta += delta
+                if (absoluteValue != null) {
+                    // Latest value wins; the coalescing timer sends only the newest.
+                    activeControlAbsolute = true
+                    pendingInputValue = absoluteValue
+                } else if (relativeDelta != null && relativeDelta != 0f) {
+                    if (activeControlAbsolute) {
+                        activeControlAbsolute = false
+                        pendingInputValue = null
+                    }
+                    pendingInputDelta += relativeDelta
                 }
                 val now = SystemClock.elapsedRealtime()
                 val elapsed = now - lastInputSentAt
@@ -742,19 +788,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             "end" -> {
                 inputFlushJob?.cancel()
                 inputFlushJob = null
-                if (pendingInputDelta != 0f) {
+                val finalAbsolute = absoluteValue
+                    ?: if (activeControlAbsolute) pendingInputValue else null
+                if (absoluteValue != null || activeControlAbsolute) {
+                    if (finalAbsolute != null) {
+                        sendControlInput(
+                            profileId,
+                            pageId,
+                            controlId,
+                            "move",
+                            null,
+                            finalAbsolute,
+                        )
+                    }
                     sendControlInput(
                         profileId,
                         pageId,
                         controlId,
-                        "move",
-                        pendingInputDelta,
+                        "end",
+                        null,
+                        finalAbsolute,
                     )
-                    pendingInputDelta = 0f
+                } else {
+                    if (pendingInputDelta != 0f) {
+                        sendControlInput(
+                            profileId,
+                            pageId,
+                            controlId,
+                            "move",
+                            pendingInputDelta,
+                            null,
+                        )
+                    }
+                    sendControlInput(profileId, pageId, controlId, "end", null, null)
                 }
-                sendControlInput(profileId, pageId, controlId, "end", null)
-                activeControlId = null
-                pendingInputDelta = 0f
+                resetControlInput()
             }
         }
     }
@@ -762,11 +830,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun flushControlMove(profileId: String, pageId: String, controlId: String) {
         inputFlushJob = null
         if (activeControlId != controlId) return
-        val delta = pendingInputDelta
-        pendingInputDelta = 0f
         lastInputSentAt = SystemClock.elapsedRealtime()
-        if (delta.isFinite() && delta != 0f) {
-            sendControlInput(profileId, pageId, controlId, "move", delta)
+        if (activeControlAbsolute) {
+            val value = pendingInputValue ?: return
+            pendingInputValue = null
+            sendControlInput(profileId, pageId, controlId, "move", null, value)
+        } else {
+            val delta = pendingInputDelta
+            pendingInputDelta = 0f
+            if (delta != 0f) {
+                sendControlInput(profileId, pageId, controlId, "move", delta, null)
+            }
         }
     }
 
@@ -774,12 +848,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val controlId = activeControlId ?: return
         inputFlushJob?.cancel()
         inputFlushJob = null
-        if (pendingInputDelta != 0f) {
-            sendControlInput(profileId, pageId, controlId, "move", pendingInputDelta)
+        if (activeControlAbsolute) {
+            val value = pendingInputValue
+            if (value != null) {
+                sendControlInput(profileId, pageId, controlId, "move", null, value)
+            }
+            sendControlInput(profileId, pageId, controlId, "end", null, value)
+        } else {
+            if (pendingInputDelta != 0f) {
+                sendControlInput(profileId, pageId, controlId, "move", pendingInputDelta, null)
+            }
+            sendControlInput(profileId, pageId, controlId, "end", null, null)
         }
-        sendControlInput(profileId, pageId, controlId, "end", null)
+        resetControlInput()
+    }
+
+    private fun resetControlInput() {
         activeControlId = null
+        activeControlAbsolute = false
         pendingInputDelta = 0f
+        pendingInputValue = null
     }
 
     private fun sendControlInput(
@@ -788,6 +876,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         controlId: String,
         phase: String,
         delta: Float?,
+        value: Float?,
     ): Boolean {
         val sent = connection.sendInput(
             requestId = connection.newRequestId(),
@@ -796,6 +885,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             controlId = controlId,
             phase = phase,
             delta = delta?.coerceIn(-100f, 100f),
+            value = value?.coerceIn(0f, 1f),
         )
         if (!sent) {
             Diag.w("Control input dropped: control=$controlId phase=$phase")

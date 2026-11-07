@@ -355,13 +355,19 @@ private fun CellSpanDto.normalized(): CellSpanDto = copy(
 
 private fun ControlBindingDto.normalized(): ControlBindingDto? {
     return when (type.trim().lowercase()) {
-        "volume" -> {
-            if (mode != null && mode.trim().lowercase() != "relative") return null
-            ControlBindingDto(
+        "volume" -> when (mode?.trim()?.lowercase() ?: "relative") {
+            "relative" -> ControlBindingDto(
                 type = "volume",
                 mode = "relative",
                 stepPercent = (stepPercent ?: 2).coerceIn(1, 25),
             )
+
+            "absolute" -> ControlBindingDto(
+                type = "volume",
+                mode = "absolute",
+            )
+
+            else -> null
         }
 
         "scroll" -> ControlBindingDto(
@@ -377,24 +383,39 @@ private fun ControlBindingDto.normalized(): ControlBindingDto? {
 private fun ControlDto.normalized(): ControlDto? {
     val controlKind = kind.trim().lowercase()
     if (controlKind != "slider" && controlKind != "dial") return null
-    // MVP supports relative delta controls only; absolute controls stay tap-only.
-    if (emit.trim().lowercase() != "delta") return null
+    val controlEmit = emit.trim().lowercase()
     val safeBinding = binding.normalized() ?: return null
+
+    val emitMatchesBinding = when {
+        safeBinding.type == "volume" && safeBinding.mode == "absolute" ->
+            controlEmit == "value"
+
+        safeBinding.type == "volume" -> controlEmit == "delta"
+        safeBinding.type == "scroll" -> controlEmit == "delta"
+        else -> false
+    }
+    if (!emitMatchesBinding) return null
 
     val safeMin = min?.takeIf { it.isFinite() } ?: 0f
     var safeMax = max?.takeIf { it.isFinite() } ?: 100f
     if (safeMax <= safeMin) safeMax = safeMin + 100f
     val safeStep = step?.takeIf { it.isFinite() && it > 0f }
-        ?: if (safeBinding.type == "volume") safeBinding.stepPercent!!.toFloat() else 1f
+        ?: when {
+            safeBinding.type == "volume" && safeBinding.mode == "relative" ->
+                safeBinding.stepPercent!!.toFloat()
+
+            else -> 1f
+        }
     val safeInitial = (initial?.takeIf { it.isFinite() } ?: ((safeMin + safeMax) / 2f))
         .coerceIn(safeMin, safeMax)
     val safeAxis = if (axis?.trim()?.lowercase() == "vertical") "vertical" else "horizontal"
-    val safeUnit = unit?.trim()?.takeIf { it.isNotEmpty() }?.take(16)
+    val safeUnit = (unit?.trim()?.takeIf { it.isNotEmpty() }?.take(16))
+        ?: if (safeBinding.type == "volume") "%" else null
 
     return copy(
         kind = controlKind,
         axis = safeAxis,
-        emit = "delta",
+        emit = controlEmit,
         binding = safeBinding,
         min = safeMin,
         max = safeMax,

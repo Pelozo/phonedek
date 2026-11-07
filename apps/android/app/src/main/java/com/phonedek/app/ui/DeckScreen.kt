@@ -670,7 +670,12 @@ private fun DeckPager(
     controlInteracting: Boolean,
     onPageSettled: (String) -> Unit,
     onPress: (DeckButton) -> Unit,
-    onControlInput: (controlId: String, phase: String, delta: Float) -> Unit,
+    onControlInput: (
+        controlId: String,
+        phase: String,
+        delta: Float?,
+        value: Float?,
+    ) -> Unit,
     onControlInteracting: (Boolean) -> Unit,
 ) {
     val pages = profile.pages
@@ -780,7 +785,12 @@ private fun DeckPageContent(
     topInset: Dp,
     isActive: Boolean,
     onPress: (DeckButton) -> Unit,
-    onControlInput: (controlId: String, phase: String, delta: Float) -> Unit,
+    onControlInput: (
+        controlId: String,
+        phase: String,
+        delta: Float?,
+        value: Float?,
+    ) -> Unit,
     onControlInteracting: (Boolean) -> Unit,
 ) {
     val spec = remember(page.background, profile.theme.background, pairing) {
@@ -811,7 +821,12 @@ private fun DeckGrid(
     topInset: Dp,
     isActive: Boolean,
     onPress: (DeckButton) -> Unit,
-    onControlInput: (controlId: String, phase: String, delta: Float) -> Unit,
+    onControlInput: (
+        controlId: String,
+        phase: String,
+        delta: Float?,
+        value: Float?,
+    ) -> Unit,
     onControlInteracting: (Boolean) -> Unit,
 ) {
     val grid = pageGrid(profile, page)

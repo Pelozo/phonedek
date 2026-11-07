@@ -48,11 +48,13 @@ import kotlin.math.sin
 private const val DIAL_DETENT_DEGREES = 15f
 
 /**
- * Relative slider/dial input. Wire deltas are positive for right/up/clockwise.
+ * Relative delta or absolute value slider/dial input.
  *
- * - Volume sliders map a full travel to 100 / stepPercent desktop volume steps.
- * - Scroll sliders map a full travel to 100 wheel units.
- * - Every dial detent sends one unit for either binding.
+ * - Relative deltas are positive for right/up/clockwise.
+ * - Absolute volume sends the normalized 0..1 slider value instead.
+ * - Volume sliders map a full relative travel to 100 / stepPercent steps.
+ * - Scroll sliders map a full relative travel to 100 wheel units.
+ * - Every dial detent sends one relative unit; absolute dials send the new value.
  * - The final `end` phase is always sent by the VM even if no move occurred.
  */
 @Composable
@@ -60,7 +62,7 @@ fun DeckControlView(
     control: ControlDto,
     label: String,
     textColor: Color,
-    onInput: (phase: String, delta: Float) -> Unit,
+    onInput: (phase: String, delta: Float?, value: Float?) -> Unit,
     onInteractingChange: (Boolean) -> Unit,
     onTap: () -> Unit,
     modifier: Modifier = Modifier,
@@ -69,6 +71,7 @@ fun DeckControlView(
     val maxValue = control.max ?: 100f
     val stepValue = (control.step ?: 1f).takeIf { it > 0f } ?: 1f
     val range = (maxValue - minValue).takeIf { it > 0f } ?: 1f
+    val absolute = control.emit == "value"
     val isVolume = control.binding.type == "volume"
     val volumeStepPercent = control.binding.stepPercent?.coerceIn(1, 25) ?: 2
     val sliderWireScale = if (isVolume) 100f / volumeStepPercent else 100f
@@ -101,15 +104,23 @@ fun DeckControlView(
 
     fun finishGesture() {
         if (!interacting) return
-        onInput("end", 0f)
+        if (absolute) {
+            onInput("end", null, fractionOf(value))
+        } else {
+            onInput("end", 0f, null)
+        }
         interacting = false
         onInteractingChange(false)
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(control) {
         onDispose {
             if (interacting) {
-                onInput("end", 0f)
+                if (absolute) {
+                    onInput("end", null, fractionOf(value))
+                } else {
+                    onInput("end", 0f, null)
+                }
                 onInteractingChange(false)
             }
         }
@@ -173,7 +184,11 @@ fun DeckControlView(
                         down.consume()
                         interacting = true
                         onInteractingChange(true)
-                        onInput("start", 0f)
+                        if (absolute) {
+                            onInput("start", null, fractionOf(value))
+                        } else {
+                            onInput("start", 0f, null)
+                        }
 
                         if (control.kind == "dial") {
                             fun angleAt(position: Offset): Float {
@@ -199,7 +214,11 @@ fun DeckControlView(
                                 }
                                 if (next == value) return
                                 value = next
-                                onInput("move", detents.toFloat())
+                                if (absolute) {
+                                    onInput("move", null, fractionOf(next))
+                                } else {
+                                    onInput("move", detents.toFloat(), null)
+                                }
                                 performDetentHaptic()
                             }
 
@@ -233,13 +252,14 @@ fun DeckControlView(
                             var pendingWireDelta = 0f
 
                             fun flushWholeWire(force: Boolean) {
+                                if (absolute) return
                                 val whole = pendingWireDelta.toInt().toFloat()
                                 if (whole != 0f) {
                                     pendingWireDelta -= whole
-                                    onInput("move", whole)
+                                    onInput("move", whole, null)
                                     performDetentHaptic()
                                 } else if (force && abs(pendingWireDelta) >= 0.5f) {
-                                    onInput("move", pendingWireDelta)
+                                    onInput("move", pendingWireDelta, null)
                                     pendingWireDelta = 0f
                                     performDetentHaptic()
                                 }
@@ -253,9 +273,15 @@ fun DeckControlView(
                                 }
                                 val snapped = snap(minValue + fraction * range)
                                 val newFraction = fractionOf(snapped)
+                                if (snapped == value) return
+                                value = snapped
+                                if (absolute) {
+                                    onInput("move", null, newFraction)
+                                    performDetentHaptic()
+                                    return
+                                }
                                 val fractionDelta = newFraction - lastFraction
                                 if (fractionDelta == 0f) return
-                                value = snapped
                                 lastFraction = newFraction
                                 pendingWireDelta += fractionDelta * sliderWireScale
                                 flushWholeWire(force = false)
