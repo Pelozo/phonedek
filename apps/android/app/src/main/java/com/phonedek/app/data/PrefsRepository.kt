@@ -21,9 +21,19 @@ data class StoredSettings(
     val hideTopBarWhenConnected: Boolean,
     val lockLandscape: Boolean,
     val rotateContentInPortrait: Boolean,
+    val onboardingSeen: Boolean,
     val lastProfileId: String?,
     val lastPageId: String?,
 )
+
+/**
+ * Existing users (saved pairing) should not see the first-run guide after an
+ * update. Fresh installs start with it visible.
+ */
+internal fun resolveOnboardingSeen(
+    storedValue: Boolean?,
+    hasSavedPairing: Boolean,
+): Boolean = storedValue ?: hasSavedPairing
 
 class PrefsRepository(private val context: Context) {
     private object Keys {
@@ -37,6 +47,7 @@ class PrefsRepository(private val context: Context) {
         val LOCK_LANDSCAPE = booleanPreferencesKey("lock_landscape")
         val ROTATE_CONTENT_IN_PORTRAIT =
             booleanPreferencesKey("rotate_content_in_portrait")
+        val ONBOARDING_SEEN = booleanPreferencesKey("onboarding_seen")
         val LAST_PROFILE = stringPreferencesKey("last_profile")
         val LAST_PAGE = stringPreferencesKey("last_page")
     }
@@ -84,6 +95,10 @@ class PrefsRepository(private val context: Context) {
             // The deck is a landscape console by default.
             lockLandscape = prefs[Keys.LOCK_LANDSCAPE] ?: true,
             rotateContentInPortrait = prefs[Keys.ROTATE_CONTENT_IN_PORTRAIT] ?: true,
+            onboardingSeen = resolveOnboardingSeen(
+                storedValue = prefs[Keys.ONBOARDING_SEEN],
+                hasSavedPairing = pairing != null,
+            ),
             lastProfileId = prefs[Keys.LAST_PROFILE]?.takeIf { it.isNotBlank() },
             lastPageId = prefs[Keys.LAST_PAGE]?.takeIf { it.isNotBlank() },
         )
@@ -130,6 +145,10 @@ class PrefsRepository(private val context: Context) {
 
     suspend fun setRotateContentInPortrait(enabled: Boolean) {
         context.deckDataStore.edit { prefs -> prefs[Keys.ROTATE_CONTENT_IN_PORTRAIT] = enabled }
+    }
+
+    suspend fun setOnboardingSeen(seen: Boolean) {
+        context.deckDataStore.edit { prefs -> prefs[Keys.ONBOARDING_SEEN] = seen }
     }
 
     suspend fun setLastPage(profileId: String, pageId: String) {

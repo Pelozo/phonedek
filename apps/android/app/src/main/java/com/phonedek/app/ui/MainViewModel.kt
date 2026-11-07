@@ -49,6 +49,7 @@ private const val CONTROL_INPUT_FLUSH_MS = 40L
 
 data class UiState(
     val ready: Boolean = false,
+    val onboardingSeen: Boolean = true,
     val pairing: Pairing? = null,
     val config: DeckConfig? = null,
     val activeProfileId: String? = null,
@@ -402,6 +403,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { runCatching { prefs.setRotateContentInPortrait(enabled) } }
     }
 
+    fun completeOnboarding() {
+        _state.update { it.copy(onboardingSeen = true) }
+        viewModelScope.launch { runCatching { prefs.setOnboardingSeen(true) } }
+    }
+
     /**
      * Streams the desktop's ZIP backup into the SAF document chosen by the user.
      * Partial documents are deleted when the download or write fails.
@@ -723,6 +729,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // still in flight, and its draft/error/busy/pairing state must survive.
         _state.value = current.copy(
             ready = true,
+            onboardingSeen = stored.onboardingSeen,
             pairing = pairing,
             config = current.config ?: cached,
             activeProfileId = profileId,

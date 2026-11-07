@@ -97,7 +97,11 @@ private val ControlShape = RoundedCornerShape(4.dp)
  * removed; a downward swipe from the top edge temporarily brings the bar back.
  */
 @Composable
-fun DeckScreen(state: UiState, viewModel: MainViewModel) {
+fun DeckScreen(
+    state: UiState,
+    viewModel: MainViewModel,
+    onShowSetupGuide: () -> Unit = {},
+) {
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var settingsChangeServerOnOpen by rememberSaveable { mutableStateOf(false) }
     var showDiagnostics by rememberSaveable { mutableStateOf(false) }
@@ -274,6 +278,11 @@ fun DeckScreen(state: UiState, viewModel: MainViewModel) {
             onLockLandscape = viewModel::setLockLandscape,
             onRotateContentInPortrait = viewModel::setRotateContentInPortrait,
             onSaveBackup = viewModel::saveBackup,
+            onShowSetupGuide = {
+                showSettings = false
+                settingsChangeServerOnOpen = false
+                onShowSetupGuide()
+            },
             confirmChangeOnOpen = settingsChangeServerOnOpen,
         )
     }

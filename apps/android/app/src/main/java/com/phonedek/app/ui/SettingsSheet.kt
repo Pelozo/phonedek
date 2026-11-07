@@ -89,6 +89,7 @@ fun SettingsSheet(
     onLockLandscape: (Boolean) -> Unit,
     onRotateContentInPortrait: (Boolean) -> Unit,
     onSaveBackup: (Uri) -> Unit,
+    onShowSetupGuide: () -> Unit,
     confirmChangeOnOpen: Boolean = false,
 ) {
     val configuration = LocalConfiguration.current
@@ -127,6 +128,7 @@ fun SettingsSheet(
             onLockLandscape = onLockLandscape,
             onRotateContentInPortrait = onRotateContentInPortrait,
             onLaunchBackup = launchBackup,
+            onShowSetupGuide = onShowSetupGuide,
             onRefreshLogs = refreshLogs,
             onCopyLogs = copyLogs,
             onClearLogs = clearLogs,
@@ -143,6 +145,7 @@ fun SettingsSheet(
             onLockLandscape = onLockLandscape,
             onRotateContentInPortrait = onRotateContentInPortrait,
             onLaunchBackup = launchBackup,
+            onShowSetupGuide = onShowSetupGuide,
             onRefreshLogs = refreshLogs,
             onCopyLogs = copyLogs,
             onClearLogs = clearLogs,
@@ -173,6 +176,7 @@ private fun SettingsBottomSheet(
     onLockLandscape: (Boolean) -> Unit,
     onRotateContentInPortrait: (Boolean) -> Unit,
     onLaunchBackup: () -> Unit,
+    onShowSetupGuide: () -> Unit,
     onRefreshLogs: () -> Unit,
     onCopyLogs: () -> Unit,
     onClearLogs: () -> Unit,
@@ -205,6 +209,7 @@ private fun SettingsBottomSheet(
                 pairing = state.pairing,
                 onReconnect = onReconnect,
                 onRequestChangeServer = onRequestChangeServer,
+                onShowSetupGuide = onShowSetupGuide,
             )
             Spacer(Modifier.height(20.dp))
             HorizontalDivider(color = Hairline)
@@ -250,6 +255,7 @@ private fun SettingsConsolePanel(
     onLockLandscape: (Boolean) -> Unit,
     onRotateContentInPortrait: (Boolean) -> Unit,
     onLaunchBackup: () -> Unit,
+    onShowSetupGuide: () -> Unit,
     onRefreshLogs: () -> Unit,
     onCopyLogs: () -> Unit,
     onClearLogs: () -> Unit,
@@ -301,6 +307,7 @@ private fun SettingsConsolePanel(
                                 pairing = state.pairing,
                                 onReconnect = onReconnect,
                                 onRequestChangeServer = onRequestChangeServer,
+                                onShowSetupGuide = onShowSetupGuide,
                             )
                             Spacer(Modifier.height(20.dp))
                             HorizontalDivider(color = Hairline)
@@ -373,6 +380,7 @@ private fun SettingsServerSection(
     pairing: Pairing?,
     onReconnect: () -> Unit,
     onRequestChangeServer: () -> Unit,
+    onShowSetupGuide: () -> Unit,
 ) {
     ConsoleSectionLabel(index = "01", label = "SERVER")
     Spacer(Modifier.height(10.dp))
@@ -420,6 +428,18 @@ private fun SettingsServerSection(
         ) {
             Text("Change server", fontSize = 12.sp)
         }
+    }
+    TextButton(
+        onClick = onShowSetupGuide,
+        modifier = Modifier.height(48.dp),
+    ) {
+        Text(
+            text = "SETUP GUIDE",
+            color = TextMuted,
+            fontFamily = ConsoleMono,
+            fontSize = 10.sp,
+            letterSpacing = 1.sp,
+        )
     }
 }
 

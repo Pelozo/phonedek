@@ -33,6 +33,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -141,6 +142,7 @@ fun PairingScreen(
     state: UiState,
     onConnect: (host: String, port: Int, token: String, name: String?) -> Unit,
     onClearError: () -> Unit,
+    onShowSetupGuide: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -394,20 +396,37 @@ fun PairingScreen(
                 fontSize = 10.sp,
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(6.dp))
-            OutlinedButton(
-                onClick = { showDiagnostics = true },
-                shape = ControlShape,
-                border = BorderStroke(1.dp, HairlineStrong),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
-                modifier = Modifier.height(38.dp),
+            Spacer(Modifier.height(4.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = "DIAGNOSTICS / LOGS",
-                    fontFamily = ConsoleMono,
-                    fontSize = 10.sp,
-                    letterSpacing = 1.sp,
-                )
+                TextButton(
+                    onClick = onShowSetupGuide,
+                    modifier = Modifier.height(48.dp),
+                ) {
+                    Text(
+                        text = "SETUP GUIDE",
+                        color = TextMuted,
+                        fontFamily = ConsoleMono,
+                        fontSize = 10.sp,
+                        letterSpacing = 1.sp,
+                    )
+                }
+                OutlinedButton(
+                    onClick = { showDiagnostics = true },
+                    shape = ControlShape,
+                    border = BorderStroke(1.dp, HairlineStrong),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
+                    modifier = Modifier.height(38.dp),
+                ) {
+                    Text(
+                        text = "DIAGNOSTICS / LOGS",
+                        fontFamily = ConsoleMono,
+                        fontSize = 10.sp,
+                        letterSpacing = 1.sp,
+                    )
+                }
             }
         }
     }

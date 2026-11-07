@@ -1,5 +1,6 @@
 package com.phonedek.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -21,7 +22,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
@@ -31,6 +36,11 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun PhoneDeckApp(viewModel: MainViewModel, state: UiState) {
     val snackbarHostState = remember { SnackbarHostState() }
+    var showOnboardingGuide by rememberSaveable { mutableStateOf(false) }
+
+    BackHandler(enabled = showOnboardingGuide) {
+        showOnboardingGuide = false
+    }
 
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
@@ -49,13 +59,36 @@ fun PhoneDeckApp(viewModel: MainViewModel, state: UiState) {
 
             when {
                 !state.ready -> SplashScreen()
+
+                !state.onboardingSeen -> OnboardingScreen(
+                    isReopen = state.pairing != null,
+                    onStartPairing = viewModel::completeOnboarding,
+                    onSkip = viewModel::completeOnboarding,
+                    onClose = viewModel::completeOnboarding,
+                )
+
                 state.pairing == null -> PairingScreen(
                     state = state,
                     onConnect = viewModel::connect,
                     onClearError = viewModel::clearPairingError,
+                    onShowSetupGuide = { showOnboardingGuide = true },
                 )
 
-                else -> DeckScreen(state, viewModel)
+                else -> DeckScreen(
+                    state = state,
+                    viewModel = viewModel,
+                    onShowSetupGuide = { showOnboardingGuide = true },
+                )
+            }
+
+            if (showOnboardingGuide) {
+                OnboardingScreen(
+                    isReopen = true,
+                    onStartPairing = {},
+                    onSkip = {},
+                    onClose = { showOnboardingGuide = false },
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
 
             SnackbarHost(
