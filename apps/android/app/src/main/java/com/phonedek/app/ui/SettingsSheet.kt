@@ -66,6 +66,7 @@ fun SettingsSheet(
     onChangeServer: () -> Unit,
     onKeepScreenOn: (Boolean) -> Unit,
     onHideTopBarWhenConnected: (Boolean) -> Unit,
+    onLockLandscape: (Boolean) -> Unit,
     confirmChangeOnOpen: Boolean = false,
 ) {
     val configuration = LocalConfiguration.current
@@ -95,6 +96,7 @@ fun SettingsSheet(
             onRequestChangeServer = requestChangeServer,
             onKeepScreenOn = onKeepScreenOn,
             onHideTopBarWhenConnected = onHideTopBarWhenConnected,
+            onLockLandscape = onLockLandscape,
             onRefreshLogs = refreshLogs,
             onCopyLogs = copyLogs,
             onClearLogs = clearLogs,
@@ -108,6 +110,7 @@ fun SettingsSheet(
             onRequestChangeServer = requestChangeServer,
             onKeepScreenOn = onKeepScreenOn,
             onHideTopBarWhenConnected = onHideTopBarWhenConnected,
+            onLockLandscape = onLockLandscape,
             onRefreshLogs = refreshLogs,
             onCopyLogs = copyLogs,
             onClearLogs = clearLogs,
@@ -135,6 +138,7 @@ private fun SettingsBottomSheet(
     onRequestChangeServer: () -> Unit,
     onKeepScreenOn: (Boolean) -> Unit,
     onHideTopBarWhenConnected: (Boolean) -> Unit,
+    onLockLandscape: (Boolean) -> Unit,
     onRefreshLogs: () -> Unit,
     onCopyLogs: () -> Unit,
     onClearLogs: () -> Unit,
@@ -175,6 +179,7 @@ private fun SettingsBottomSheet(
                 state = state,
                 onKeepScreenOn = onKeepScreenOn,
                 onHideTopBarWhenConnected = onHideTopBarWhenConnected,
+                onLockLandscape = onLockLandscape,
             )
             Spacer(Modifier.height(20.dp))
             HorizontalDivider(color = Hairline)
@@ -200,6 +205,7 @@ private fun SettingsConsolePanel(
     onRequestChangeServer: () -> Unit,
     onKeepScreenOn: (Boolean) -> Unit,
     onHideTopBarWhenConnected: (Boolean) -> Unit,
+    onLockLandscape: (Boolean) -> Unit,
     onRefreshLogs: () -> Unit,
     onCopyLogs: () -> Unit,
     onClearLogs: () -> Unit,
@@ -259,6 +265,7 @@ private fun SettingsConsolePanel(
                                 state = state,
                                 onKeepScreenOn = onKeepScreenOn,
                                 onHideTopBarWhenConnected = onHideTopBarWhenConnected,
+                                onLockLandscape = onLockLandscape,
                             )
                         }
                         Box(
@@ -369,10 +376,19 @@ private fun SettingsBehaviorSection(
     state: UiState,
     onKeepScreenOn: (Boolean) -> Unit,
     onHideTopBarWhenConnected: (Boolean) -> Unit,
+    onLockLandscape: (Boolean) -> Unit,
 ) {
     ConsoleSectionLabel(index = "02", label = "BEHAVIOR")
     Spacer(Modifier.height(4.dp))
 
+    SettingToggle(
+        title = "Lock landscape",
+        description = "Keep the deck sideways even when the phone's auto-rotate is on. " +
+            "Turn off to allow portrait.",
+        checked = state.lockLandscape,
+        onCheckedChange = onLockLandscape,
+    )
+    HorizontalDivider(color = Hairline)
     SettingToggle(
         title = "Keep screen on",
         description = "Prevents the phone from sleeping while the deck is open.",

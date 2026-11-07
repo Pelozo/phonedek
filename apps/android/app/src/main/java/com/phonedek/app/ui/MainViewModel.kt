@@ -46,6 +46,7 @@ data class UiState(
     val connection: ConnectionStatus = ConnectionStatus.OFFLINE,
     val keepScreenOn: Boolean = true,
     val hideTopBarWhenConnected: Boolean = true,
+    val lockLandscape: Boolean = true,
     val pairingBusy: Boolean = false,
     val pairingError: String? = null,
     val pairingDraft: PairingDraft? = null,
@@ -307,10 +308,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         authWarningShown = false
         val keepScreenOn = _state.value.keepScreenOn
         val hideTopBarWhenConnected = _state.value.hideTopBarWhenConnected
+        val lockLandscape = _state.value.lockLandscape
         _state.value = UiState(
             ready = true,
             keepScreenOn = keepScreenOn,
             hideTopBarWhenConnected = hideTopBarWhenConnected,
+            lockLandscape = lockLandscape,
             connection = ConnectionStatus.OFFLINE,
         )
         viewModelScope.launch {
@@ -327,6 +330,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setHideTopBarWhenConnected(enabled: Boolean) {
         _state.update { it.copy(hideTopBarWhenConnected = enabled) }
         viewModelScope.launch { runCatching { prefs.setHideTopBarWhenConnected(enabled) } }
+    }
+
+    fun setLockLandscape(enabled: Boolean) {
+        _state.update { it.copy(lockLandscape = enabled) }
+        viewModelScope.launch { runCatching { prefs.setLockLandscape(enabled) } }
     }
 
     /**
@@ -401,6 +409,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             activePageId = pageId,
             keepScreenOn = stored.keepScreenOn,
             hideTopBarWhenConnected = stored.hideTopBarWhenConnected,
+            lockLandscape = stored.lockLandscape,
         )
         loaded = true
 
