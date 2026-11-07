@@ -5,6 +5,8 @@ import type { Logger } from './logger'
 
 export interface KeySender {
   send(step: KeyboardPlanStep): Promise<void>
+  /** Set absolute output volume (0..100) on hosts that support it. */
+  setVolume?(level: number): Promise<void>
   /** Whether the helper can inject input right now (macOS TCC check). */
   probeAccessibility?(): Promise<boolean>
   /** Restart a helper that cached a permission denial. */
@@ -71,6 +73,11 @@ export class HelperKeySender implements KeySender {
 
   async send(step: KeyboardPlanStep): Promise<void> {
     await this.sendRaw(step)
+  }
+
+  async setVolume(level: number): Promise<void> {
+    const clamped = Math.max(0, Math.min(100, Math.round(level)))
+    await this.sendRaw({ kind: 'set-volume', level: clamped })
   }
 
   /**

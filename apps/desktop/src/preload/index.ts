@@ -24,8 +24,9 @@ const api: PhoneDeckApi = {
     pageId: string,
     buttonId: string,
     delta: number,
+    value?: number,
   ): Promise<PressResult> =>
-    ipcRenderer.invoke(IPC.testControlInput, profileId, pageId, buttonId, delta),
+    ipcRenderer.invoke(IPC.testControlInput, profileId, pageId, buttonId, delta, value),
   setPort: (port: number): Promise<OperationResult> => ipcRenderer.invoke(IPC.setPort, port),
   rotateToken: (): Promise<OperationResult> => ipcRenderer.invoke(IPC.rotateToken),
   setDiscovery: (enabled: boolean): Promise<OperationResult> => ipcRenderer.invoke(IPC.setDiscovery, enabled),

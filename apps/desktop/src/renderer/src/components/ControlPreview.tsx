@@ -9,7 +9,10 @@ function initialPercent(control: ControlSpec): number {
 }
 
 function badgeFor(control: ControlSpec): string {
-  return control.binding.type === 'volume' ? 'VOL' : 'SCROLL'
+  if (control.binding.type === 'volume') {
+    return control.binding.mode === 'absolute' ? 'VOL · ABS' : 'VOL · REL'
+  }
+  return 'SCROLL'
 }
 
 /**

@@ -4,6 +4,7 @@ import {
   canPlaceButton,
   createEmptyButton,
   nextFreeSlotForPage,
+  normalizeHostPlatform,
   occupiedCells,
   pageCapacity,
   pageGrid,
@@ -51,6 +52,7 @@ function AppContent() {
   const saveNonce = useRef(0)
   const toastTimer = useRef<number | null>(null)
   const lastErrorShown = useRef('')
+  const hostPlatform = normalizeHostPlatform(server?.platform)
 
   const showToast = useCallback((message: string, kind: ToastKind = 'info') => {
     setToast({ message, kind })
@@ -321,11 +323,23 @@ function AppContent() {
       return
     }
 
-    const control: ControlSpec =
-      kind === 'volume'
+    const volumeControl = (volumeKind: 'slider' | 'dial'): ControlSpec =>
+      hostPlatform === 'darwin'
         ? {
-            kind: 'slider',
-            axis: 'horizontal',
+            kind: volumeKind,
+            ...(volumeKind === 'slider' ? { axis: 'horizontal' as const } : {}),
+            emit: 'value',
+            binding: { type: 'volume', mode: 'absolute' },
+            min: 0,
+            max: 100,
+            step: 1,
+            initial: 50,
+            unit: '%',
+            haptics: true,
+          }
+        : {
+            kind: volumeKind,
+            ...(volumeKind === 'slider' ? { axis: 'horizontal' as const } : {}),
             emit: 'delta',
             binding: { type: 'volume', mode: 'relative', stepPercent: 2 },
             min: 0,
@@ -335,25 +349,17 @@ function AppContent() {
             unit: '%',
             haptics: true,
           }
-        : kind === 'volume-wheel'
-          ? {
-              kind: 'dial',
-              emit: 'delta',
-              binding: { type: 'volume', mode: 'relative', stepPercent: 2 },
-              min: 0,
-              max: 100,
-              step: 2,
-              initial: 50,
-              unit: '%',
-              haptics: true,
-            }
-          : {
-              kind: 'dial',
-              emit: 'delta',
-              binding: { type: 'scroll', axis: 'vertical' },
-              step: 1,
-              haptics: true,
-            }
+
+    const control: ControlSpec =
+      kind === 'scroll'
+        ? {
+            kind: 'dial',
+            emit: 'delta',
+            binding: { type: 'scroll', axis: 'vertical' },
+            step: 1,
+            haptics: true,
+          }
+        : volumeControl(kind === 'volume' ? 'slider' : 'dial')
     const button: DeckButton = {
       ...createEmptyButton(
         slot,
@@ -480,13 +486,13 @@ function AppContent() {
                 {
                   label: 'Volume slider',
                   icon: 'music',
-                  description: '3 × 1 · relative volume',
+                  description: `3 × 1 · ${hostPlatform === 'darwin' ? 'absolute volume' : 'relative volume'}`,
                   onClick: () => addNewControl('volume'),
                 },
                 {
                   label: 'Volume wheel',
                   icon: 'sliders',
-                  description: '2 × 1 · relative volume',
+                  description: `2 × 1 · ${hostPlatform === 'darwin' ? 'absolute volume' : 'relative volume'}`,
                   onClick: () => addNewControl('volume-wheel'),
                 },
                 {

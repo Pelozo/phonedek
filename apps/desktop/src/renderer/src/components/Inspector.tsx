@@ -308,17 +308,65 @@ export function Inspector({
 
   const setControlBinding = (type: 'volume' | 'scroll'): void => {
     if (!button.control || button.control.binding.type === type) return
-    updateControl({
-      binding:
-        type === 'volume'
-          ? { type: 'volume', mode: 'relative', stepPercent: 2 }
-          : { type: 'scroll', axis: 'vertical' },
-    })
+    if (type === 'scroll') {
+      updateControl({ emit: 'delta', binding: { type: 'scroll', axis: 'vertical' } })
+      return
+    }
+    updateControl(
+      platform === 'darwin'
+        ? {
+            emit: 'value',
+            binding: { type: 'volume', mode: 'absolute' },
+            min: 0,
+            max: 100,
+            step: 1,
+            initial: 50,
+            unit: '%',
+          }
+        : {
+            emit: 'delta',
+            binding: { type: 'volume', mode: 'relative', stepPercent: 2 },
+            min: 0,
+            max: 100,
+            step: 2,
+            initial: 50,
+            unit: '%',
+          },
+    )
+  }
+
+  const setVolumeMode = (mode: 'relative' | 'absolute'): void => {
+    if (!button.control) return
+    const binding = button.control.binding
+    if (binding.type !== 'volume' || binding.mode === mode) return
+    if (mode === 'absolute') {
+      updateControl({
+        emit: 'value',
+        binding: { type: 'volume', mode: 'absolute' },
+        min: 0,
+        max: 100,
+        step: 1,
+        initial: 50,
+        unit: '%',
+      })
+    } else {
+      updateControl({
+        emit: 'delta',
+        binding: { type: 'volume', mode: 'relative', stepPercent: 2 },
+        min: 0,
+        max: 100,
+        step: 2,
+        initial: 50,
+        unit: '%',
+      })
+    }
   }
 
   const updateVolumeBinding = (patch: { stepPercent?: number }): void => {
-    if (!button.control || button.control.binding.type !== 'volume') return
-    updateControl({ binding: { ...button.control.binding, ...patch } })
+    if (!button.control) return
+    const binding = button.control.binding
+    if (binding.type !== 'volume' || binding.mode !== 'relative') return
+    updateControl({ binding: { ...binding, ...patch } })
   }
 
   const updateScrollBinding = (patch: { axis?: 'vertical' | 'horizontal'; invert?: boolean }): void => {
@@ -370,6 +418,56 @@ export function Inspector({
     controlMax,
   )
   const controlSpan = buttonSpan(button)
+  const controlIsAbsolute = control?.binding.type === 'volume' && control.binding.mode === 'absolute'
+
+  const testControl = async (direction: -1 | 1): Promise<void> => {
+    if (!control) return
+    if (controlIsAbsolute) {
+      const percent = direction < 0 ? 45 : 55
+      type ControlTestResult = Awaited<ReturnType<typeof window.phonedek.testControlInput>>
+      const api = window.phonedek as unknown as {
+        testControlInput: (
+          profileId: string,
+          pageId: string,
+          buttonId: string,
+          delta: number,
+          value?: number,
+        ) => Promise<ControlTestResult>
+        testControlValue?: (
+          profileId: string,
+          pageId: string,
+          buttonId: string,
+          value: number,
+        ) => Promise<ControlTestResult>
+      }
+      let result: ControlTestResult | null = null
+      if (api.testControlValue) {
+        result = await api.testControlValue(profile.id, page.id, button.id, percent / 100)
+      } else if (api.testControlInput.length >= 5) {
+        result = await api.testControlInput(profile.id, page.id, button.id, 0, percent / 100)
+      }
+      if (!result) {
+        onToast(
+          'Absolute volume testing needs the updated desktop API. The control still works from the phone.',
+          'info',
+        )
+        return
+      }
+      onToast(
+        result.ok ? `Set PC volume to ${percent}%` : (result.error ?? 'Control test failed'),
+        result.ok ? 'success' : 'error',
+      )
+      return
+    }
+
+    const result = await window.phonedek.testControlInput(profile.id, page.id, button.id, direction)
+    onToast(
+      result.ok
+        ? `Sent one ${control.binding.type === 'volume' ? 'volume' : 'scroll'} step ${direction < 0 ? 'down' : 'up'}`
+        : (result.error ?? 'Control test failed'),
+      result.ok ? 'success' : 'error',
+    )
+  }
 
   const updateAction = (index: number, action: Action): void => {
     update({ actions: button.actions.map((item, current) => (current === index ? action : item)) })
@@ -670,7 +768,9 @@ export function Inspector({
               <h3>Control</h3>
               <span className="inspector-badge mono">
                 {control.kind === 'slider' ? 'SLIDER' : 'DIAL'} ·{' '}
-                {control.binding.type === 'volume' ? 'VOL' : 'SCROLL'}
+                {control.binding.type === 'volume'
+                  ? `VOL · ${control.binding.mode === 'absolute' ? 'ABS' : 'REL'}`
+                  : 'SCROLL'}
               </span>
             </div>
 
@@ -687,40 +787,22 @@ export function Inspector({
               <button
                 type="button"
                 className="button secondary small"
-                onClick={() => {
-                  void window.phonedek
-                    .testControlInput(profile.id, page.id, button.id, -1)
-                    .then((result) =>
-                      onToast(
-                        result.ok
-                          ? `Sent one ${control.binding.type === 'volume' ? 'volume' : 'scroll'} step down`
-                          : (result.error ?? 'Control test failed'),
-                        result.ok ? 'success' : 'error',
-                      ),
-                    )
-                }}
+                title={controlIsAbsolute ? 'Set the PC volume to 45%' : 'Send one step down'}
+                onClick={() => void testControl(-1)}
               >
                 Test −
               </button>
               <button
                 type="button"
                 className="button secondary small"
-                onClick={() => {
-                  void window.phonedek
-                    .testControlInput(profile.id, page.id, button.id, 1)
-                    .then((result) =>
-                      onToast(
-                        result.ok
-                          ? `Sent one ${control.binding.type === 'volume' ? 'volume' : 'scroll'} step up`
-                          : (result.error ?? 'Control test failed'),
-                        result.ok ? 'success' : 'error',
-                      ),
-                    )
-                }}
+                title={controlIsAbsolute ? 'Set the PC volume to 55%' : 'Send one step up'}
+                onClick={() => void testControl(1)}
               >
                 Test +
               </button>
-              <span className="hint">Applies one step on this PC</span>
+              <span className="hint">
+                {controlIsAbsolute ? 'Sets 45% / 55% on this PC' : 'Applies one step on this PC'}
+              </span>
             </div>
 
             <div className="two-col">
@@ -740,11 +822,31 @@ export function Inspector({
                   value={control.binding.type}
                   onChange={(event) => setControlBinding(event.target.value as 'volume' | 'scroll')}
                 >
-                  <option value="volume">Volume · relative</option>
+                  <option value="volume">Volume</option>
                   <option value="scroll">Scroll</option>
                 </select>
               </label>
             </div>
+
+            {control.binding.type === 'volume' && (
+              <>
+                <label className="field">
+                  <span>Mode</span>
+                  <select
+                    value={control.binding.mode}
+                    onChange={(event) =>
+                      setVolumeMode(event.target.value as 'relative' | 'absolute')
+                    }
+                  >
+                    <option value="relative">Relative (volume keys)</option>
+                    <option value="absolute">Absolute (set %)</option>
+                  </select>
+                </label>
+                <p className="hint">
+                  Absolute sets the PC volume directly; relative sends volume-key steps.
+                </p>
+              </>
+            )}
 
             {control.kind === 'slider' && (
               <label className="field">
@@ -759,22 +861,18 @@ export function Inspector({
               </label>
             )}
 
-            {control.binding.type === 'volume' ? (
-              <div className="two-col">
-                <NumberField
-                  label="Volume step"
-                  value={control.binding.stepPercent ?? 2}
-                  min={1}
-                  max={25}
-                  suffix="%"
-                  onChange={(stepPercent) => updateVolumeBinding({ stepPercent })}
-                />
-                <div className="control-readout">
-                  <span>Mode</span>
-                  <strong className="mono">Relative</strong>
-                </div>
-              </div>
-            ) : (
+            {control.binding.type === 'volume' && control.binding.mode === 'relative' && (
+              <NumberField
+                label="Volume step"
+                value={control.binding.stepPercent ?? 2}
+                min={1}
+                max={25}
+                suffix="%"
+                onChange={(stepPercent) => updateVolumeBinding({ stepPercent })}
+              />
+            )}
+
+            {control.binding.type === 'scroll' && (
               <div className="two-col">
                 <label className="field">
                   <span>Scroll axis</span>
@@ -866,8 +964,9 @@ export function Inspector({
             </div>
 
             <p className="hint">
-              Editor preview only. The phone renders this control and sends relative deltas; tap actions stay as the
-              fallback.
+              {control.binding.type === 'volume' && control.binding.mode === 'absolute'
+                ? 'Editor preview only. The phone sends an absolute value; tap actions stay as the fallback.'
+                : 'Editor preview only. The phone renders this control and sends relative deltas; tap actions stay as the fallback.'}
             </p>
 
             <button type="button" className="button danger ghost full" onClick={() => void removeControl()}>

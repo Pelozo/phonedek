@@ -386,18 +386,36 @@ function registerIpc(): void {
 
   ipcMain.handle(
     IPC.testControlInput,
-    async (_event, profileId: unknown, pageId: unknown, buttonId: unknown, delta: unknown): Promise<PressResult> => {
+    async (
+      _event,
+      profileId: unknown,
+      pageId: unknown,
+      buttonId: unknown,
+      delta: unknown,
+      value: unknown,
+    ): Promise<PressResult> => {
       if (typeof profileId !== 'string' || typeof pageId !== 'string' || typeof buttonId !== 'string') {
         return { ok: false, error: 'Invalid control test request' }
-      }
-      if (typeof delta !== 'number' || !Number.isFinite(delta) || Math.abs(delta) > 100) {
-        return { ok: false, error: 'Test delta must be between -100 and 100' }
       }
       const config = store.get()
       const profile = config.profiles.find((item) => item.id === profileId)
       const page = profile?.pages.find((item) => item.id === pageId)
       const button = page?.buttons.find((item) => item.id === buttonId)
       if (!button?.control) return { ok: false, error: 'Control not found' }
+
+      if (value !== undefined) {
+        if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
+          return { ok: false, error: 'Test value must be between 0 and 1' }
+        }
+        if (button.control.emit !== 'value') {
+          return { ok: false, error: 'This control does not use an absolute value' }
+        }
+        return executor.executeVolume(value * 100, `test ${button.label || 'control'}`)
+      }
+
+      if (typeof delta !== 'number' || !Number.isFinite(delta) || Math.abs(delta) > 100) {
+        return { ok: false, error: 'Test delta must be between -100 and 100' }
+      }
       const actions = controlToActions(button.control, delta)
       if (actions.length === 0) return { ok: false, error: 'This control has no action' }
       return executor.execute(actions, `test ${button.label || 'control'}`)
@@ -726,6 +744,14 @@ async function bootstrap(): Promise<void> {
     openPath: async (path) => shell.openPath(path),
     openExternal: async (url) => shell.openExternal(url),
     getScreenshotDirectory: () => settings.get().screenshotDirectory || app.getPath('desktop'),
+    ...(process.platform === 'win32'
+      ? {
+          setSystemVolume: async (level: number) => {
+            if (!keySender.setVolume) throw new Error('The Windows keyboard helper does not support volume control.')
+            await keySender.setVolume(level)
+          },
+        }
+      : {}),
   })
   executor = new ActionExecutor(keySender, host, logger, {
     onScreenshot: (path) => {

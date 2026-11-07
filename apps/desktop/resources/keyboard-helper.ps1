@@ -81,6 +81,52 @@ public static class PhoneDeckNative {
         SendInput(1, new INPUT[] { up }, Marshal.SizeOf(typeof(INPUT)));
     }
 }
+
+[ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
+internal class MMDeviceEnumeratorComObject { }
+
+[ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IMMDeviceEnumerator {
+    [PreserveSig] int EnumAudioEndpoints(int dataFlow, int stateMask, out IntPtr devices);
+    [PreserveSig] int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice device);
+}
+
+[ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IMMDevice {
+    [PreserveSig] int Activate(ref Guid iid, int clsCtx, IntPtr activationParams,
+        [MarshalAs(UnmanagedType.IUnknown)] out object interfacePointer);
+}
+
+[ComImport, Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IAudioEndpointVolume {
+    [PreserveSig] int RegisterControlChangeNotify(IntPtr notify);
+    [PreserveSig] int UnregisterControlChangeNotify(IntPtr notify);
+    [PreserveSig] int GetChannelCount(out uint count);
+    [PreserveSig] int SetMasterVolumeLevel(float levelDb, ref Guid eventContext);
+    [PreserveSig] int SetMasterVolumeLevelScalar(float level, ref Guid eventContext);
+    [PreserveSig] int GetMasterVolumeLevel(out float levelDb);
+    [PreserveSig] int GetMasterVolumeLevelScalar(out float level);
+}
+
+public static class PhoneDeckVolume {
+    public static void Set(float scalar) {
+        var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject();
+        IMMDevice device;
+        int hr = enumerator.GetDefaultAudioEndpoint(0, 1, out device); // eRender, eMultimedia
+        if (hr != 0) Marshal.ThrowExceptionForHR(hr);
+        Guid iid = typeof(IAudioEndpointVolume).GUID;
+        object obj;
+        hr = device.Activate(ref iid, 1, IntPtr.Zero, out obj); // CLSCTX_INPROC_SERVER
+        if (hr != 0) Marshal.ThrowExceptionForHR(hr);
+        var volume = (IAudioEndpointVolume)obj;
+        Guid context = Guid.Empty;
+        hr = volume.SetMasterVolumeLevelScalar(Math.Max(0f, Math.Min(1f, scalar)), ref context);
+        if (hr != 0) Marshal.ThrowExceptionForHR(hr);
+        if (Marshal.IsComObject(volume)) Marshal.ReleaseComObject(volume);
+        if (Marshal.IsComObject(device)) Marshal.ReleaseComObject(device);
+        if (Marshal.IsComObject(enumerator)) Marshal.ReleaseComObject(enumerator);
+    }
+}
 '@
 
 $SCRIPT:VK = @{
@@ -190,8 +236,14 @@ function Send-Mouse([string]$Button, [string]$Action, $X, $Y, [string]$Direction
     }
 }
 
+function Set-SystemVolume([int]$Level) {
+    $clamped = [Math]::Max(0, [Math]::Min(100, $Level))
+    [PhoneDeckVolume]::Set([single]($clamped / 100.0))
+}
+
 function Invoke-Step($Step) {
     switch ($Step.kind) {
+        'set-volume' { Set-SystemVolume ([int]$Step.level) }
         'keys' { Send-Chord $Step.keys ([int]$Step.holdMs) ([string]$Step.action) }
         'text' { Send-Text ([string]$Step.text) ([int]$Step.perCharMs) }
         'delay' { Start-Sleep -Milliseconds ([Math]::Max(0, [Math]::Min(60000, [int]$Step.ms))) }

@@ -99,7 +99,13 @@ export interface PhoneDeckApi {
   importAsset(kind?: AssetKind): Promise<AssetPickResult>
   pickApplication(): Promise<string | null>
   testActions(actions: Action[], label?: string): Promise<PressResult>
-  testControlInput(profileId: string, pageId: string, buttonId: string, delta: number): Promise<PressResult>
+  testControlInput(
+    profileId: string,
+    pageId: string,
+    buttonId: string,
+    delta: number,
+    value?: number,
+  ): Promise<PressResult>
   setPort(port: number): Promise<OperationResult>
   rotateToken(): Promise<OperationResult>
   setDiscovery(enabled: boolean): Promise<OperationResult>
