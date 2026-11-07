@@ -56,6 +56,7 @@ data class UiState(
     val activePageId: String? = null,
     val connection: ConnectionStatus = ConnectionStatus.OFFLINE,
     val inputCapable: Boolean = false,
+    val phoneBrightness: Float? = null,
     val keepScreenOn: Boolean = true,
     val hideTopBarWhenConnected: Boolean = true,
     val lockLandscape: Boolean = true,
@@ -133,7 +134,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 capabilities: Set<String>,
             ) {
                 val inputCapable = "input-v1" in capabilities
-                _state.update { it.copy(inputCapable = inputCapable) }
+                val brightnessCapable = "brightness-v1" in capabilities
+                _state.update { current ->
+                    current.copy(
+                        inputCapable = inputCapable,
+                        phoneBrightness = if (brightnessCapable) {
+                            current.phoneBrightness
+                        } else {
+                            null
+                        },
+                    )
+                }
                 if (inputCapable) inputUnsupportedShown = false
                 if (protocol != 1 && !protocolWarningShown) {
                     protocolWarningShown = true
@@ -181,6 +192,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
+            override fun onBrightness(level: Float?) {
+                val normalized = level
+                    ?.takeIf { it.isFinite() }
+                    ?.coerceIn(0f, 1f)
+                _state.update { it.copy(phoneBrightness = normalized) }
+            }
+
             override fun onServerError(code: String, message: String) {
                 Diag.w("Server error code=$code message=\"$message\"")
                 emit(message.ifBlank { "The desktop reported an error." })
@@ -220,6 +238,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         name: String? = null,
     ) {
         if (_state.value.pairingBusy) return
+        _state.update { it.copy(phoneBrightness = null) }
         val token = tokenInput.trim()
         Diag.i("Pairing attempt: hostInput=\"$hostInput\" port=$port token=${Diag.maskToken(token)}")
         val endpoint = parseEndpoint(hostInput, port)

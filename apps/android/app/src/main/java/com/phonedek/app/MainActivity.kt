@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.os.Bundle
 import android.view.OrientationEventListener
 import android.view.Surface
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -38,6 +39,7 @@ class MainActivity : ComponentActivity() {
         OrientationEventListener.ORIENTATION_UNKNOWN,
     )
     private var lastOrientationBucket = Int.MIN_VALUE
+    private var lastBrightnessOverride: Float? = null
     private val orientationListener by lazy {
         object : OrientationEventListener(this) {
             override fun onOrientationChanged(orientation: Int) {
@@ -86,6 +88,9 @@ class MainActivity : ComponentActivity() {
                 }
                 Diag.i("Orientation lock landscape=${state.lockLandscape}")
             }
+            LaunchedEffect(state.phoneBrightness) {
+                applyPhoneBrightness(state.phoneBrightness)
+            }
             CompositionLocalProvider(
                 LocalButtonContentRotation provides contentRotation,
             ) {
@@ -122,11 +127,13 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         Diag.i("Activity start")
+        applyWindowBrightness(lastBrightnessOverride)
         viewModel.onForeground()
     }
 
     override fun onStop() {
         Diag.i("Activity stop")
+        applyWindowBrightness(null)
         viewModel.onBackground()
         super.onStop()
     }
@@ -134,6 +141,33 @@ class MainActivity : ComponentActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) hideSystemBars()
+    }
+
+    private fun applyPhoneBrightness(level: Float?) {
+        val normalized = level
+            ?.takeIf { it.isFinite() }
+            ?.coerceIn(0f, 1f)
+        lastBrightnessOverride = normalized
+        applyWindowBrightness(normalized)
+    }
+
+    private fun applyWindowBrightness(level: Float?) {
+        try {
+            // Mutate the existing attributes so FLAG_KEEP_SCREEN_ON and other
+            // window flags are preserved.
+            val attributes = window.attributes
+            attributes.screenBrightness = level
+                ?.takeIf { it.isFinite() }
+                ?.coerceIn(0f, 1f)
+                ?: WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+            window.attributes = attributes
+        } catch (error: WindowManager.BadTokenException) {
+            Diag.w("Could not apply phone brightness (bad window token): ${error.message}")
+        } catch (error: IllegalStateException) {
+            Diag.w("Could not apply phone brightness (window state): ${error.message}")
+        } catch (error: Exception) {
+            Diag.w("Could not apply phone brightness: ${error.message}")
+        }
     }
 
     private fun hideSystemBars() {

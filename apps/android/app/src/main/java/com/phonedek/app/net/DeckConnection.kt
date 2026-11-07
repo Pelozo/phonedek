@@ -13,11 +13,15 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.put
 import okhttp3.HttpUrl
@@ -40,6 +44,21 @@ internal fun buildWebSocketUrl(host: String, port: Int, token: String): HttpUrl?
         .addQueryParameter("token", token)
         .build()
 }.getOrNull()
+
+internal val CLIENT_CAPABILITIES = listOf("input-v1", "brightness-v1")
+
+internal fun buildHelloPayload(device: DeviceInfo): JsonObject = buildJsonObject {
+    put("type", "hello")
+    put("protocol", PROTOCOL_VERSION)
+    put("capabilities", buildJsonArray {
+        CLIENT_CAPABILITIES.forEach { capability -> add(capability) }
+    })
+    put("device", buildJsonObject {
+        put("name", device.name)
+        put("model", device.model)
+        put("appVersion", device.appVersion)
+    })
+}
 
 enum class ConnectionStatus {
     CONNECTING,
@@ -71,6 +90,7 @@ class DeckConnection(
             message: String?,
         )
         fun onInputResult(requestId: String, controlId: String, ok: Boolean, error: String?)
+        fun onBrightness(level: Float?)
         fun onServerError(code: String, message: String)
         fun onNavigate(direction: String, pageId: String?)
         fun onPong()
@@ -280,16 +300,7 @@ class DeckConnection(
     }
 
     private fun sendHello(socket: WebSocket) {
-        val payload = buildJsonObject {
-            put("type", "hello")
-            put("protocol", PROTOCOL_VERSION)
-            put("device", buildJsonObject {
-                put("name", device.name)
-                put("model", device.model)
-                put("appVersion", device.appVersion)
-            })
-        }
-        socket.send(payload.toString())
+        socket.send(buildHelloPayload(device).toString())
     }
 
     private fun startPing(generation: Long, socket: WebSocket) {
@@ -356,6 +367,14 @@ class DeckConnection(
                 )
             }
 
+            "brightness" -> {
+                when (val brightness = parseBrightness(obj)) {
+                    is BrightnessMessage.Level -> listener.onBrightness(brightness.level)
+                    BrightnessMessage.System -> listener.onBrightness(null)
+                    BrightnessMessage.Invalid -> Unit
+                }
+            }
+
             "error" -> {
                 val code = obj.string("code") ?: "error"
                 val message = obj.string("message") ?: "The desktop reported an error."
@@ -396,6 +415,22 @@ internal data class PressResultPayload(
 
 internal fun parseCapabilities(obj: JsonObject): Set<String> =
     obj.stringList("capabilities").orEmpty().toSet()
+
+internal sealed interface BrightnessMessage {
+    data class Level(val level: Float) : BrightnessMessage
+    data object System : BrightnessMessage
+    data object Invalid : BrightnessMessage
+}
+
+internal fun parseBrightness(obj: JsonObject): BrightnessMessage {
+    val element = obj["level"] ?: return BrightnessMessage.Invalid
+    if (element is JsonNull) return BrightnessMessage.System
+    val primitive = element as? JsonPrimitive ?: return BrightnessMessage.Invalid
+    if (primitive.isString) return BrightnessMessage.Invalid
+    val level = primitive.floatOrNull ?: return BrightnessMessage.Invalid
+    if (!level.isFinite() || level !in 0f..1f) return BrightnessMessage.Invalid
+    return BrightnessMessage.Level(level)
+}
 
 internal fun parsePressResult(obj: JsonObject): PressResultPayload = PressResultPayload(
     requestId = obj.string("requestId").orEmpty(),
