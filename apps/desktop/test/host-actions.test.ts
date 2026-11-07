@@ -39,7 +39,7 @@ describe('macApplicationOpenArgs', () => {
 describe('macScreenshotPath', () => {
   it('builds a Finder-friendly path under the Desktop', () => {
     const path = macScreenshotPath(new Date(2026, 10, 7, 12, 34, 56), '/Users/ada')
-    expect(path).toBe('/Users/ada/Desktop/PhoneDeck Screenshot 2026-11-07 at 12.34.56.png')
+    expect(path).toBe(join('/Users/ada', 'Desktop', 'PhoneDeck Screenshot 2026-11-07 at 12.34.56.png'))
     expect(basename(path)).not.toContain(':')
     expect(path.endsWith('.png')).toBe(true)
   })
