@@ -40,6 +40,12 @@ implementation — belongs there, not inline.
 - Keep the main session for orchestration: planning, reviewing the
   subagent's report, small edits, updating STATE.md/PLAN.md.
 
+## Frontend & UI Work
+
+For any new or redesigned frontend screen, component, dashboard, or app UI,
+load the `anti-ai-ui` skill with the `skill` tool before designing, and follow
+its direction and anti-slop review checks.
+
 ## Long-Runtime Work
 
 This agent is expected to run unattended. Never block the session on

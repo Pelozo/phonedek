@@ -91,7 +91,7 @@ export function summarizeUpdateStatus(status: UpdateStatus): UpdateSummary {
         title: 'Automatic updates are unavailable',
         detail:
           status.message ??
-          'Only the installed Windows app can update itself. Development and Linux builds must be updated manually.',
+          'Automatic updates are unavailable in this build. Download the latest release from GitHub Releases to update manually.',
         tone: 'neutral',
       }
     case 'idle':

@@ -1,5 +1,5 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from 'electron'
-import type { OpenDialogOptions, SaveDialogOptions } from 'electron'
+import type { MenuItemConstructorOptions, OpenDialogOptions, SaveDialogOptions } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
@@ -14,6 +14,7 @@ import { createHostActions } from './host-actions'
 import { createKeySender, type KeySender } from './key-sender'
 import { createLogger, type Logger } from './logger'
 import { lanAddresses, primaryLanAddress, urlsForPort } from './lan'
+import { keyboardHelperPath } from './platform'
 import { createPairInfo } from './qr'
 import { DeckServer, type PressContext } from './server'
 import { SettingsStore } from './settings-store'
@@ -30,7 +31,7 @@ import type {
 
 app.setName('PhoneDeck')
 
-const APP_VERSION = '0.1.3'
+const APP_VERSION = '0.1.4'
 
 let mainWindow: BrowserWindow | null = null
 let logger: Logger
@@ -45,11 +46,24 @@ let updater: UpdateService
 let serverError: string | null = null
 let pairCache: { key: string; value: PairView } | null = null
 let shuttingDown = false
+let bootstrapped = false
+
+const ACCESSIBILITY_SETTINGS_URL =
+  'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'
 
 function helperPath(): string {
-  return app.isPackaged
-    ? join(process.resourcesPath, 'keyboard-helper.ps1')
-    : join(app.getAppPath(), 'resources', 'keyboard-helper.ps1')
+  return keyboardHelperPath(process.platform, {
+    isPackaged: app.isPackaged,
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+  })
+}
+
+async function openAccessibilitySettings(): Promise<void> {
+  if (process.platform !== 'darwin') {
+    throw new Error('Accessibility settings are only available on macOS')
+  }
+  await shell.openExternal(ACCESSIBILITY_SETTINGS_URL)
 }
 
 
@@ -322,6 +336,10 @@ function registerIpc(): void {
     else await shell.openPath(app.getPath('userData'))
   })
 
+  ipcMain.handle(IPC.openAccessibility, async (): Promise<void> => {
+    await openAccessibilitySettings()
+  })
+
   ipcMain.handle(IPC.openExternal, async (_event, url: string): Promise<void> => {
     const parsed = new URL(url)
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Invalid URL')
@@ -335,6 +353,47 @@ function registerIpc(): void {
   ipcMain.handle(IPC.getUpdateStatus, async () => updater.getStatus())
   ipcMain.handle(IPC.checkForUpdates, async () => updater.check())
   ipcMain.handle(IPC.installUpdate, async (): Promise<void> => updater.install())
+}
+
+/**
+ * macOS needs a real application menu for standard editing shortcuts
+ * (Cmd+C/V/X/A/Z), window management and Cmd+Q. A null menu removes them.
+ */
+function installApplicationMenu(): void {
+  if (process.platform !== 'darwin') {
+    Menu.setApplicationMenu(null)
+    return
+  }
+
+  const template: MenuItemConstructorOptions[] = [
+    {
+      label: app.name,
+      submenu: [
+        { role: 'about' },
+        {
+          label: 'Open Accessibility Settings…',
+          click: () => {
+            void openAccessibilitySettings().catch((error) => {
+              logger.warn(`Could not open Accessibility settings: ${(error as Error).message}`)
+            })
+          },
+        },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+    { role: 'editMenu' },
+    { role: 'viewMenu' },
+    { role: 'windowMenu' },
+  ]
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
 function createWindow(): void {
@@ -433,22 +492,27 @@ async function bootstrap(): Promise<void> {
 
   await startServer()
   if (settings.get().discovery) await discovery.start()
-  if (process.platform === 'win32' && 'prewarm' in keySender) {
+  if ((process.platform === 'win32' || process.platform === 'darwin') && 'prewarm' in keySender) {
     void (keySender as unknown as { prewarm: () => Promise<void> }).prewarm()
   }
 
   registerIpc()
-  Menu.setApplicationMenu(null)
+  installApplicationMenu()
 
+  // Squirrel.Mac requires a Developer ID-signed, notarized app. This build is
+  // intentionally unsigned, so updates are manual (DMG + ZIP from Releases).
+  const updaterEnabled = app.isPackaged && process.platform === 'win32'
   updater = new UpdateService({
-    enabled: app.isPackaged && process.platform === 'win32',
+    enabled: updaterEnabled,
     currentVersion: app.getVersion(),
+    platform: process.platform,
     getWindow: () => mainWindow,
     logger,
   })
   updater.init()
 
   createWindow()
+  bootstrapped = true
   updater.checkOnStartup()
 }
 
@@ -460,7 +524,9 @@ if (!gotLock) {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore()
       mainWindow.focus()
+      return
     }
+    if (bootstrapped) createWindow()
   })
 
   app.whenReady().then(async () => {
@@ -475,11 +541,13 @@ if (!gotLock) {
   })
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (bootstrapped && BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 
   app.on('window-all-closed', () => {
-    app.quit()
+    // macOS convention: keep the app and the deck server alive in the dock
+    // until the user explicitly chooses Quit (Cmd+Q).
+    if (process.platform !== 'darwin') app.quit()
   })
 
   app.on('before-quit', (event) => {

@@ -92,6 +92,7 @@ export interface PhoneDeckApi {
   exportConfig(): Promise<OperationResult>
   importConfig(): Promise<SaveConfigResult>
   openLogs(): Promise<void>
+  openAccessibility(): Promise<void>
   openExternal(url: string): Promise<void>
   copyText(text: string): Promise<void>
   getUpdateStatus(): Promise<UpdateStatus>
@@ -116,6 +117,7 @@ export const IPC = {
   exportConfig: 'phonedek:export-config',
   importConfig: 'phonedek:import-config',
   openLogs: 'phonedek:open-logs',
+  openAccessibility: 'phonedek:open-accessibility',
   openExternal: 'phonedek:open-external',
   copyText: 'phonedek:copy-text',
   getUpdateStatus: 'phonedek:update-get-status',

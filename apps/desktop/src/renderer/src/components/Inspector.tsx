@@ -17,10 +17,10 @@ import { backgroundStyle, buttonBackground, textColorFor } from '../lib/ui'
 import { ActionEditor } from './ActionEditor'
 import { BackgroundEditor } from './BackgroundEditor'
 import { Icon } from './Icons'
+import { IconPicker } from './IconPicker'
 import { PopMenu } from './Menu'
 import { ColorField, NumberField, Toggle } from './Primitives'
 
-const ICON_PICKS = ['🎮', '🎵', '🔊', '🔇', '⏯️', '⏮️', '⏭️', '📋', '📌', '↩️', '🔒', '📸', '🖥️', '▶️', '🎧', '🌐', '⚙️', '⚡', '＋', '✓']
 const DEFAULT_MACRO_STEP: MacroStep = { type: 'hotkey', keys: ['CTRL', 'C'], holdMs: 35 }
 
 function defaultAction(type: Action['type']): Action {
@@ -333,19 +333,21 @@ export function Inspector({
               onChange={(event) => update({ sublabel: event.target.value || undefined })}
             />
           </label>
-          <label className="field">
+          <div className="field">
             <span>Icon</span>
             <div className="row gap">
-              <input className="icon-input" value={button.icon ?? ''} maxLength={8} onChange={(event) => update({ icon: event.target.value || undefined })} />
-              <div className="icon-picks">
-                {ICON_PICKS.map((icon) => (
-                  <button key={icon} type="button" className="icon-pick" onClick={() => update({ icon })} title={`Use ${icon}`}>
-                    {icon}
-                  </button>
-                ))}
-              </div>
+              <input
+                className="icon-input"
+                value={button.icon ?? ''}
+                maxLength={16}
+                placeholder="＋"
+                aria-label="Custom emoji icon"
+                onChange={(event) => update({ icon: event.target.value || undefined })}
+              />
+              <span className="hint">Pick a category below or paste any emoji.</span>
             </div>
-          </label>
+            <IconPicker key={button.id} value={button.icon} onChange={(icon) => update({ icon: icon || undefined })} />
+          </div>
 
           <div className="section-title">
             <span>Custom background</span>

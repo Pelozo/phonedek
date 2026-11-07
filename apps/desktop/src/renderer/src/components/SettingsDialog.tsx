@@ -234,8 +234,8 @@ export function SettingsDialog({
 
           {updateStatus?.state === 'disabled' && (
             <p className="update-note">
-              Automatic updates only run in the installed Windows build. Development and Linux builds must be updated
-              manually.
+              {updateStatus.message ??
+                'Automatic updates are unavailable in this build. Download the latest release from GitHub Releases to update manually.'}
             </p>
           )}
           {updateStatus?.state === 'error' && (

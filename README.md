@@ -173,7 +173,7 @@ docs/
 
 ## Manual testing
 
-A step-by-step checklist is in [docs/TESTING.md](docs/TESTING.md). The current preview is published at [v0.1.3](https://github.com/Pelozo/phonedek/releases/tag/v0.1.3).
+A step-by-step checklist is in [docs/TESTING.md](docs/TESTING.md). The current preview is published at [v0.1.4](https://github.com/Pelozo/phonedek/releases/tag/v0.1.4).
 
 ## Status
 

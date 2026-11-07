@@ -14,8 +14,31 @@ interface PendingCommand {
   timer: NodeJS.Timeout
 }
 
-/** Persistent PowerShell helper: pays the startup cost once, then ~1ms per chord. */
-export class WindowsKeySender implements KeySender {
+/** How to launch a persistent helper process. No shell is used. */
+export interface HelperLaunch {
+  command: string
+  args: string[]
+  /** Human-readable name used in startup errors. */
+  label: string
+}
+
+/** Turn a helper permission failure into text a user can act on. */
+export function helperFailure(message: string | undefined, permission?: string): Error {
+  if (permission === 'accessibility') {
+    return new Error(
+      'Accessibility permission is required for PhoneDeck key and mouse actions. ' +
+        'Open System Settings → Privacy & Security → Accessibility, enable PhoneDeck, then try again.',
+    )
+  }
+  return new Error(message ?? 'Keyboard helper failed')
+}
+
+/**
+ * Persistent JSONL helper: pays the process/startup cost once, then sends one
+ * command per press. Windows uses a PowerShell script; macOS uses a compiled
+ * Swift executable with the same protocol.
+ */
+export class HelperKeySender implements KeySender {
   private child: ChildProcessWithoutNullStreams | null = null
   private starting: Promise<void> | null = null
   private readonly pending = new Map<string, PendingCommand>()
@@ -23,11 +46,13 @@ export class WindowsKeySender implements KeySender {
   private stderrTail = ''
   private nextId = 0
   private readonly helperPath: string
+  private readonly launch: HelperLaunch
   private readonly logger?: Logger
   private disposed = false
 
-  constructor(helperPath: string, logger?: Logger) {
+  constructor(helperPath: string, launch: HelperLaunch, logger?: Logger) {
     this.helperPath = helperPath
+    this.launch = launch
     this.logger = logger
   }
 
@@ -80,19 +105,10 @@ export class WindowsKeySender implements KeySender {
     }
 
     this.starting = new Promise<void>((resolve, reject) => {
-      const child = spawn(
-        'powershell.exe',
-        [
-          '-NoLogo',
-          '-NoProfile',
-          '-NonInteractive',
-          '-ExecutionPolicy',
-          'Bypass',
-          '-File',
-          this.helperPath,
-        ],
-        { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] },
-      )
+      const child = spawn(this.launch.command, this.launch.args, {
+        windowsHide: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
       this.child = child
       this.stdoutBuffer = ''
       this.stderrTail = ''
@@ -123,7 +139,7 @@ export class WindowsKeySender implements KeySender {
         if (!settled) {
           settled = true
           clearTimeout(timer)
-          reject(new Error(`Could not start PowerShell: ${error.message}`))
+          reject(new Error(`Could not start ${this.launch.label}: ${error.message}`))
         }
         this.failAll(new Error(`Keyboard helper error: ${error.message}`))
       })
@@ -161,7 +177,7 @@ export class WindowsKeySender implements KeySender {
       const line = this.stdoutBuffer.slice(0, newline).trim()
       this.stdoutBuffer = this.stdoutBuffer.slice(newline + 1)
       if (!line) continue
-      let message: { ready?: boolean; id?: string; ok?: boolean; error?: string }
+      let message: { ready?: boolean; id?: string; ok?: boolean; error?: string; permission?: string; accessibility?: boolean }
       try {
         message = JSON.parse(line) as typeof message
       } catch {
@@ -170,6 +186,11 @@ export class WindowsKeySender implements KeySender {
       }
       if (message.ready) {
         this.logger?.info('Keyboard helper ready')
+        if (message.accessibility === false) {
+          this.logger?.warn(
+            'macOS Accessibility permission is not granted; key and mouse actions will fail until it is enabled in System Settings → Privacy & Security → Accessibility.',
+          )
+        }
         ready()
         continue
       }
@@ -179,7 +200,7 @@ export class WindowsKeySender implements KeySender {
       this.pending.delete(message.id)
       clearTimeout(pending.timer)
       if (message.ok) pending.resolve()
-      else pending.reject(new Error(message.error ?? 'Keyboard helper failed'))
+      else pending.reject(helperFailure(message.error, message.permission))
     }
   }
 
@@ -203,6 +224,28 @@ export class WindowsKeySender implements KeySender {
       }
     }
     this.failAll(new Error('Keyboard helper was stopped'))
+  }
+}
+
+/** Windows helper: powershell.exe running resources/keyboard-helper.ps1. */
+export class WindowsKeySender extends HelperKeySender {
+  constructor(helperPath: string, logger?: Logger) {
+    super(
+      helperPath,
+      {
+        command: 'powershell.exe',
+        args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', helperPath],
+        label: 'PowerShell keyboard helper',
+      },
+      logger,
+    )
+  }
+}
+
+/** macOS helper: a compiled Swift executable with the same JSONL protocol. */
+export class MacKeySender extends HelperKeySender {
+  constructor(helperPath: string, logger?: Logger) {
+    super(helperPath, { command: helperPath, args: [], label: 'macOS keyboard helper' }, logger)
   }
 }
 
@@ -356,6 +399,7 @@ export class UnsupportedKeySender implements KeySender {
 
 export function createKeySender(helperPath: string, platform: NodeJS.Platform, logger?: Logger): KeySender {
   if (platform === 'win32') return new WindowsKeySender(helperPath, logger)
+  if (platform === 'darwin') return new MacKeySender(helperPath, logger)
   if (platform === 'linux') return new LinuxKeySender(logger)
   return new UnsupportedKeySender(platform)
 }

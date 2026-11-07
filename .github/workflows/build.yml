@@ -53,6 +53,62 @@ jobs:
           path: apps/desktop/release/win-unpacked/**
           if-no-files-found: warn
 
+  macos:
+    name: Desktop (macOS arm64, unsigned)
+    runs-on: macos-latest
+    env:
+      # No signing secrets are required or allowed for this community build.
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Verify Apple Silicon runner
+        run: |
+          uname -m
+          node -p "process.arch"
+          test "$(uname -m)" = "arm64"
+      - name: Build Swift keyboard helper
+        run: npm run build:mac-helper -w @phonedek/desktop
+      - name: Self-test Swift keyboard helper
+        run: apps/desktop/resources/mac/keyboard-helper --self-test
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Build unsigned DMG and ZIP
+        run: npm run dist:mac -w @phonedek/desktop
+      - name: Verify macOS artifacts
+        run: |
+          set -euo pipefail
+          cd apps/desktop/release
+          ls -lah
+          test -n "$(find . -maxdepth 1 -name '*.dmg' -print -quit)"
+          ZIP="$(find . -maxdepth 1 -name '*.zip' -print -quit)"
+          test -n "$ZIP"
+          test -f latest-mac.yml
+          grep -q '\.zip' latest-mac.yml
+          TMP="$(mktemp -d)"
+          trap 'rm -rf "$TMP"' EXIT
+          ditto -x -k "$ZIP" "$TMP"
+          HELPER="$(find "$TMP" -path '*/PhoneDeck.app/Contents/Resources/keyboard-helper' -print -quit)"
+          test -n "$HELPER"
+          test -x "$HELPER"
+          lipo -info "$HELPER" | grep -q arm64
+          "$HELPER" --self-test
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhoneDeck-macOS-arm64
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/latest-mac.yml
+            apps/desktop/release/*.blockmap
+          if-no-files-found: error
+
   android:
     name: Android (debug APK)
     runs-on: ubuntu-latest

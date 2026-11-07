@@ -49,6 +49,15 @@ function looksLikeShellItem(path: string): boolean {
   }
 }
 
+/**
+ * `open -a <app> --args ...` is the only macOS launch path that forwards
+ * arguments to an application bundle. Without `-a`, `open` treats the first
+ * argument as a document rather than the app itself.
+ */
+export function macApplicationOpenArgs(path: string, args: readonly string[]): string[] {
+  return args.length > 0 ? ['-a', path, '--args', ...args] : ['-a', path]
+}
+
 function quoteWindows(value: string): string {
   return `"${value.replace(/"/g, '\\"')}"`
 }
@@ -60,6 +69,11 @@ export function createHostActions(options: HostActionOptions = {}): HostActions 
   return {
     async launch(path, args) {
       if (!path.trim()) throw new Error('Launch action has no path')
+      if (platform === 'darwin' && /\.app$/i.test(path)) {
+        await spawnDetached('/usr/bin/open', macApplicationOpenArgs(path, args), { hidden: false })
+        logger?.info(`Launched ${path}${args.length ? ` ${args.join(' ')}` : ''}`)
+        return
+      }
       if (options.openPath && looksLikeShellItem(path)) {
         const error = await options.openPath(path)
         if (error) throw new Error(error)

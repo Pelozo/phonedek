@@ -9,9 +9,6 @@ directories:
 files:
   - out/**
   - package.json
-extraResources:
-  - from: resources/keyboard-helper.ps1
-    to: keyboard-helper.ps1
 win:
   target:
     - target: nsis
@@ -19,6 +16,9 @@ win:
         - x64
   icon: build/icon.png
   executableName: PhoneDeck
+  extraResources:
+    - from: resources/keyboard-helper.ps1
+      to: keyboard-helper.ps1
 publish:
   provider: github
   owner: Pelozo
@@ -38,7 +38,27 @@ linux:
   category: Utility
   icon: build/icon.png
 mac:
+  # Apple Silicon first. Universal builds can be produced locally with
+  # scripts/build-mac-helper.sh universal and `electron-builder --mac --universal`,
+  # but the CI artifact is deliberately small and arm64-only.
   target:
-    - zip
+    - target: dmg
+      arch:
+        - arm64
+    - target: zip
+      arch:
+        - arm64
   category: public.app-category.utilities
   icon: build/icon.png
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  # This is an unsigned community build. Ad-hoc/absent signatures cannot use
+  # Squirrel.Mac auto-updates and must be opened once via Gatekeeper.
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  notarize: false
+  extraResources:
+    - from: resources/mac/keyboard-helper
+      to: keyboard-helper
+  extendInfo:
+    NSLocalNetworkUsageDescription: PhoneDeck uses your local network to connect to the Android remote app and discover this desktop.
