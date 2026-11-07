@@ -1,5 +1,6 @@
 package com.phonedek.app.net
 
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -21,5 +22,13 @@ class DeckConnectionUrlTest {
         assertNull(buildWebSocketUrl("", 47654, "4821"))
         assertNull(buildWebSocketUrl("bad host", 47654, "4821"))
         assertNull(buildWebSocketUrl("192.168.1.42", 0, "4821"))
+    }
+
+    @Test
+    fun assetUrlCarriesThePairingTokenForCoilAndExoPlayer() {
+        val url = assetUrl("192.168.1.42", 47654, "clip.mp4", "4821")!!.toHttpUrl()
+        assertEquals("http", url.scheme)
+        assertEquals("/assets/clip.mp4", url.encodedPath)
+        assertEquals("4821", url.queryParameter("token"))
     }
 }

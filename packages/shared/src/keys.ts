@@ -1,5 +1,7 @@
 /** Keyboard naming shared by the recorder, the editor and the native helper. */
 
+import { normalizeHostPlatform } from './platform'
+
 const ALIASES: Record<string, string> = {
   CONTROL: 'CTRL',
   CTRL: 'CTRL',
@@ -194,12 +196,16 @@ const LABELS: Record<string, string> = {
   PAUSE: 'Pause',
 }
 
-export function formatKeyLabel(key: string): string {
+export function formatKeyLabel(key: string, platform?: string): string {
+  if (normalizeHostPlatform(platform) === 'darwin') {
+    if (key === 'WIN') return 'Cmd'
+    if (key === 'ALT') return 'Option'
+  }
   return LABELS[key] ?? key
 }
 
-export function formatCombo(keys: readonly string[]): string {
-  return keys.map(formatKeyLabel).join(' + ')
+export function formatCombo(keys: readonly string[], platform?: string): string {
+  return keys.map((key) => formatKeyLabel(key, platform)).join(' + ')
 }
 
 /** Convert a DOM keyboard event (or a plain test object) to a canonical key. */

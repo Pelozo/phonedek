@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createDefaultConfig } from '../src/defaults'
+import { createDefaultConfig, createEmptyButton } from '../src/defaults'
 import { parseConfig, validateConfig } from '../src/schema'
 
 describe('config schema', () => {
@@ -167,5 +167,48 @@ describe('config schema', () => {
     button.background = undefined
     button.iconMedia = { type: 'video', asset: '..%2Fsecret.mp4', fit: 'cover' }
     expect(validateConfig(config).ok).toBe(false)
+  })
+
+  it('accepts per-page grids and validates slots against the page grid', () => {
+    const config = createDefaultConfig()
+    const page = config.profiles[0]!.pages[0]!
+    page.grid = { columns: 8, rows: 4, gap: 8, padding: 10 }
+    page.buttons.push(createEmptyButton(30))
+    expect(validateConfig(config).ok).toBe(true)
+    expect(config.schemaVersion).toBe(1)
+  })
+
+  it('rejects invalid page grids', () => {
+    const config = createDefaultConfig()
+    const page = config.profiles[0]!.pages[1]!
+    page.grid = { columns: 0, rows: 3, gap: 0, padding: 0 }
+    expect(validateConfig(config).ok).toBe(false)
+
+    page.grid = { columns: 11, rows: 3, gap: 0, padding: 0 }
+    expect(validateConfig(config).ok).toBe(false)
+
+    page.grid = { columns: 5, rows: 3, gap: 61, padding: 0 }
+    expect(validateConfig(config).ok).toBe(false)
+
+    page.grid = { columns: 5, rows: 3, gap: 0, padding: 81 }
+    expect(validateConfig(config).ok).toBe(false)
+  })
+
+  it('rejects buttons outside the page grid override', () => {
+    const config = createDefaultConfig()
+    const page = config.profiles[0]!.pages[1]!
+    page.buttons = [page.buttons[9]!]
+    page.grid = { columns: 2, rows: 2, gap: 0, padding: 0 }
+    const result = validateConfig(config)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.errors.join(' ')).toMatch(/outside the 2x2 grid/)
+  })
+
+  it('keeps old pages without a grid override valid and inherit the profile', () => {
+    const config = createDefaultConfig()
+    for (const page of config.profiles[0]!.pages) {
+      expect('grid' in page).toBe(false)
+    }
+    expect(validateConfig(config).ok).toBe(true)
   })
 })

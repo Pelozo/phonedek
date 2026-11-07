@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   formatCombo,
+  formatKeyLabel,
   isModifier,
   isScreenshotShortcut,
   isValidKeyName,
@@ -46,6 +47,24 @@ describe('key names', () => {
 
   it('formats keycaps', () => {
     expect(formatCombo(['CTRL', 'SHIFT', 'ESC'])).toBe('Ctrl + Shift + Esc')
+  })
+
+  it('maps modifier labels per host platform', () => {
+    expect(formatKeyLabel('WIN', 'darwin')).toBe('Cmd')
+    expect(formatKeyLabel('ALT', 'darwin')).toBe('Option')
+    expect(formatKeyLabel('CTRL', 'darwin')).toBe('Ctrl')
+    expect(formatKeyLabel('WIN', 'win32')).toBe('Win')
+    expect(formatKeyLabel('ALT', 'win32')).toBe('Alt')
+    expect(formatKeyLabel('WIN', 'linux')).toBe('Win')
+
+    // Existing callers omit the platform and keep Windows-style labels.
+    expect(formatKeyLabel('WIN')).toBe('Win')
+    expect(formatCombo(['WIN', 'SHIFT', 'S'], 'darwin')).toBe('Cmd + Shift + S')
+    expect(formatCombo(['WIN', 'SHIFT', 'S'], 'win32')).toBe('Win + Shift + S')
+    expect(formatCombo(['WIN', 'SHIFT', 'S'])).toBe('Win + Shift + S')
+
+    // Unknown platforms normalize safely to the Windows/Linux labels.
+    expect(formatKeyLabel('WIN', 'freebsd')).toBe('Win')
   })
 
   it('maps DOM events, preferring physical codes for shifted symbols', () => {

@@ -3,7 +3,10 @@ package com.phonedek.app
 import androidx.compose.ui.graphics.Color
 import com.phonedek.app.data.BackgroundDto
 import com.phonedek.app.data.DeckJson
+import com.phonedek.app.data.GridDto
+import com.phonedek.app.data.GridSettings
 import com.phonedek.app.data.Pairing
+import com.phonedek.app.data.pageGrid
 import com.phonedek.app.ui.BackgroundSpec
 import com.phonedek.app.ui.backgroundSpec
 import com.phonedek.app.util.parseEndpoint
@@ -60,6 +63,118 @@ class DeckModelsTest {
         assertEquals("📋", profile.pages.single().buttons.single().icon)
         assertNull(profile.pages.single().buttons.single().iconMedia)
         assertEquals("gradient", profile.pages.single().buttons.single().background?.type)
+        assertNull(profile.pages.single().grid)
+        assertEquals(profile.grid, pageGrid(profile, profile.pages.single()))
+    }
+
+    @Test
+    fun parsesPerPageGridOverride() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "grid": { "columns": 5, "rows": 3, "gap": 12, "padding": 14 },
+                "pages": [{
+                  "id": "page",
+                  "grid": { "columns": 3, "rows": 4, "gap": 8, "padding": 10 }
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val profile = DeckJson.parse(raw)!!.profiles.single()
+        val page = profile.pages.single()
+        assertEquals(GridDto(columns = 3, rows = 4, gap = 8, padding = 10), page.grid)
+        assertEquals(GridSettings(columns = 3, rows = 4, gap = 8, padding = 10), pageGrid(profile, page))
+    }
+
+    @Test
+    fun pageWithoutGridInheritsProfileGrid() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "grid": { "columns": 4, "rows": 2, "gap": 6, "padding": 9 },
+                "pages": [{ "id": "page" }]
+              }]
+            }
+        """.trimIndent()
+
+        val profile = DeckJson.parse(raw)!!.profiles.single()
+        val page = profile.pages.single()
+        assertNull(page.grid)
+        assertEquals(GridSettings(columns = 4, rows = 2, gap = 6, padding = 9), pageGrid(profile, page))
+    }
+
+    @Test
+    fun pagesKeepIndependentGridsAndCapacity() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "grid": { "columns": 5, "rows": 3, "gap": 12, "padding": 14 },
+                "pages": [
+                  {
+                    "id": "compact",
+                    "grid": { "columns": 2, "rows": 2, "gap": 4, "padding": 6 },
+                    "buttons": [
+                      { "id": "a", "slot": 0 },
+                      { "id": "b", "slot": 3 },
+                      { "id": "lost", "slot": 4 }
+                    ]
+                  },
+                  {
+                    "id": "wide",
+                    "grid": { "columns": 4, "rows": 3, "gap": 10, "padding": 12 },
+                    "buttons": [
+                      { "id": "c", "slot": 4 },
+                      { "id": "d", "slot": 11 },
+                      { "id": "lost2", "slot": 12 }
+                    ]
+                  }
+                ]
+              }]
+            }
+        """.trimIndent()
+
+        val profile = DeckJson.parse(raw)!!.profiles.single()
+        val compact = profile.pages.first { it.id == "compact" }
+        val wide = profile.pages.first { it.id == "wide" }
+
+        assertEquals(GridSettings(2, 2, 4, 6), pageGrid(profile, compact))
+        assertEquals(GridSettings(4, 3, 10, 12), pageGrid(profile, wide))
+        assertEquals(listOf("a", "b"), compact.buttons.map { it.id })
+        assertEquals(listOf("c", "d"), wide.buttons.map { it.id })
+    }
+
+    @Test
+    fun malformedPageGridFallsBackAndRepairsMissingFields() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "grid": { "columns": 4, "rows": 2, "gap": 8, "padding": 10 },
+                "pages": [
+                  {
+                    "id": "bad",
+                    "grid": { "columns": 0, "rows": 99, "gap": -5, "padding": 200 }
+                  },
+                  {
+                    "id": "partial",
+                    "grid": { "columns": 3 }
+                  }
+                ]
+              }]
+            }
+        """.trimIndent()
+
+        val profile = DeckJson.parse(raw)!!.profiles.single()
+        val bad = profile.pages.first { it.id == "bad" }
+        val partial = profile.pages.first { it.id == "partial" }
+
+        assertEquals(GridSettings(4, 2, 8, 10), pageGrid(profile, bad))
+        assertEquals(GridSettings(3, 2, 8, 10), pageGrid(profile, partial))
+        assertEquals(GridDto(columns = 3, rows = 2, gap = 8, padding = 10), partial.grid)
     }
 
     @Test

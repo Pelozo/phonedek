@@ -195,6 +195,7 @@ export const PageSchema = z.object({
   id,
   name: z.string().min(1).max(60),
   background: BackgroundSchema.optional(),
+  grid: GridSchema.optional(),
   buttons: z.array(ButtonSchema).max(100),
 })
 
@@ -223,7 +224,6 @@ export const DeckConfigSchema = z
       }
       profileIds.add(profile.id)
 
-      const capacity = profile.grid.columns * profile.grid.rows
       const pageIds = new Set<string>()
       for (const page of profile.pages) {
         if (pageIds.has(page.id)) {
@@ -231,13 +231,15 @@ export const DeckConfigSchema = z
         }
         pageIds.add(page.id)
 
+        const effectiveGrid = page.grid ?? profile.grid
+        const pageCapacity = effectiveGrid.columns * effectiveGrid.rows
         const slots = new Set<number>()
         const buttonIds = new Set<string>()
         for (const button of page.buttons) {
-          if (button.slot >= capacity) {
+          if (button.slot >= pageCapacity) {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
-              message: `Button "${button.label}" uses slot ${button.slot}, outside the ${profile.grid.columns}x${profile.grid.rows} grid`,
+              message: `Button "${button.label}" uses slot ${button.slot}, outside the ${effectiveGrid.columns}x${effectiveGrid.rows} grid`,
             })
           }
           if (slots.has(button.slot)) {

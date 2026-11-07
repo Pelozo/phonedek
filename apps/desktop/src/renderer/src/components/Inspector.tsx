@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import type { Action, ActionPack, ActionPreset, DeckButton, DeckConfig, DeckPage, DeckProfile, MacroStep, MediaIcon } from '@phonedek/shared'
 import {
-  capacity,
   compactPage,
   describeAction,
+  pageCapacity,
+  pageGrid,
   removeButton,
+  resizePageGrid,
   updateButton,
-  updateGrid,
   updatePageMeta,
   updateProfileMeta,
   updateTheme,
@@ -21,10 +22,11 @@ import { IconPicker } from './IconPicker'
 import { PopMenu } from './Menu'
 import { PresetPicker } from './PresetPicker'
 import { ColorField, NumberField, Toggle } from './Primitives'
+import { useHostPlatform } from '../lib/platform'
 
 const DEFAULT_MACRO_STEP: MacroStep = { type: 'hotkey', keys: ['CTRL', 'C'], holdMs: 35 }
 
-function defaultAction(type: Action['type']): Action {
+function defaultAction(type: Action['type'], platform: string): Action {
   switch (type) {
     case 'hotkey':
       return { type: 'hotkey', keys: ['CTRL', 'C'], holdMs: 35 }
@@ -33,7 +35,11 @@ function defaultAction(type: Action['type']): Action {
     case 'macro':
       return { type: 'macro', steps: [DEFAULT_MACRO_STEP] }
     case 'launch':
-      return { type: 'launch', path: 'notepad.exe', args: [] }
+      return {
+        type: 'launch',
+        path: platform === 'darwin' ? '/System/Applications/TextEdit.app' : 'notepad.exe',
+        args: [],
+      }
     case 'url':
       return { type: 'url', url: 'https://' }
     case 'command':
@@ -71,6 +77,9 @@ export function Inspector({
   const [pageCustomBackground, setPageCustomBackground] = useState(page.background !== undefined)
   const [presetsOpen, setPresetsOpen] = useState(false)
   const [iconBusy, setIconBusy] = useState<'image' | 'video' | null>(null)
+  const platform = useHostPlatform()
+
+  const makeAction = (type: Action['type']): Action => defaultAction(type, platform)
 
   useEffect(() => {
     setCustomBackground(button?.background !== undefined)
@@ -94,7 +103,8 @@ export function Inspector({
 
   if (!button) {
     const usedSlots = page.buttons.length
-    const total = capacity(profile.grid)
+    const total = pageCapacity(profile, page)
+    const activePageGrid = pageGrid(profile, page)
     return (
       <aside className="inspector">
         <div className="inspector-header">
@@ -185,29 +195,39 @@ export function Inspector({
               <Icon name="grid" size={16} />
               <span>
                 <strong className="mono">
-                  {profile.grid.columns} × {profile.grid.rows}
+                  {activePageGrid.columns} × {activePageGrid.rows}
                 </strong>{' '}
-                grid · change size in the sidebar’s 02 Deck section.
+                page grid · {usedSlots}/{total} slots · {page.grid ? 'custom' : 'inherited'}.
+                Size and presets are in the sidebar’s 02 Deck section.
               </span>
             </div>
             <div className="two-col">
               <NumberField
-                label="Gap"
-                value={profile.grid.gap}
+                label="Page gap"
+                value={activePageGrid.gap}
                 min={0}
                 max={60}
                 suffix="px"
-                onChange={(gap) => onChangeConfig(updateGrid(config, profile.id, { gap }))}
+                onChange={(gap) =>
+                  onChangeConfig(
+                    resizePageGrid(config, profile.id, page.id, { ...activePageGrid, gap }),
+                  )
+                }
               />
               <NumberField
-                label="Padding"
-                value={profile.grid.padding}
+                label="Page padding"
+                value={activePageGrid.padding}
                 min={0}
                 max={80}
                 suffix="px"
-                onChange={(padding) => onChangeConfig(updateGrid(config, profile.id, { padding }))}
+                onChange={(padding) =>
+                  onChangeConfig(
+                    resizePageGrid(config, profile.id, page.id, { ...activePageGrid, padding }),
+                  )
+                }
               />
             </div>
+            <p className="hint">Gap and padding are stored with this page; changing them creates a custom layout.</p>
             <div className="two-col">
               <NumberField
                 label="Text size"
@@ -278,11 +298,11 @@ export function Inspector({
     update({ actions })
   }
 
-  const addPreset = (pack: ActionPack, preset: ActionPreset): void => {
+  const addPreset = (pack: ActionPack, preset: ActionPreset, actions: Action[]): void => {
     const plainLabel = button.label.trim().toLowerCase()
     const untitled = plainLabel === '' || plainLabel === 'untitled' || plainLabel === 'untitled button' || plainLabel === 'new button'
     update({
-      actions: [...button.actions, ...structuredClone(preset.actions)],
+      actions: [...button.actions, ...structuredClone(actions)],
       ...(untitled
         ? {
             label: preset.name,
@@ -574,15 +594,15 @@ export function Inspector({
                 }
                 items={[
                   { label: 'Browse presets…', icon: 'grid', description: 'Ready-made shortcut packs', onClick: () => setPresetsOpen(true) },
-                  { label: 'Shortcut', icon: 'keyboard', description: 'Send a key combination', onClick: () => update({ actions: [...button.actions, defaultAction('hotkey')] }) },
-                  { label: 'Type text', icon: 'text', description: 'Type a phrase on the PC', onClick: () => update({ actions: [...button.actions, defaultAction('text')] }) },
-                  { label: 'Macro', icon: 'bolt', description: 'A recorded sequence', onClick: () => update({ actions: [...button.actions, defaultAction('macro')] }) },
-                  { label: 'Launch app', icon: 'app', description: 'Start a program', onClick: () => update({ actions: [...button.actions, defaultAction('launch')] }) },
-                  { label: 'Open URL', icon: 'link', description: 'Open a web page', onClick: () => update({ actions: [...button.actions, defaultAction('url')] }) },
-                  { label: 'Run command', icon: 'terminal', description: 'Run a shell command', onClick: () => update({ actions: [...button.actions, defaultAction('command')] }) },
-                  { label: 'Media key', icon: 'music', description: 'Play, pause, volume…', onClick: () => update({ actions: [...button.actions, defaultAction('media')] }) },
-                  { label: 'Delay', icon: 'clock', description: 'Wait before the next action', onClick: () => update({ actions: [...button.actions, defaultAction('delay')] }) },
-                  { label: 'Change page', icon: 'layers', description: 'Navigate to another deck page', onClick: () => update({ actions: [...button.actions, defaultAction('page')] }) },
+                  { label: 'Shortcut', icon: 'keyboard', description: 'Send a key combination', onClick: () => update({ actions: [...button.actions, makeAction('hotkey')] }) },
+                  { label: 'Type text', icon: 'text', description: 'Type a phrase on the PC', onClick: () => update({ actions: [...button.actions, makeAction('text')] }) },
+                  { label: 'Macro', icon: 'bolt', description: 'A recorded sequence', onClick: () => update({ actions: [...button.actions, makeAction('macro')] }) },
+                  { label: 'Launch app', icon: 'app', description: 'Start a program', onClick: () => update({ actions: [...button.actions, makeAction('launch')] }) },
+                  { label: 'Open URL', icon: 'link', description: 'Open a web page', onClick: () => update({ actions: [...button.actions, makeAction('url')] }) },
+                  { label: 'Run command', icon: 'terminal', description: 'Run a shell command', onClick: () => update({ actions: [...button.actions, makeAction('command')] }) },
+                  { label: 'Media key', icon: 'music', description: 'Play, pause, volume…', onClick: () => update({ actions: [...button.actions, makeAction('media')] }) },
+                  { label: 'Delay', icon: 'clock', description: 'Wait before the next action', onClick: () => update({ actions: [...button.actions, makeAction('delay')] }) },
+                  { label: 'Change page', icon: 'layers', description: 'Navigate to another deck page', onClick: () => update({ actions: [...button.actions, makeAction('page')] }) },
                 ]}
               />
             </div>
@@ -606,7 +626,7 @@ export function Inspector({
                   onUpdate={(next) => updateAction(index, next)}
                   onDelete={() => deleteAction(index)}
                   onMove={(direction) => moveAction(index, direction)}
-                  onTest={(candidate) => void testActions([candidate], describeAction(candidate))}
+                  onTest={(candidate) => void testActions([candidate], describeAction(candidate, platform))}
                 />
               ))}
               <button

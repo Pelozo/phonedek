@@ -55,7 +55,21 @@ data class DeckPage(
     val id: String = "",
     val name: String = "Page",
     val background: BackgroundDto? = null,
+    val grid: GridDto? = null,
     val buttons: List<DeckButton> = emptyList(),
+)
+
+/**
+ * Optional page-level override. Omitted fields fall back to the profile grid.
+ * Kept nullable independently from [GridSettings] so partial or malformed
+ * overrides can be repaired without losing the profile defaults.
+ */
+@Serializable
+data class GridDto(
+    val columns: Int? = null,
+    val rows: Int? = null,
+    val gap: Int? = null,
+    val padding: Int? = null,
 )
 
 @Serializable
@@ -175,12 +189,11 @@ fun DeckConfig.normalized(): DeckConfig? {
 
 private fun DeckProfile.normalized(): DeckProfile? {
     val safeGrid = grid.safe()
-    val capacity = safeGrid.columns * safeGrid.rows
 
     val usedPageIds = mutableSetOf<String>()
     val cleanPages = pages.mapIndexedNotNull { index, page ->
         val id = uniqueId(page.id, "page-${index + 1}", usedPageIds)
-        page.normalized(capacity).copy(id = id)
+        page.normalized(safeGrid).copy(id = id)
     }
     if (cleanPages.isEmpty()) return null
 
@@ -197,7 +210,11 @@ private fun DeckProfile.normalized(): DeckProfile? {
     )
 }
 
-private fun DeckPage.normalized(capacity: Int): DeckPage {
+private fun DeckPage.normalized(profileGrid: GridSettings): DeckPage {
+    val safePageGrid = grid?.toGridSettings(profileGrid)
+    val effectiveGrid = safePageGrid ?: profileGrid
+    val capacity = effectiveGrid.columns * effectiveGrid.rows
+
     val usedButtonIds = mutableSetOf<String>()
     val cleanButtons = buttons
         .filter { it.slot in 0 until capacity }
@@ -213,9 +230,30 @@ private fun DeckPage.normalized(capacity: Int): DeckPage {
         }
     return copy(
         name = name.ifBlank { "Page" },
+        grid = safePageGrid?.toDto(),
         buttons = cleanButtons,
     )
 }
+
+private fun GridSettings.toDto(): GridDto = GridDto(
+    columns = columns,
+    rows = rows,
+    gap = gap,
+    padding = padding,
+)
+
+/** Effective grid for a page: its override when present, otherwise the profile default. */
+fun pageGrid(profile: DeckProfile, page: DeckPage): GridSettings {
+    val fallback = profile.grid.safe()
+    return page.grid?.toGridSettings(fallback) ?: fallback
+}
+
+private fun GridDto.toGridSettings(fallback: GridSettings): GridSettings = GridSettings(
+    columns = columns?.takeIf { it in 1..10 } ?: fallback.columns,
+    rows = rows?.takeIf { it in 1..10 } ?: fallback.rows,
+    gap = gap?.takeIf { it in 0..60 } ?: fallback.gap,
+    padding = padding?.takeIf { it in 0..80 } ?: fallback.padding,
+)
 
 private fun GridSettings.safe(): GridSettings = copy(
     columns = columns.takeIf { it in 1..10 } ?: 5,

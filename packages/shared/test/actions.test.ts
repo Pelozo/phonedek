@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { actionsToPlan, MacroRecorder, pageActions, hasHostActions } from '../src/actions'
+import { actionsToPlan, describeAction, MacroRecorder, pageActions, hasHostActions } from '../src/actions'
 import type { Action } from '../src/types'
 
 describe('action plans', () => {
@@ -84,6 +84,22 @@ describe('action plans', () => {
     expect(pageActions(actions)).toHaveLength(1)
     expect(hasHostActions(actions)).toBe(true)
     expect(hasHostActions([{ type: 'page', direction: 'next' }])).toBe(false)
+  })
+
+  it('describes hotkeys with platform-aware labels', () => {
+    const screenshot: Action = { type: 'hotkey', keys: ['WIN', 'SHIFT', 'S'] }
+    expect(describeAction(screenshot, 'darwin')).toBe('Cmd + Shift + S')
+    expect(describeAction(screenshot, 'win32')).toBe('Win + Shift + S')
+    expect(describeAction(screenshot)).toBe('Win + Shift + S')
+    expect(describeAction(screenshot, 'linux')).toBe('Win + Shift + S')
+
+    const formatMac: Action = { type: 'hotkey', keys: ['SHIFT', 'ALT', 'F'] }
+    expect(describeAction(formatMac, 'darwin')).toBe('Shift + Option + F')
+    expect(describeAction(formatMac, 'win32')).toBe('Shift + Alt + F')
+
+    // Non-hotkey descriptions are unchanged.
+    expect(describeAction({ type: 'delay', ms: 250 }, 'darwin')).toBe('Wait 250 ms')
+    expect(describeAction({ type: 'media', key: 'playpause' }, 'darwin')).toBe('Media: playpause')
   })
 })
 

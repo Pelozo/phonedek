@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { ACTION_PACKS, describeAction, formatCombo } from '@phonedek/shared'
-import type { Action, ActionPack, ActionPreset, MediaKey } from '@phonedek/shared'
+import {
+  ACTION_PACKS,
+  describeAction,
+  formatCombo,
+  isPresetAvailable,
+  resolvePresetActions,
+} from '@phonedek/shared'
+import type { Action, ActionPack, ActionPreset, HostPlatform, MediaKey } from '@phonedek/shared'
+import { useHostPlatform } from '../lib/platform'
 import { Icon } from './Icons'
 import { Modal } from './Primitives'
 
@@ -22,22 +29,32 @@ function normalize(value: string): string {
     .replace(/\uFE0F/g, '')
 }
 
-function actionSummary(action: Action): string {
-  if (action.type === 'hotkey') return formatCombo(action.keys)
+function actionSummary(action: Action, platform: HostPlatform): string {
+  if (action.type === 'hotkey') return formatCombo(action.keys, platform)
   if (action.type === 'media') return `Media: ${MEDIA_LABELS[action.key]}`
-  return describeAction(action)
+  return describeAction(action, platform)
 }
 
-function presetSummary(preset: ActionPreset): string {
-  const summaries = preset.actions.map(actionSummary)
+function presetDescription(preset: ActionPreset, platform: HostPlatform): string {
+  return preset.platformDescriptions?.[platform] ?? preset.description
+}
+
+function presetSummary(preset: ActionPreset, platform: HostPlatform): string {
+  const summaries = resolvePresetActions(preset, platform).map((action) => actionSummary(action, platform))
   if (summaries.length === 0) return 'No actions'
   if (summaries.length === 1) return summaries[0] ?? 'Action'
   return `${summaries.length} actions · ${summaries.join(' → ')}`
 }
 
-function searchHaystack(pack: ActionPack, preset: ActionPreset): string {
+function searchHaystack(pack: ActionPack, preset: ActionPreset, platform: HostPlatform): string {
   return normalize(
-    [pack.name, pack.description, preset.name, preset.description, presetSummary(preset)].join(' '),
+    [
+      pack.name,
+      pack.description,
+      preset.name,
+      presetDescription(preset, platform),
+      presetSummary(preset, platform),
+    ].join(' '),
   )
 }
 
@@ -45,11 +62,12 @@ export function PresetPicker({
   onPick,
   onClose,
 }: {
-  onPick: (pack: ActionPack, preset: ActionPreset) => void
+  onPick: (pack: ActionPack, preset: ActionPreset, actions: Action[]) => void
   onClose: () => void
 }) {
+  const platform = useHostPlatform()
   const [query, setQuery] = useState('')
-  const [activePackId, setActivePackId] = useState(ACTION_PACKS[0]?.id ?? '')
+  const [activePackId, setActivePackId] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const railRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
@@ -57,17 +75,18 @@ export function PresetPicker({
   const tokens = useMemo(() => normalize(query).trim().split(/\s+/).filter(Boolean), [query])
   const filteredPacks = useMemo(
     () =>
-      ACTION_PACKS.map((pack) => ({
-        pack,
-        presets:
+      ACTION_PACKS.map((pack) => {
+        const available = pack.presets.filter((preset) => isPresetAvailable(preset, platform))
+        const presets =
           tokens.length === 0
-            ? pack.presets
-            : pack.presets.filter((preset) => {
-                const haystack = searchHaystack(pack, preset)
+            ? available
+            : available.filter((preset) => {
+                const haystack = searchHaystack(pack, preset, platform)
                 return tokens.every((token) => haystack.includes(token))
-              }),
-      })),
-    [tokens],
+              })
+        return { pack, presets, total: available.length }
+      }).filter((entry) => entry.presets.length > 0),
+    [tokens, platform],
   )
 
   const activeEntry = filteredPacks.find((entry) => entry.pack.id === activePackId) ?? filteredPacks[0]
@@ -79,12 +98,10 @@ export function PresetPicker({
   }, [])
 
   useEffect(() => {
-    if (!searching) return
-    const current = filteredPacks.find((entry) => entry.pack.id === activePackId)
-    if (current && current.presets.length > 0) return
-    const first = filteredPacks.find((entry) => entry.presets.length > 0)
+    if (filteredPacks.some((entry) => entry.pack.id === activePackId)) return
+    const first = filteredPacks[0]
     if (first) setActivePackId(first.pack.id)
-  }, [searching, filteredPacks, activePackId])
+  }, [filteredPacks, activePackId])
 
   const clearSearch = (): void => {
     setQuery('')
@@ -92,7 +109,7 @@ export function PresetPicker({
   }
 
   const choose = (pack: ActionPack, preset: ActionPreset): void => {
-    onPick(pack, preset)
+    onPick(pack, preset, resolvePresetActions(preset, platform))
     onClose()
   }
 
@@ -211,20 +228,20 @@ export function PresetPicker({
             aria-label="Action pack"
             onKeyDown={onRailKeyDown}
           >
-            {filteredPacks.map(({ pack, presets }) => {
+            {filteredPacks.map(({ pack, presets, total }) => {
               const active = pack.id === activeEntry?.pack.id
               return (
                 <button
                   key={pack.id}
                   type="button"
-                  className={`preset-pack${active ? ' active' : ''}${presets.length === 0 ? ' no-match' : ''}`}
+                  className={`preset-pack${active ? ' active' : ''}`}
                   aria-current={active ? 'page' : undefined}
                   onClick={() => setActivePackId(pack.id)}
                 >
                   <span className="preset-pack-head">
                     <strong>{pack.name}</strong>
                     <span className="preset-pack-count">
-                      {searching ? `${presets.length}/${pack.presets.length}` : presets.length}
+                      {searching ? `${presets.length}/${total}` : presets.length}
                     </span>
                   </span>
                   <span className="preset-pack-desc">{pack.description}</span>
@@ -236,15 +253,17 @@ export function PresetPicker({
           <div className="preset-results">
             <div className="preset-results-head">
               <div>
-                <h3>{activeEntry?.pack.name ?? 'Preset actions'}</h3>
+                <h3>{activeEntry?.pack.name ?? (searching ? 'No matches' : 'No presets available')}</h3>
                 <p>
                   {activeEntry?.pack.description ??
-                    'Choose a pack to browse ready-made shortcuts and controls.'}
+                    (searching
+                      ? 'Try a broader search or clear the query.'
+                      : 'This platform has no presets in the available packs.')}
                 </p>
               </div>
               <span className="preset-result-count">
                 {activePresets.length}
-                {searching && activeEntry ? `/${activeEntry.pack.presets.length}` : ''}{' '}
+                {searching && activeEntry ? `/${activeEntry.total}` : ''}{' '}
                 {activePresets.length === 1 ? 'preset' : 'presets'}
               </span>
             </div>
@@ -252,10 +271,16 @@ export function PresetPicker({
             {activePresets.length === 0 ? (
               <div className="preset-empty" role="status">
                 <Icon name="search" size={22} />
-                <p>No presets match “{query.trim()}”.</p>
-                <button type="button" className="button secondary small" onClick={clearSearch}>
-                  Clear search
-                </button>
+                <p>
+                  {searching
+                    ? `No presets match “${query.trim()}”.`
+                    : 'No presets are available for this platform.'}
+                </p>
+                {searching && (
+                  <button type="button" className="button secondary small" onClick={clearSearch}>
+                    Clear search
+                  </button>
+                )}
               </div>
             ) : (
               <div
@@ -279,9 +304,11 @@ export function PresetPicker({
                     <span className="preset-item-copy">
                       <span className="preset-item-title">
                         <strong>{preset.name}</strong>
-                        <span className="preset-item-summary">{presetSummary(preset)}</span>
+                        <span className="preset-item-summary">{presetSummary(preset, platform)}</span>
                       </span>
-                      <span className="preset-item-desc">{preset.description}</span>
+                      {presetDescription(preset, platform) !== presetSummary(preset, platform) && (
+                        <span className="preset-item-desc">{presetDescription(preset, platform)}</span>
+                      )}
                     </span>
                     <span className="preset-item-add" aria-hidden="true">
                       <Icon name="plus" size={14} />

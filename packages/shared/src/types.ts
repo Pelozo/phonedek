@@ -229,6 +229,8 @@ export interface DeckPage {
   name: string
   /** Optional page-wide background override. */
   background?: Background
+  /** Optional per-page grid override. Omitted = inherit profile.grid. */
+  grid?: GridSettings
   buttons: DeckButton[]
 }
 

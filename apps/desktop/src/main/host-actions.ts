@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process'
-import { statSync } from 'node:fs'
+import { existsSync, mkdirSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import type { Logger } from './logger'
 
 export interface HostActions {
@@ -14,14 +16,54 @@ export interface HostActionOptions {
   platform?: NodeJS.Platform
   openPath?: (path: string) => Promise<string>
   openExternal?: (url: string) => Promise<void>
-  /** Test seam for the macOS screenshot command. */
-  captureScreen?: () => Promise<void>
+  /** Test seam for the macOS screenshot command; receives the destination file. */
+  captureScreen?: (path: string) => Promise<void>
+  /** Overrides the user's home directory (used by tests to avoid touching ~/Desktop). */
+  homeDir?: string
   logger?: Logger
 }
 
 export const MAC_SCREENSHOT_COMMAND = '/usr/sbin/screencapture'
-/** `-x` = silent, full screen. */
-export const MAC_SCREENSHOT_ARGS: readonly string[] = ['-x']
+/** `-x` = silent, `-t png` = explicit PNG output; the destination file follows. */
+export const MAC_SCREENSHOT_ARGS: readonly string[] = ['-x', '-t', 'png']
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0')
+}
+
+/**
+ * Finder-friendly, colon-free screenshot name, e.g.
+ * `PhoneDeck Screenshot 2026-11-07 at 12.34.56.png`.
+ */
+export function macScreenshotFileName(date: Date): string {
+  const day = `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+  const time = `${pad2(date.getHours())}.${pad2(date.getMinutes())}.${pad2(date.getSeconds())}`
+  return `PhoneDeck Screenshot ${day} at ${time}.png`
+}
+
+/** Absolute destination on the user's Desktop. */
+export function macScreenshotPath(date: Date, homeDir: string): string {
+  return join(homeDir, 'Desktop', macScreenshotFileName(date))
+}
+
+/**
+ * `screencapture` requires an output path; without one it exits 1 with
+ * "no file specified". Array args avoid any shell quoting issues.
+ */
+export function macScreenshotArgs(path: string): string[] {
+  return [...MAC_SCREENSHOT_ARGS, path]
+}
+
+/** Never overwrite an existing capture: `… 12.34.56 2.png`, `… 3.png`, … */
+function uniqueScreenshotPath(basePath: string): string {
+  if (!existsSync(basePath)) return basePath
+  const stem = basePath.replace(/\.png$/i, '')
+  for (let attempt = 2; attempt < 1000; attempt += 1) {
+    const candidate = `${stem} ${attempt}.png`
+    if (!existsSync(candidate)) return candidate
+  }
+  throw new Error(`Could not find an unused screenshot name near ${basePath}`)
+}
 
 function spawnDetached(
   command: string,
@@ -156,20 +198,37 @@ export function createHostActions(options: HostActionOptions = {}): HostActions 
       if (platform !== 'darwin') {
         throw new Error('Full-screen screenshot is only implemented on macOS')
       }
+      const home = options.homeDir ?? homedir()
+      const desktopDir = join(home, 'Desktop')
+      try {
+        mkdirSync(desktopDir, { recursive: true })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        throw new Error(`macOS screenshot failed: could not create ${desktopDir}: ${message}`)
+      }
+
+      let target: string
+      try {
+        target = uniqueScreenshotPath(macScreenshotPath(new Date(), home))
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        throw new Error(`macOS screenshot failed: ${message}`)
+      }
+
       try {
         if (options.captureScreen) {
-          await options.captureScreen()
+          await options.captureScreen(target)
         } else {
-          await runToCompletion(MAC_SCREENSHOT_COMMAND, MAC_SCREENSHOT_ARGS)
+          await runToCompletion(MAC_SCREENSHOT_COMMAND, macScreenshotArgs(target))
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         throw new Error(
-          `macOS screenshot failed: ${message}. If macOS blocked the capture, allow Screen Recording ` +
-            'for PhoneDeck in System Settings → Privacy & Security.',
+          `macOS screenshot failed: ${message}. Destination: ${target}. If macOS blocked the capture, ` +
+            'allow Screen Recording for PhoneDeck in System Settings → Privacy & Security.',
         )
       }
-      logger?.info('Captured the full screen with screencapture')
+      logger?.info(`Saved full-screen screenshot to ${target}`)
     },
   }
 }

@@ -82,6 +82,7 @@ import com.phonedek.app.data.DeckPage
 import com.phonedek.app.data.DeckProfile
 import com.phonedek.app.data.Pairing
 import com.phonedek.app.data.ProfileTheme
+import com.phonedek.app.data.pageGrid
 import com.phonedek.app.net.ConnectionStatus
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -776,8 +777,13 @@ private fun DeckGrid(
     isActive: Boolean,
     onPress: (DeckButton) -> Unit,
 ) {
-    val grid = profile.grid
-    val bySlot = remember(page.buttons) { page.buttons.associateBy { it.slot } }
+    val grid = pageGrid(profile, page)
+    val capacity = grid.columns * grid.rows
+    val bySlot = remember(page.buttons, grid) {
+        // Defensive: configs are normalized on parse, but never render or
+        // crash on a slot that the page's effective grid cannot hold.
+        page.buttons.filter { it.slot in 0 until capacity }.associateBy { it.slot }
+    }
 
     Column(
         modifier = Modifier

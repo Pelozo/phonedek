@@ -1048,6 +1048,119 @@ input[type="range"]::-webkit-slider-thumb {
   border-bottom: 1px solid var(--line);
 }
 
+.grid-state-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.grid-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.grid-state::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  background: var(--faint);
+}
+
+.grid-state.custom {
+  color: var(--text-soft);
+}
+
+.grid-state.custom::before {
+  background: var(--accent);
+}
+
+.grid-reset {
+  flex: 0 0 auto;
+  padding: 1px 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 9.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.grid-reset:hover {
+  color: var(--accent-hi);
+}
+
+.grid-default {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.grid-default-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+}
+
+.grid-default-toggle > span:first-child {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.grid-default-toggle .mono {
+  flex: 0 0 auto;
+  font-size: 9px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.grid-default-toggle > svg {
+  flex: 0 0 auto;
+  color: var(--faint);
+}
+
+.grid-default-toggle:hover {
+  color: var(--text-soft);
+}
+
+.grid-default-toggle:hover .mono,
+.grid-default-toggle:hover > svg {
+  color: var(--text-soft);
+}
+
+.grid-default-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line);
+}
+
+.grid-default-panel .hint {
+  font-size: 9.5px;
+  line-height: 1.4;
+}
+
 .grid-steppers {
   display: grid;
   grid-template-columns: 1fr 1fr;

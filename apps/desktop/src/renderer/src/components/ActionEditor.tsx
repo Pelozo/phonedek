@@ -5,6 +5,7 @@ import { Icon, type IconName } from './Icons'
 import { NumberField } from './Primitives'
 import { Keycaps, ShortcutDialog } from './ShortcutDialog'
 import { MacroEditor } from './MacroEditor'
+import { useHostPlatform } from '../lib/platform'
 import type { ServerInfoView } from '../../../shared/api'
 
 const MEDIA_KEYS: Array<{ value: MediaKey; label: string }> = [
@@ -132,6 +133,7 @@ export function ActionEditor({
   const [macroOpen, setMacroOpen] = useState(false)
   const [macroRecording, setMacroRecording] = useState(false)
   const macroBodyId = useId()
+  const platform = useHostPlatform()
 
   useEffect(() => {
     if (macroRecording && !macroOpen) setMacroOpen(true)
@@ -181,7 +183,7 @@ export function ActionEditor({
         ) : (
           <div className="action-title">
             <strong>{ACTION_TITLES[action.type]}</strong>
-            <small>{describeAction(action)}</small>
+            <small>{describeAction(action, platform)}</small>
           </div>
         )}
         <div className="action-tools">
@@ -210,7 +212,7 @@ export function ActionEditor({
           {action.type === 'hotkey' && (
           <div className="stack">
             <div className="row between">
-              <Keycaps keys={action.keys} />
+              <Keycaps keys={action.keys} platform={platform} />
               <button type="button" className="button ghost small" onClick={() => setShortcutOpen(true)}>
                 Change shortcut
               </button>
@@ -410,7 +412,7 @@ export function ActionEditor({
         />
       )}
       {action.type === 'hotkey' && action.keys.length > 0 && (
-        <div className="sr-only">{formatCombo(action.keys)}</div>
+        <div className="sr-only">{formatCombo(action.keys, platform)}</div>
       )}
     </div>
   )

@@ -3,17 +3,22 @@ import type { DeckConfig, DeckPage, DeckProfile } from '@phonedek/shared'
 import {
   addPage,
   addProfile,
-  capacity,
+  clearPageGrid,
   deletePage,
   deleteProfile,
   duplicatePage,
   duplicateProfile,
+  pageCapacity,
+  pageGrid,
   resizeGrid,
+  resizePageGrid,
+  updateGrid,
   updatePageMeta,
   updateProfileMeta,
 } from '@phonedek/shared'
 import type { ServerInfoView, SettingsView } from '../../../shared/api'
 import { Icon } from './Icons'
+import { NumberField } from './Primitives'
 
 const GRID_PRESETS = [
   { columns: 3, rows: 3 },
@@ -21,6 +26,91 @@ const GRID_PRESETS = [
   { columns: 5, rows: 3 },
   { columns: 8, rows: 4 },
 ]
+
+function GridSizeControls({
+  columns,
+  rows,
+  label,
+  onChange,
+}: {
+  columns: number
+  rows: number
+  label: string
+  onChange: (columns: number, rows: number) => void
+}) {
+  return (
+    <>
+      <div className="grid-steppers">
+        <div className="grid-stepper" role="group" aria-label={`${label} columns: ${columns}`}>
+          <span className="grid-stepper-label">Columns</span>
+          <div className="grid-stepper-controls">
+            <button
+              type="button"
+              onClick={() => onChange(columns - 1, rows)}
+              disabled={columns <= 1}
+              aria-label={`Decrease ${label} columns`}
+            >
+              −
+            </button>
+            <span className="grid-stepper-value" aria-live="polite">
+              {columns}
+            </span>
+            <button
+              type="button"
+              onClick={() => onChange(columns + 1, rows)}
+              disabled={columns >= 10}
+              aria-label={`Increase ${label} columns`}
+            >
+              +
+            </button>
+          </div>
+        </div>
+        <div className="grid-stepper" role="group" aria-label={`${label} rows: ${rows}`}>
+          <span className="grid-stepper-label">Rows</span>
+          <div className="grid-stepper-controls">
+            <button
+              type="button"
+              onClick={() => onChange(columns, rows - 1)}
+              disabled={rows <= 1}
+              aria-label={`Decrease ${label} rows`}
+            >
+              −
+            </button>
+            <span className="grid-stepper-value" aria-live="polite">
+              {rows}
+            </span>
+            <button
+              type="button"
+              onClick={() => onChange(columns, rows + 1)}
+              disabled={rows >= 10}
+              aria-label={`Increase ${label} rows`}
+            >
+              +
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid-presets" role="group" aria-label={`${label} grid presets`}>
+        {GRID_PRESETS.map((preset) => {
+          const active = preset.columns === columns && preset.rows === rows
+          return (
+            <button
+              key={`${preset.columns}x${preset.rows}`}
+              type="button"
+              className={`grid-preset${active ? ' active' : ''}`}
+              aria-pressed={active}
+              title={`Set ${label.toLowerCase()} grid to ${preset.columns} × ${preset.rows}`}
+              onClick={() => onChange(preset.columns, preset.rows)}
+            >
+              {preset.columns}×{preset.rows}
+            </button>
+          )
+        })}
+      </div>
+    </>
+  )
+}
 
 function InlineName({
   value,
@@ -80,6 +170,8 @@ export function Sidebar({
   onOpenSettings: () => void
   onToast: (message: string, kind?: 'info' | 'success' | 'error') => void
 }) {
+  const [profileGridOpen, setProfileGridOpen] = useState(false)
+
   const addNewProfile = (): void => {
     const result = addProfile(config, `Profile ${config.profiles.length + 1}`)
     onChangeConfig(result.config)
@@ -139,14 +231,45 @@ export function Sidebar({
   }
 
   const usedButtons = profile.pages.reduce((count, item) => count + item.buttons.length, 0)
+  const activePageGrid = pageGrid(profile, page)
 
-  const applyGrid = (columns: number, rows: number): void => {
+  const applyPageGrid = (columns: number, rows: number): void => {
+    const nextColumns = Math.max(1, Math.min(10, Math.round(columns)))
+    const nextRows = Math.max(1, Math.min(10, Math.round(rows)))
+    if (nextColumns === activePageGrid.columns && nextRows === activePageGrid.rows) return
+
+    const limit = nextColumns * nextRows
+    const removed = page.buttons.filter((button) => button.slot >= limit).length
+    if (removed > 0) {
+      const confirmed = window.confirm(
+        `Resize “${page.name}” to ${nextColumns} × ${nextRows}? This removes ${removed} button${removed === 1 ? '' : 's'} from this page that no longer fit. This cannot be undone.`,
+      )
+      if (!confirmed) return
+    }
+
+    onChangeConfig(
+      resizePageGrid(config, profile.id, page.id, {
+        ...activePageGrid,
+        columns: nextColumns,
+        rows: nextRows,
+      }),
+    )
+    onToast(
+      removed > 0
+        ? `“${page.name}” grid set to ${nextColumns} × ${nextRows} · ${removed} button${removed === 1 ? '' : 's'} removed`
+        : `“${page.name}” grid set to ${nextColumns} × ${nextRows}`,
+      removed > 0 ? 'info' : 'success',
+    )
+  }
+
+  const applyProfileGrid = (columns: number, rows: number): void => {
     const nextColumns = Math.max(1, Math.min(10, Math.round(columns)))
     const nextRows = Math.max(1, Math.min(10, Math.round(rows)))
     if (nextColumns === profile.grid.columns && nextRows === profile.grid.rows) return
 
     const limit = nextColumns * nextRows
     const losses = profile.pages
+      .filter((item) => !item.grid)
       .map((item) => ({
         name: item.name,
         count: item.buttons.filter((button) => button.slot >= limit).length,
@@ -157,7 +280,7 @@ export function Sidebar({
     if (removed > 0) {
       const where = losses.map((item) => `${item.name} (${item.count})`).join(', ')
       const confirmed = window.confirm(
-        `Resize the grid to ${nextColumns} × ${nextRows}? This removes ${removed} button${removed === 1 ? '' : 's'} that no longer fit: ${where}. This cannot be undone.`,
+        `Resize the profile default grid to ${nextColumns} × ${nextRows}? This removes ${removed} button${removed === 1 ? '' : 's'} from inheriting pages: ${where}. Pages with their own layout are unaffected. This cannot be undone.`,
       )
       if (!confirmed) return
     }
@@ -165,8 +288,28 @@ export function Sidebar({
     onChangeConfig(resizeGrid(config, profile.id, nextColumns, nextRows))
     onToast(
       removed > 0
-        ? `Grid set to ${nextColumns} × ${nextRows} · ${removed} button${removed === 1 ? '' : 's'} removed`
-        : `Grid set to ${nextColumns} × ${nextRows}`,
+        ? `Profile default set to ${nextColumns} × ${nextRows} · ${removed} button${removed === 1 ? '' : 's'} removed from inheriting pages`
+        : `Profile default set to ${nextColumns} × ${nextRows}`,
+      removed > 0 ? 'info' : 'success',
+    )
+  }
+
+  const inheritProfileGrid = (): void => {
+    if (!page.grid) return
+    const limit = profile.grid.columns * profile.grid.rows
+    const removed = page.buttons.filter((button) => button.slot >= limit).length
+    if (removed > 0) {
+      const confirmed = window.confirm(
+        `Use the profile default grid (${profile.grid.columns} × ${profile.grid.rows}) for “${page.name}”? This removes ${removed} button${removed === 1 ? '' : 's'} that no longer fit. This cannot be undone.`,
+      )
+      if (!confirmed) return
+    }
+
+    onChangeConfig(clearPageGrid(config, profile.id, page.id))
+    onToast(
+      removed > 0
+        ? `“${page.name}” now inherits the profile grid · ${removed} button${removed === 1 ? '' : 's'} removed`
+        : `“${page.name}” now inherits the profile grid`,
       removed > 0 ? 'info' : 'success',
     )
   }
@@ -238,84 +381,74 @@ export function Sidebar({
             />
           </label>
           <div className="grid-control">
-            <div className="grid-steppers">
-              <div className="grid-stepper" role="group" aria-label={`Columns: ${profile.grid.columns}`}>
-                <span className="grid-stepper-label">Columns</span>
-                <div className="grid-stepper-controls">
-                  <button
-                    type="button"
-                    onClick={() => applyGrid(profile.grid.columns - 1, profile.grid.rows)}
-                    disabled={profile.grid.columns <= 1}
-                    aria-label="Decrease columns"
-                  >
-                    −
-                  </button>
-                  <span className="grid-stepper-value" aria-live="polite">
-                    {profile.grid.columns}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => applyGrid(profile.grid.columns + 1, profile.grid.rows)}
-                    disabled={profile.grid.columns >= 10}
-                    aria-label="Increase columns"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-              <div className="grid-stepper" role="group" aria-label={`Rows: ${profile.grid.rows}`}>
-                <span className="grid-stepper-label">Rows</span>
-                <div className="grid-stepper-controls">
-                  <button
-                    type="button"
-                    onClick={() => applyGrid(profile.grid.columns, profile.grid.rows - 1)}
-                    disabled={profile.grid.rows <= 1}
-                    aria-label="Decrease rows"
-                  >
-                    −
-                  </button>
-                  <span className="grid-stepper-value" aria-live="polite">
-                    {profile.grid.rows}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => applyGrid(profile.grid.columns, profile.grid.rows + 1)}
-                    disabled={profile.grid.rows >= 10}
-                    aria-label="Increase rows"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
+            <div className="grid-state-row">
+              <span className={`grid-state${page.grid ? ' custom' : ''}`}>
+                {page.grid ? 'Custom page layout' : 'Inherited from profile'}
+              </span>
+              {page.grid && (
+                <button type="button" className="grid-reset" onClick={inheritProfileGrid}>
+                  Use profile default
+                </button>
+              )}
             </div>
-
-            <div className="grid-presets" role="group" aria-label="Grid size presets">
-              {GRID_PRESETS.map((preset) => {
-                const active =
-                  preset.columns === profile.grid.columns && preset.rows === profile.grid.rows
-                return (
-                  <button
-                    key={`${preset.columns}x${preset.rows}`}
-                    type="button"
-                    className={`grid-preset${active ? ' active' : ''}`}
-                    aria-pressed={active}
-                    title={`Set grid to ${preset.columns} × ${preset.rows}`}
-                    onClick={() => applyGrid(preset.columns, preset.rows)}
-                  >
-                    {preset.columns}×{preset.rows}
-                  </button>
-                )
-              })}
-            </div>
-
+            <GridSizeControls
+              columns={activePageGrid.columns}
+              rows={activePageGrid.rows}
+              label="Page"
+              onChange={applyPageGrid}
+            />
             <div className="grid-readout">
               <span>
-                Page <strong>{page.buttons.length}/{capacity(profile.grid)}</strong>
+                Page <strong>{page.buttons.length}/{pageCapacity(profile, page)}</strong>
               </span>
               <span>
                 Profile <strong>{usedButtons}</strong>
               </span>
             </div>
+          </div>
+
+          <div className="grid-default">
+            <button
+              type="button"
+              className="grid-default-toggle"
+              aria-expanded={profileGridOpen}
+              onClick={() => setProfileGridOpen((open) => !open)}
+            >
+              <span>Profile default</span>
+              <span className="mono">
+                {profile.grid.columns} × {profile.grid.rows}
+              </span>
+              <Icon name={profileGridOpen ? 'chevron-down' : 'chevron-right'} size={13} />
+            </button>
+            {profileGridOpen && (
+              <div className="grid-default-panel">
+                <GridSizeControls
+                  columns={profile.grid.columns}
+                  rows={profile.grid.rows}
+                  label="Profile default"
+                  onChange={applyProfileGrid}
+                />
+                <div className="two-col">
+                  <NumberField
+                    label="Gap"
+                    value={profile.grid.gap}
+                    min={0}
+                    max={60}
+                    suffix="px"
+                    onChange={(gap) => onChangeConfig(updateGrid(config, profile.id, { gap }))}
+                  />
+                  <NumberField
+                    label="Padding"
+                    value={profile.grid.padding}
+                    min={0}
+                    max={80}
+                    suffix="px"
+                    onChange={(padding) => onChangeConfig(updateGrid(config, profile.id, { padding }))}
+                  />
+                </div>
+                <p className="hint">Applies to pages that inherit the profile grid.</p>
+              </div>
+            )}
           </div>
         </section>
 
@@ -339,7 +472,8 @@ export function Sidebar({
                       {item.id === profile.defaultPageId && <em className="tag">start</em>}
                     </strong>
                     <small>
-                      {item.buttons.length} button{item.buttons.length === 1 ? '' : 's'}
+                      {item.buttons.length} button{item.buttons.length === 1 ? '' : 's'} ·{' '}
+                      {pageGrid(profile, item).columns}×{pageGrid(profile, item).rows}
                     </small>
                   </span>
                 </button>

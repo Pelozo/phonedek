@@ -9,6 +9,7 @@ import type {
   ProfileTheme,
 } from './types'
 import { CONFIG_SCHEMA_VERSION } from './types'
+import { normalizeHostPlatform, type HostPlatform } from './platform'
 import { newId } from './ids'
 
 export const GRADIENTS = [
@@ -114,7 +115,8 @@ function hotkey(...keys: string[]): Action {
   return { type: 'hotkey', keys }
 }
 
-function mainPage(): DeckPage {
+function mainPage(platform: HostPlatform): DeckPage {
+  const mac = platform === 'darwin'
   return {
     id: 'page-main',
     name: 'Main',
@@ -171,50 +173,53 @@ function mainPage(): DeckPage {
       }),
       starter('btn-taskview', {
         slot: 7,
-        label: 'Task view',
-        sublabel: 'Win + Tab',
-        icon: '🗂️',
+        label: mac ? 'Mission Control' : 'Task view',
+        sublabel: mac ? 'Ctrl + Up' : 'Win + Tab',
+        icon: mac ? '🧭' : '🗂️',
         background: gradient('#1e40af', '#3b82f6'),
-        actions: [hotkey('WIN', 'TAB')],
+        actions: mac ? [hotkey('CTRL', 'UP')] : [hotkey('WIN', 'TAB')],
       }),
       starter('btn-desktop', {
         slot: 8,
         label: 'Show desktop',
-        sublabel: 'Win + D',
+        sublabel: mac ? 'F11' : 'Win + D',
         icon: '🖥️',
         background: gradient('#334155', '#64748b'),
-        actions: [hotkey('WIN', 'D')],
+        actions: mac ? [hotkey('F11')] : [hotkey('WIN', 'D')],
       }),
       starter('btn-lock', {
         slot: 9,
         label: 'Lock PC',
+        sublabel: mac ? 'Ctrl + Cmd + Q' : undefined,
         icon: '🔒',
         background: gradient('#9f1239', '#e11d48'),
-        actions: [{ type: 'command', command: 'rundll32.exe user32.dll,LockWorkStation', hidden: true }],
+        actions: mac
+          ? [hotkey('CTRL', 'WIN', 'Q')]
+          : [{ type: 'command', command: 'rundll32.exe user32.dll,LockWorkStation', hidden: true }],
       }),
       starter('btn-copy', {
         slot: 10,
         label: 'Copy',
-        sublabel: 'Ctrl + C',
+        sublabel: mac ? 'Cmd + C' : 'Ctrl + C',
         icon: '📋',
         background: gradient('#065f46', '#059669'),
-        actions: [hotkey('CTRL', 'C')],
+        actions: [mac ? hotkey('WIN', 'C') : hotkey('CTRL', 'C')],
       }),
       starter('btn-paste', {
         slot: 11,
         label: 'Paste',
-        sublabel: 'Ctrl + V',
+        sublabel: mac ? 'Cmd + V' : 'Ctrl + V',
         icon: '📌',
         background: gradient('#7c2d12', '#ea580c'),
-        actions: [hotkey('CTRL', 'V')],
+        actions: [mac ? hotkey('WIN', 'V') : hotkey('CTRL', 'V')],
       }),
       starter('btn-undo', {
         slot: 12,
         label: 'Undo',
-        sublabel: 'Ctrl + Z',
+        sublabel: mac ? 'Cmd + Z' : 'Ctrl + Z',
         icon: '↩️',
         background: gradient('#854d0e', '#ca8a04'),
-        actions: [hotkey('CTRL', 'Z')],
+        actions: [mac ? hotkey('WIN', 'Z') : hotkey('CTRL', 'Z')],
       }),
       starter('btn-youtube', {
         slot: 13,
@@ -315,13 +320,14 @@ function mediaPage(): DeckPage {
   }
 }
 
-export function createDefaultConfig(now: Date = new Date()): DeckConfig {
+export function createDefaultConfig(platform?: string, now: Date = new Date()): DeckConfig {
+  const host = normalizeHostPlatform(platform)
   const profile: DeckProfile = {
     id: 'profile-desktop',
     name: 'My PC',
     grid: { ...DEFAULT_GRID },
     theme: structuredClone(DEFAULT_THEME),
-    pages: [mainPage(), mediaPage()],
+    pages: [mainPage(host), mediaPage()],
     defaultPageId: 'page-main',
   }
 

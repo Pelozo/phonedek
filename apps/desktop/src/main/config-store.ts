@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { createDefaultConfig } from '@phonedek/shared'
+import { createDefaultConfig, migrateStarterDeck } from '@phonedek/shared'
 import { parseConfig } from '@phonedek/shared'
 import type { DeckConfig } from '@phonedek/shared'
 import type { Logger } from './logger'
@@ -68,13 +68,16 @@ export class ConfigStore {
 
   private readOrCreate(): DeckConfig {
     if (!existsSync(this.file)) {
-      const config = createDefaultConfig(this.now())
+      const config = createDefaultConfig(process.platform, this.now())
       this.write(config)
       return config
     }
     const raw = readFileSync(this.file, 'utf8')
     try {
-      return parseConfig(JSON.parse(raw))
+      const parsed = parseConfig(JSON.parse(raw))
+      const migrated = migrateStarterDeck(parsed, process.platform)
+      if (migrated !== parsed) this.write(migrated)
+      return migrated
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error)
       const backup = join(dirname(this.file), `config.corrupt-${Date.now()}.json`)
@@ -84,7 +87,7 @@ export class ConfigStore {
         // best effort
       }
       this.logger?.warn(`Config was invalid; backed up to ${backup}. ${this.lastError}`)
-      const config = createDefaultConfig(this.now())
+      const config = createDefaultConfig(process.platform, this.now())
       this.write(config)
       return config
     }

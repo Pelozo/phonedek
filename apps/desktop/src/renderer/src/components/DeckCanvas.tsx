@@ -1,5 +1,5 @@
 import { useState, type CSSProperties, type DragEvent } from 'react'
-import { addButton, capacity, createEmptyButton, moveButton } from '@phonedek/shared'
+import { addButton, createEmptyButton, moveButton, pageCapacity, pageGrid } from '@phonedek/shared'
 import type { DeckConfig, DeckPage, DeckProfile } from '@phonedek/shared'
 import type { ServerInfoView } from '../../../shared/api'
 import { backgroundStyle, buttonBackground, isVideoBackground, textColorFor } from '../lib/ui'
@@ -27,7 +27,8 @@ export function DeckCanvas({
 }) {
   const [dragging, setDragging] = useState<string | null>(null)
   const [overSlot, setOverSlot] = useState<number | null>(null)
-  const slots = capacity(profile.grid)
+  const grid = pageGrid(profile, page)
+  const slots = pageCapacity(profile, page)
   const bySlot = new Map(page.buttons.map((button) => [button.slot, button]))
   const deckNumber = String(Math.max(1, config.profiles.findIndex((item) => item.id === profile.id) + 1)).padStart(2, '0')
 
@@ -64,11 +65,11 @@ export function DeckCanvas({
   const pageVideo = isVideoBackground(pageBackground) ? pageBackground : null
 
   const gridStyle: CSSProperties = {
-    gridTemplateColumns: `repeat(${profile.grid.columns}, minmax(0, 1fr))`,
-    gridTemplateRows: `repeat(${profile.grid.rows}, minmax(0, 1fr))`,
-    gap: `${profile.grid.gap}px`,
-    padding: `${profile.grid.padding}px`,
-    aspectRatio: `${profile.grid.columns} / ${profile.grid.rows}`,
+    gridTemplateColumns: `repeat(${grid.columns}, minmax(0, 1fr))`,
+    gridTemplateRows: `repeat(${grid.rows}, minmax(0, 1fr))`,
+    gap: `${grid.gap}px`,
+    padding: `${grid.padding}px`,
+    aspectRatio: `${grid.columns} / ${grid.rows}`,
     ...backgroundStyle(pageBackground, server),
   }
 
@@ -81,7 +82,7 @@ export function DeckCanvas({
           <span className="deck-sep" aria-hidden="true" />
           <span>Deck {deckNumber}</span>
           <span className="deck-meta">
-            {profile.grid.columns}×{profile.grid.rows} · {page.buttons.length}/{slots}
+            {grid.columns}×{grid.rows} · {page.buttons.length}/{slots}
           </span>
         </div>
         <div className="deck-frame">

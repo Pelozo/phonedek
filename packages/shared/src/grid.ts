@@ -14,6 +14,34 @@ export function capacity(grid: GridSettings): number {
   return grid.columns * grid.rows
 }
 
+/** Effective grid for a page: its own override or the profile default. */
+export function pageGrid(profile: DeckProfile, page: DeckPage): GridSettings {
+  return page.grid ?? profile.grid
+}
+
+/** Effective capacity of a page (honors the page grid override). */
+export function pageCapacity(profile: DeckProfile, page: DeckPage): number {
+  return capacity(pageGrid(profile, page))
+}
+
+/** Next free slot within the page's effective grid, or null when full. */
+export function nextFreeSlotForPage(profile: DeckProfile, page: DeckPage): number | null {
+  return nextFreeSlot(page, pageGrid(profile, page))
+}
+
+function clampGridValue(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.round(value)))
+}
+
+function normalizeGrid(grid: GridSettings): GridSettings {
+  return {
+    columns: clampGridValue(grid.columns, 1, 10),
+    rows: clampGridValue(grid.rows, 1, 10),
+    gap: clampGridValue(grid.gap, 0, 60),
+    padding: clampGridValue(grid.padding, 0, 80),
+  }
+}
+
 export function touch(config: DeckConfig, now: Date = new Date()): DeckConfig {
   return { ...config, updatedAt: now.toISOString() }
 }
@@ -100,7 +128,7 @@ export function updateTheme(
   return touch(next, now)
 }
 
-/** Resize a grid, dropping buttons that no longer fit. Returns the new config. */
+/** Resize the profile default grid, dropping buttons that no longer fit. */
 export function resizeGrid(
   config: DeckConfig,
   profileId: string,
@@ -114,11 +142,61 @@ export function resizeGrid(
   const next = mapProfile(config, profileId, (profile) => ({
     ...profile,
     grid: { ...profile.grid, columns: cols, rows: rws },
-    pages: profile.pages.map((page) => ({
-      ...page,
-      buttons: page.buttons.filter((button) => button.slot < limit),
-    })),
+    pages: profile.pages.map((page) =>
+      // Pages with their own grid are unaffected by the profile default.
+      page.grid
+        ? page
+        : {
+            ...page,
+            buttons: page.buttons.filter((button) => button.slot < limit),
+          },
+    ),
   }))
+  return touch(next, now)
+}
+
+/**
+ * Set a page's grid override and drop buttons outside the new capacity.
+ * Other pages and the profile default are untouched.
+ */
+export function resizePageGrid(
+  config: DeckConfig,
+  profileId: string,
+  pageId: string,
+  grid: GridSettings,
+  now: Date = new Date(),
+): DeckConfig {
+  const normalized = normalizeGrid(grid)
+  const limit = capacity(normalized)
+  const next = mapPage(config, profileId, pageId, (page) => ({
+    ...page,
+    grid: normalized,
+    buttons: page.buttons.filter((button) => button.slot < limit),
+  }))
+  return touch(next, now)
+}
+
+/**
+ * Remove a page's grid override (inherit the profile default) and drop buttons
+ * that do not fit the profile grid.
+ */
+export function clearPageGrid(
+  config: DeckConfig,
+  profileId: string,
+  pageId: string,
+  now: Date = new Date(),
+): DeckConfig {
+  const profile = getProfile(config, profileId)
+  if (!profile) return config
+  const limit = capacity(profile.grid)
+  const next = mapPage(config, profileId, pageId, (page) => {
+    const rest = { ...page }
+    delete rest.grid
+    return {
+      ...rest,
+      buttons: rest.buttons.filter((button) => button.slot < limit),
+    }
+  })
   return touch(next, now)
 }
 
@@ -133,7 +211,9 @@ export function addButton(
   if (!profile) throw new Error('Unknown profile')
   const page = getPage(profile, pageId)
   if (!page) throw new Error('Unknown page')
-  if (button.slot < 0 || button.slot >= capacity(profile.grid)) throw new Error('Slot is outside the grid')
+  if (button.slot < 0 || button.slot >= pageCapacity(profile, page)) {
+    throw new Error('Slot is outside the grid')
+  }
   if (page.buttons.some((existing) => existing.slot === button.slot)) throw new Error('Slot is already occupied')
 
   const next = mapPage(config, profileId, pageId, (current) => ({
@@ -185,7 +265,9 @@ export function moveButton(
 ): DeckConfig {
   const profile = getProfile(config, profileId)
   if (!profile) throw new Error('Unknown profile')
-  if (targetSlot < 0 || targetSlot >= capacity(profile.grid)) throw new Error('Slot is outside the grid')
+  const currentPage = getPage(profile, pageId)
+  if (!currentPage) throw new Error('Unknown page')
+  if (targetSlot < 0 || targetSlot >= pageCapacity(profile, currentPage)) throw new Error('Slot is outside the grid')
   const next = mapPage(config, profileId, pageId, (page) => {
     const moving = page.buttons.find((button) => button.id === buttonId)
     if (!moving) throw new Error('Unknown button')

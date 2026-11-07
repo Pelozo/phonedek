@@ -5,7 +5,7 @@ import type {
   PagePlanStep,
   PlanStep,
 } from './types'
-import { normalizeCombo, isModifier } from './keys'
+import { normalizeCombo, isModifier, formatCombo } from './keys'
 
 const DEFAULT_HOLD_MS = 35
 const DEFAULT_CHAR_MS = 4
@@ -360,10 +360,10 @@ export function describeStep(step: MacroStep): string {
   }
 }
 
-export function describeAction(action: Action): string {
+export function describeAction(action: Action, platform?: string): string {
   switch (action.type) {
     case 'hotkey':
-      return action.keys.map((key) => key.length === 1 ? key.toUpperCase() : key).join(' + ')
+      return formatCombo(action.keys, platform)
     case 'text':
       return `Type "${action.text.replace(/\s+/g, ' ').slice(0, 36)}"`
     case 'macro': {

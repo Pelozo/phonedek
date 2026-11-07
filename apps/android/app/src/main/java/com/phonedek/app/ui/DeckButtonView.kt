@@ -68,7 +68,7 @@ fun DeckButtonView(
     val media = button.iconMedia
     val mediaUrl = remember(media?.asset, pairing?.host, pairing?.port, pairing?.token) {
         media?.asset?.takeIf { it.isNotBlank() }?.let { asset ->
-            pairing?.let { assetUrl(it.host, it.port, asset) }
+            pairing?.let { assetUrl(it.host, it.port, asset, it.token) }
         }
     }
     var mediaFailed by remember(media?.type, media?.asset, mediaUrl, pairing?.token) {

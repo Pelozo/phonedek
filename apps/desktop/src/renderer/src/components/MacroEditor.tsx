@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { describeStep } from '@phonedek/shared'
+import { describeStep, formatCombo } from '@phonedek/shared'
 import type { MacroStep, MediaKey, MouseAction } from '@phonedek/shared'
 import { Icon } from './Icons'
 import { PopMenu } from './Menu'
 import { NumberField } from './Primitives'
 import { Keycaps, ShortcutDialog } from './ShortcutDialog'
 import { MacroRecordDialog } from './MacroRecordDialog'
+import { useHostPlatform } from '../lib/platform'
 
 const MEDIA_KEYS: Array<{ value: MediaKey; label: string }> = [
   { value: 'playpause', label: 'Play / pause' },
@@ -86,6 +87,16 @@ function stepLabel(step: MacroStep): string {
   }
 }
 
+function stepSummary(step: MacroStep, platform: string): string {
+  if (step.type === 'hotkey') {
+    const combo = formatCombo(step.keys, platform)
+    if (step.action === 'down') return `Hold ${combo}`
+    if (step.action === 'up') return `Release ${combo}`
+    return combo
+  }
+  return describeStep(step)
+}
+
 export function MacroEditor({
   steps,
   repeat = 1,
@@ -103,6 +114,7 @@ export function MacroEditor({
 }) {
   const [recordOpen, setRecordOpen] = useState(false)
   const [shortcutIndex, setShortcutIndex] = useState<number | null>(null)
+  const platform = useHostPlatform()
 
   const update = (index: number, next: MacroStep): void => {
     onChange(steps.map((step, current) => (current === index ? next : step)))
@@ -194,7 +206,7 @@ export function MacroEditor({
               <header>
                 <span className="step-badge">{index + 1}</span>
                 <strong>{stepLabel(step)}</strong>
-                <span className="step-summary">{describeStep(step)}</span>
+                <span className="step-summary">{stepSummary(step, platform)}</span>
                 <div className="step-actions">
                   <button type="button" className="icon-button tiny" disabled={index === 0} onClick={() => move(index, -1)} aria-label="Move step up">
                     <Icon name="arrow-up" size={14} />
@@ -215,7 +227,7 @@ export function MacroEditor({
                 {step.type === 'hotkey' && (
                   <div className="stack">
                     <div className="row between gap">
-                      <Keycaps keys={step.keys} small />
+                      <Keycaps keys={step.keys} small platform={platform} />
                       <button type="button" className="button ghost small" onClick={() => setShortcutIndex(index)}>
                         Change keys
                       </button>

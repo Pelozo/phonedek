@@ -120,7 +120,7 @@ fun backgroundSpec(
         "image" -> {
             val url = pairing?.let {
                 background.asset?.takeIf(String::isNotBlank)?.let { asset ->
-                    assetUrl(it.host, it.port, asset)
+                    assetUrl(it.host, it.port, asset, it.token)
                 }
             }
             if (url == null) {
@@ -140,7 +140,7 @@ fun backgroundSpec(
             val current = pairing
             val url = current?.let {
                 background.asset?.takeIf(String::isNotBlank)?.let { asset ->
-                    assetUrl(it.host, it.port, asset)
+                    assetUrl(it.host, it.port, asset, it.token)
                 }
             }
             if (url == null) {

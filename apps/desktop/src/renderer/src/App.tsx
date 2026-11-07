@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   addButton,
   createEmptyButton,
-  nextFreeSlot,
+  nextFreeSlotForPage,
+  pageCapacity,
+  pageGrid,
 } from '@phonedek/shared'
 import type { DeckConfig } from '@phonedek/shared'
 import type { AppState, ServerInfoView, UpdateStatus, PermissionStatus } from '../../shared/api'
@@ -14,6 +16,7 @@ import { PairDialog } from './components/PairDialog'
 import { PermissionBanner } from './components/PermissionBanner'
 import { SettingsDialog } from './components/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
+import { HostPlatformProvider } from './lib/platform'
 
 type ToastKind = 'info' | 'success' | 'error'
 interface ToastState {
@@ -268,7 +271,7 @@ export default function App() {
 
   const addNewButton = (): void => {
     if (!config || !profile || !page) return
-    const slot = nextFreeSlot(page, profile.grid)
+    const slot = nextFreeSlotForPage(profile, page)
     if (slot === null) {
       showToast('This page is full. Add rows/columns or delete a button first.', 'error')
       return
@@ -323,22 +326,25 @@ export default function App() {
 
   const selectedButton = page.buttons.find((item) => item.id === selectedButtonId) ?? null
   const saveLabel = saveStatus === 'saving' ? 'Saving…' : saveStatus === 'error' ? 'Unsaved' : 'Saved'
+  const activeGrid = pageGrid(profile, page)
+  const activeCapacity = pageCapacity(profile, page)
 
   return (
-    <div className="app-shell">
-      <Sidebar
-        config={config}
-        profile={profile}
-        page={page}
-        server={server}
-        settings={server.settings}
-        onChangeConfig={setConfig}
-        onSelectProfile={selectProfile}
-        onSelectPage={selectPage}
-        onOpenPair={() => setPairOpen(true)}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onToast={showToast}
-      />
+    <HostPlatformProvider platform={server.platform}>
+      <div className="app-shell">
+        <Sidebar
+          config={config}
+          profile={profile}
+          page={page}
+          server={server}
+          settings={server.settings}
+          onChangeConfig={setConfig}
+          onSelectProfile={selectProfile}
+          onSelectPage={selectPage}
+          onOpenPair={() => setPairOpen(true)}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onToast={showToast}
+        />
 
       <main className="workspace">
         <header className="topbar">
@@ -347,10 +353,10 @@ export default function App() {
             <Icon name="chevron-right" size={14} />
             <strong>{page.name}</strong>
             <span className="grid-pill">
-              {profile.grid.columns} × {profile.grid.rows}
+              {activeGrid.columns} × {activeGrid.rows}
             </span>
             <span className="slot-pill">
-              {page.buttons.length}/{profile.grid.columns * profile.grid.rows} slots
+              {page.buttons.length}/{activeCapacity} slots
             </span>
           </div>
 
@@ -461,6 +467,7 @@ export default function App() {
         />
       )}
       {toast && <div className={`toast ${toast.kind}`}>{toast.message}</div>}
-    </div>
+      </div>
+    </HostPlatformProvider>
   )
 }

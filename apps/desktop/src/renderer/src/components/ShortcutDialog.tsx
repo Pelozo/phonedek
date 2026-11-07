@@ -1,12 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
 import { formatKeyLabel, isModifier, keyFromEvent, normalizeCombo } from '@phonedek/shared'
+import { useHostPlatform } from '../lib/platform'
 import { Modal } from './Primitives'
 
-export function Keycaps({ keys, small }: { keys: string[]; small?: boolean }) {
+export function Keycaps({
+  keys,
+  small,
+  platform,
+}: {
+  keys: string[]
+  small?: boolean
+  platform?: string
+}) {
+  const hostPlatform = useHostPlatform()
+  const activePlatform = platform ?? hostPlatform
   return (
     <span className={small ? 'keycaps small' : 'keycaps'}>
       {keys.map((key) => (
-        <kbd key={key}>{formatKeyLabel(key)}</kbd>
+        <kbd key={key}>{formatKeyLabel(key, activePlatform)}</kbd>
       ))}
     </span>
   )

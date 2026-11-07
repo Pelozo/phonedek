@@ -58,13 +58,16 @@ fun httpBaseUrl(host: String, port: Int): HttpUrl =
         .port(port)
         .build()
 
-fun assetUrl(host: String, port: Int, asset: String): String? = runCatching {
+fun assetUrl(host: String, port: Int, asset: String, token: String? = null): String? = runCatching {
     HttpUrl.Builder()
         .scheme("http")
         .host(host)
         .port(port)
         .addPathSegment("assets")
         .addPathSegment(asset)
+        .apply {
+            if (!token.isNullOrBlank()) addQueryParameter("token", token)
+        }
         .build()
         .toString()
 }.getOrNull()
