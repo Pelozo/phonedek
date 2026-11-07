@@ -5,6 +5,7 @@ import android.content.ContentResolver
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -29,6 +30,8 @@ import com.phonedek.app.net.createHttpClient
 import com.phonedek.app.net.createWebSocketClient
 import com.phonedek.app.util.Diag
 import com.phonedek.app.util.parseEndpoint
+import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -454,10 +457,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             reportBackupFailure("Pair with a PC before saving a backup.")
             return
         }
-        if (snapshot.connection != ConnectionStatus.CONNECTED) {
-            reportBackupFailure("Connect to your PC to save a backup.")
-            return
-        }
 
         _state.update {
             it.copy(
@@ -475,47 +474,54 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         backupJob = viewModelScope.launch {
             val resolver = getApplication<Application>().contentResolver
+            val tempFile = File(
+                getApplication<Application>().cacheDir,
+                "phonedek-backup-${System.currentTimeMillis()}.zip",
+            )
             var failure: String? = null
             var savedName: String? = null
             try {
                 withContext(Dispatchers.IO) {
                     val displayName = queryBackupName(resolver, uri)
-                    val output = resolver.openOutputStream(uri)
-                    if (output == null) {
-                        failure = "Could not open the selected file."
-                        return@withContext
+                    val downloaded = FileOutputStream(tempFile).use { stream ->
+                        http.downloadBackup(
+                            host = pairing.host,
+                            port = pairing.port,
+                            token = pairing.token,
+                            outputStream = stream,
+                            onProgress = { downloadedBytes, total ->
+                                _state.update { current ->
+                                    current.copy(
+                                        backupBytes = downloadedBytes,
+                                        backupTotalBytes = total,
+                                        backupProgress = if (total > 0) {
+                                            (downloadedBytes.toFloat() / total)
+                                                .coerceIn(0f, 1f)
+                                        } else {
+                                            0f
+                                        },
+                                    )
+                                }
+                            },
+                        )
                     }
-                    output.use { stream ->
-                        when (
-                            val result = http.downloadBackup(
-                                host = pairing.host,
-                                port = pairing.port,
-                                token = pairing.token,
-                                outputStream = stream,
-                                onProgress = { downloaded, total ->
-                                    _state.update { current ->
-                                        current.copy(
-                                            backupBytes = downloaded,
-                                            backupTotalBytes = total,
-                                            backupProgress = if (total > 0) {
-                                                (downloaded.toFloat() / total)
-                                                    .coerceIn(0f, 1f)
-                                            } else {
-                                                0f
-                                            },
-                                        )
+                    when (downloaded) {
+                        is BackupResult.Success -> {
+                            val output = resolver.openOutputStream(uri)
+                            if (output == null) {
+                                failure = "Could not open the selected file."
+                            } else {
+                                output.use { destination ->
+                                    tempFile.inputStream().use { source ->
+                                        source.copyTo(destination, 64 * 1024)
                                     }
-                                },
-                            )
-                        ) {
-                            is BackupResult.Success -> {
+                                }
                                 savedName = displayName
                                     ?: uri.lastPathSegment
                                     ?: "backup.zip"
                             }
-
-                            is BackupResult.Failure -> failure = result.message
                         }
+                        is BackupResult.Failure -> failure = downloaded.message
                     }
                 }
             } catch (error: CancellationException) {
@@ -534,11 +540,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (error: Exception) {
                 failure = "Backup failed: ${error.message ?: "unknown error"}"
+            } finally {
+                tempFile.delete()
             }
 
             if (failure != null) {
-                // SAF may leave a zero/partial document behind. Remove it so a
-                // failed download never looks like a valid backup.
+                // CreateDocument may have made an empty placeholder before the
+                // download. Remove it via both provider paths so a failed save
+                // is never mistaken for a 0-byte backup.
+                runCatching { DocumentsContract.deleteDocument(resolver, uri) }
                 runCatching { resolver.delete(uri, null, null) }
             }
             val message = failure

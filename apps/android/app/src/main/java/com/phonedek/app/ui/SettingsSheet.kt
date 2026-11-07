@@ -57,7 +57,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.phonedek.app.BuildConfig
 import com.phonedek.app.data.Pairing
-import com.phonedek.app.net.ConnectionStatus
 import com.phonedek.app.util.Diag
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -568,10 +567,10 @@ private fun SettingsBackupSection(
     onLaunchBackup: () -> Unit,
     onLaunchImport: () -> Unit,
 ) {
-    val saveUnavailableReason = when {
-        state.pairing == null -> "Pair with a PC before using backups."
-        state.connection != ConnectionStatus.CONNECTED -> "Connect to your PC to save a backup."
-        else -> null
+    val saveUnavailableReason = if (state.pairing == null) {
+        "Pair with a PC before using backups."
+    } else {
+        null
     }
     // The upload is HTTP and can proceed while the WebSocket is reconnecting
     // after the system document picker; only pairing is required.
