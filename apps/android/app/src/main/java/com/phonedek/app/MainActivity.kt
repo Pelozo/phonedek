@@ -70,23 +70,26 @@ class MainActivity : ComponentActivity() {
             val state by viewModel.state.collectAsStateWithLifecycle()
             val view = LocalView.current
             val displayRotation = view.display?.rotation ?: Surface.ROTATION_0
+            // Onboarding and pairing stay responsive to portrait. The deck is
+            // landscape-locked only once a phone has been paired.
+            val lockDeckLandscape = state.lockLandscape && state.pairing != null
             val contentRotation = if (state.ready) {
                 buttonContentRotation(
                     physicalOrientation = physicalOrientation,
                     displayRotation = displayRotation,
-                    lockLandscape = state.lockLandscape,
+                    lockLandscape = lockDeckLandscape,
                     enabled = state.rotateContentInPortrait,
                 )
             } else {
                 0f
             }
-            LaunchedEffect(state.lockLandscape) {
-                this@MainActivity.requestedOrientation = if (state.lockLandscape) {
+            LaunchedEffect(lockDeckLandscape) {
+                this@MainActivity.requestedOrientation = if (lockDeckLandscape) {
                     ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                 } else {
                     ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                 }
-                Diag.i("Orientation lock landscape=${state.lockLandscape}")
+                Diag.i("Orientation lock landscape=$lockDeckLandscape paired=${state.pairing != null}")
             }
             LaunchedEffect(state.phoneBrightness) {
                 applyPhoneBrightness(state.phoneBrightness)

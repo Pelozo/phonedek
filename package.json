@@ -1,6 +1,6 @@
 {
   "name": "phonedek",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "private": true,
   "description": "PhoneDeck — turn an Android phone into a wireless Stream Deck for Windows",
   "license": "MIT",
