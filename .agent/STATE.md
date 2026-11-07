@@ -33,8 +33,11 @@
 - Android subagent session `ses_e4cf99e72ffen0aq1xsuJgWb94`: its files are in the repo and
   CI-green; local arm64 Gradle still runs/fails on x86_64 aapt2 (CI x64 is authoritative).
   If it reports edits after 20:35, review and re-run CI.
-- Next action: user re-tests pairing with v0.1.2 and shares Diagnostics/logcat if needed.
-  Optional backlog: tray/minimize-to-tray, Android page swipe, global macro hook, signing.
+- 2026-11-06/07: User confirmed v0.1.2 APK connects successfully after pairing. Root cause was
+  the pre-fix APK (`scheme ws`); the published v0.1.2 artifact contains `buildWebSocketUrl`.
+- v0.1.1 release was deleted (known WS bug); only v0.1.2 is published.
+- Next action: await manual-test feedback (pairing/actions/UI). Optional backlog: tray/minimize,
+  Android page swipe, global macro hook, signed release APK/Windows signing.
 - Optional backlog: signed release APK, Windows code signing, global macro recording hook,
   tray/minimize-to-tray, page swipe on Android, refresh screenshots to 0.1.1 footer.
 - Release notes draft:
