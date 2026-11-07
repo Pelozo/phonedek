@@ -19,6 +19,7 @@ apps/android/*.iml
 apps/android/captures/
 *.jks
 *.keystore
+!apps/android/debug.keystore
 
 # Electron
 apps/desktop/out/

@@ -135,3 +135,7 @@ PhoneDeck is LAN-only. The manifest allows cleartext traffic because the desktop
 uses plain `http://` and `ws://` on the local network, and includes
 `ACCESS_WIFI_STATE` + `CHANGE_WIFI_MULTICAST_STATE` for discovery. No cloud
 services are used.
+
+## Signing
+
+Debug builds use the committed `apps/android/debug.keystore` so CI and local debug APKs share a stable signature and can update each other. Debug keys are not secrets; do not use this for a store release.

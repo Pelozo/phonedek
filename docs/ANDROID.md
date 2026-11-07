@@ -30,7 +30,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 Or copy the APK to the phone and open it (allow “Install unknown apps” for the file manager/browser you use).
 
-The debug APK is signed with the standard Android debug key. That is fine for personal use; create a release keystore before distributing.
+Debug builds use the committed `apps/android/debug.keystore` (standard debug credentials, not a secret) so every CI build has the same signature and APKs can update each other. That is fine for personal use; create a private release keystore before distributing on a store.
 
 ## Pair
 

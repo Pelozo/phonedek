@@ -53,6 +53,17 @@ android {
         versionName = "0.1.1"
     }
 
+    signingConfigs {
+        getByName("debug") {
+            // Stable debug key committed on purpose. Debug keys are not secrets,
+            // and using one key means CI APKs can update each other.
+            storeFile = rootProject.file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
