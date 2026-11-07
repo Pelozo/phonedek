@@ -37,13 +37,22 @@ minute it answers `429` with `Retry-After: 60`.
 | GET    | `/api/config`   | yes  | Full `DeckConfig` JSON. Supports `If-None-Match` → `304`. |
 | GET    | `/assets/<file>`| yes  | Background images/videos. `Content-Type` inferred from extension; byte ranges supported. |
 | GET/HEAD | `/api/backup` | yes  | Full PhoneDeck backup ZIP (`phonedek-config.json` + `assets/`). Byte ranges supported. |
+| POST   | `/api/import`   | yes  | Stream a backup ZIP (≤300 MB) for validation and native approval; returns the preview. |
 | POST   | `/api/press`    | yes  | Optional HTTP fallback for button presses (same body as WS `press`). |
 
-`/api/info` currently advertises `capabilities: ["backup-export-v1"]`. Clients
-must treat the array as optional and only show backup controls when the marker
-is present. `/api/backup` responds with `Content-Type: application/zip`,
+`/api/info` currently advertises `capabilities: ["backup-export-v1", "import-v1",
+"input-v1", "brightness-v1"]`. Clients must treat the array as optional and only
+show a feature when its marker is present. `/api/backup` responds with
+`Content-Type: application/zip`,
 `Content-Disposition: attachment; filename="phonedek-backup-YYYYMMDD-HHMMSS.zip"`,
 `Content-Length`, and `Cache-Control: no-store`.
+
+`POST /api/import` streams the request body to a temp file, validates the same
+ZIP format as export, and calls a native desktop approval dialog. Success is
+`200 { ok:true, preview }` with `serverName`, profile/page/button counts, asset
+count/bytes, warnings, and `dangerousActions` (`launch` + `command` actions).
+Other statuses: `400` invalid ZIP/config, `409` another import is awaiting
+approval, `413` over 300 MB, `500` rejected or failed apply.
 
 The phone may cache the last config and render offline; presses are only
 executed while the WebSocket is connected.

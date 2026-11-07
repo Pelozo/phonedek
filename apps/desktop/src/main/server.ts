@@ -1,5 +1,5 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
-import { createReadStream, mkdtempSync, rmSync, statSync } from 'node:fs'
+import { createReadStream, createWriteStream, mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -25,11 +25,21 @@ import type {
   ServerMessage,
 } from '@phonedek/shared'
 import type { AssetStore } from './assets'
-import { writeBackupFile } from './backup'
+import {
+  previewBackup,
+  readBackupFile,
+  writeBackupFile,
+  type BackupPreview,
+} from './backup'
 import type { Logger } from './logger'
 
 /** LAN endpoints and features advertised to clients. */
-export const SERVER_CAPABILITIES = ['backup-export-v1', 'input-v1', BRIGHTNESS_CAPABILITY] as const
+export const SERVER_CAPABILITIES = [
+  'backup-export-v1',
+  'import-v1',
+  'input-v1',
+  BRIGHTNESS_CAPABILITY,
+] as const
 
 export interface PressContext {
   profile: DeckProfile
@@ -50,6 +60,8 @@ export interface DeckServerOptions {
   getServerName: () => string
   onPress: (client: ConnectedClient, message: PressMessage, context: PressContext) => Promise<PressResult>
   onInput?: (client: ConnectedClient, message: InputMessage, context: InputContext) => Promise<InputResult>
+  /** Called only after an uploaded backup validates; show native approval here. */
+  importBackup?: (filePath: string, preview: BackupPreview) => Promise<{ ok: boolean; error?: string }>
   onClientsChanged?: (clients: ConnectedClient[]) => void
   logger?: Logger
 }
@@ -73,6 +85,8 @@ const AUTH_MAX_FAILURES = 6
 const AUTH_BLOCK_MS = 60_000
 const INPUT_RATE_LIMIT = 60
 const BRIGHTNESS_RATE_LIMIT = 20
+const MAX_IMPORT_BYTES = 300 * 1024 * 1024
+const IMPORT_TEMP_PREFIX = 'phonedek-import-'
 
 function bearerToken(request: IncomingMessage, url: URL): string | undefined {
   const query = url.searchParams.get('token')
@@ -160,6 +174,71 @@ function streamAsset(path: string, response: ServerResponse, range?: ByteRange):
   stream.pipe(response)
 }
 
+type UploadResult = 'ok' | 'too-large' | 'aborted'
+
+/**
+ * Stream the request body to disk without buffering the ZIP. The temp file is
+ * deleted by the caller in all paths.
+ */
+function receiveUpload(
+  request: IncomingMessage,
+  target: string,
+  limit: number,
+): Promise<UploadResult> {
+  return new Promise((resolve) => {
+    const output = createWriteStream(target)
+    let total = 0
+    let settled = false
+
+    const finish = (result: UploadResult): void => {
+      if (settled) return
+      settled = true
+      request.off('data', onData)
+      request.off('end', onEnd)
+      request.off('error', onError)
+      request.off('aborted', onAborted)
+      output.off('error', onOutputError)
+      resolve(result)
+    }
+
+    const onData = (chunk: Buffer): void => {
+      total += chunk.length
+      if (total > limit) {
+        output.destroy()
+        finish('too-large')
+        request.resume()
+        return
+      }
+      if (!output.write(chunk)) {
+        request.pause()
+        output.once('drain', () => request.resume())
+      }
+    }
+
+    const onEnd = (): void => {
+      output.end(() => finish('ok'))
+    }
+    const onError = (): void => {
+      output.destroy()
+      finish('aborted')
+    }
+    const onAborted = (): void => {
+      output.destroy()
+      finish('aborted')
+    }
+    const onOutputError = (): void => {
+      finish('aborted')
+      request.resume()
+    }
+
+    request.on('data', onData)
+    request.once('end', onEnd)
+    request.once('error', onError)
+    request.once('aborted', onAborted)
+    output.once('error', onOutputError)
+  })
+}
+
 async function readJson(request: IncomingMessage, limit = 32 * 1024): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
@@ -193,6 +272,7 @@ export class DeckServer {
   private readonly clients = new Map<string, ClientRecord>()
   private readonly authFailures = new Map<string, number[]>()
   private readonly authBlockedUntil = new Map<string, number>()
+  private importInProgress = false
   private actualPort = 0
 
   constructor(options: DeckServerOptions) {
@@ -576,6 +656,78 @@ export class DeckServer {
     }
   }
 
+  private async handleImport(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    if (this.importInProgress) {
+      request.resume()
+      json(response, 409, { ok: false, error: 'Another import is already waiting for approval.' })
+      return
+    }
+
+    const declared = Number(request.headers['content-length'])
+    if (Number.isFinite(declared) && declared > MAX_IMPORT_BYTES) {
+      request.resume()
+      json(response, 413, { ok: false, error: 'Backup is larger than 300 MB' })
+      return
+    }
+
+    this.importInProgress = true
+    let tempDir = ''
+    try {
+      tempDir = mkdtempSync(join(tmpdir(), IMPORT_TEMP_PREFIX))
+      const tempPath = join(tempDir, 'upload.zip')
+      const upload = await receiveUpload(request, tempPath, MAX_IMPORT_BYTES)
+      if (upload === 'too-large') {
+        json(response, 413, { ok: false, error: 'Backup is larger than 300 MB' })
+        return
+      }
+      if (upload === 'aborted') {
+        json(response, 400, { ok: false, error: 'Upload was interrupted' })
+        return
+      }
+
+      let preview: BackupPreview
+      try {
+        preview = previewBackup(readBackupFile(tempPath))
+      } catch (error) {
+        json(response, 400, {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        })
+        return
+      }
+
+      if (!this.options.importBackup) {
+        json(response, 500, { ok: false, error: 'Import is not available in this build' })
+        return
+      }
+
+      let result: { ok: boolean; error?: string }
+      try {
+        result = await this.options.importBackup(tempPath, preview)
+      } catch (error) {
+        result = { ok: false, error: error instanceof Error ? error.message : String(error) }
+      }
+      if (!result.ok) {
+        json(response, 500, { ok: false, error: result.error ?? 'Import failed' })
+        return
+      }
+
+      this.options.logger?.info(
+        `Phone backup import applied (${preview.profiles} profiles, ${preview.assets} assets)`,
+      )
+      json(response, 200, { ok: true, preview })
+    } finally {
+      if (tempDir) {
+        try {
+          rmSync(tempDir, { recursive: true, force: true })
+        } catch {
+          // Best effort; the OS eventually clears its temp directory.
+        }
+      }
+      this.importInProgress = false
+    }
+  }
+
   private async handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url ?? '/', 'http://localhost')
 
@@ -602,6 +754,11 @@ export class DeckServer {
       } else {
         json(response, 401, { error: 'Pairing PIN required' })
       }
+      return
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/import') {
+      await this.handleImport(request, response)
       return
     }
 

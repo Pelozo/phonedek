@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AdmZip from 'adm-zip'
@@ -15,6 +16,7 @@ import type {
   ServerMessage,
 } from '@phonedek/shared'
 import { AssetStore } from '../src/main/assets'
+import { writeBackupFile, type BackupPreview } from '../src/main/backup'
 import { DeckServer, type InputContext, type PressContext } from '../src/main/server'
 
 interface InputCall {
@@ -35,7 +37,14 @@ interface Harness {
 
 const cleanups: Array<() => Promise<void>> = []
 
-async function harness(pressResult: PressResult = { ok: true }): Promise<Harness> {
+interface HarnessOptions {
+  importBackup?: (filePath: string, preview: BackupPreview) => Promise<{ ok: boolean; error?: string }>
+}
+
+async function harness(
+  pressResult: PressResult = { ok: true },
+  options: HarnessOptions = {},
+): Promise<Harness> {
   const dir = mkdtempSync(join(tmpdir(), 'phonedek-server-'))
   const config = createDefaultConfig()
   config.serverName = 'Test deck'
@@ -60,6 +69,7 @@ async function harness(pressResult: PressResult = { ok: true }): Promise<Harness
       inputs.push({ message, context })
       return { ok: true }
     },
+    importBackup: options.importBackup,
   })
   const port = await server.start()
   cleanups.push(() => server.stop())
@@ -70,6 +80,48 @@ function attachControl(h: Harness, buttonId: string, control: ControlSpec): void
   const button = h.config.profiles[0]!.pages[0]!.buttons.find((candidate) => candidate.id === buttonId)
   if (!button) throw new Error(`Missing button ${buttonId}`)
   button.control = control
+}
+
+function makeBackup(config: DeckConfig, assets: Record<string, Buffer> = {}): Buffer {
+  const dir = mkdtempSync(join(tmpdir(), 'phonedek-backup-src-'))
+  const assetsDir = join(dir, 'assets')
+  mkdirSync(assetsDir)
+  for (const [name, data] of Object.entries(assets)) writeFileSync(join(assetsDir, name), data)
+  const target = join(dir, 'backup.zip')
+  writeBackupFile(target, config, assetsDir)
+  cleanups.push(async () => rmSync(dir, { recursive: true, force: true }))
+  return readFileSync(target)
+}
+
+function postRaw(
+  port: number,
+  path: string,
+  headers: Record<string, string>,
+  body: Buffer,
+): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(
+      { host: '127.0.0.1', port, path, method: 'POST', headers },
+      (response) => {
+        let data = ''
+        response.setEncoding('utf8')
+        response.on('data', (chunk: string) => {
+          data += chunk
+        })
+        response.on('end', () => resolve({ status: response.statusCode ?? 0, body: data }))
+      },
+    )
+    request.on('error', reject)
+    request.end(body)
+  })
+}
+
+function importTempDirs(): string[] {
+  return readdirSync(tmpdir()).filter((name) => name.startsWith('phonedek-import-'))
+}
+
+async function waitForImportCleanup(before: Set<string>): Promise<void> {
+  await waitFor(() => importTempDirs().every((name) => before.has(name)))
 }
 
 function url(base: string, path: string, token?: string): string {
@@ -126,6 +178,7 @@ describe('DeckServer HTTP', () => {
     }
     expect(infoBody).toMatchObject({ app: 'PhoneDeck', serverName: 'Test deck', protocol: 1 })
     expect(infoBody.capabilities).toContain('backup-export-v1')
+    expect(infoBody.capabilities).toContain('import-v1')
     expect(infoBody.capabilities).toContain('input-v1')
     expect(infoBody.capabilities).toContain('brightness-v1')
 
@@ -341,6 +394,7 @@ describe('DeckServer WebSocket', () => {
     expect(hello.config.serverName).toBe('Test deck')
     expect(hello.capabilities).toContain('input-v1')
     expect(hello.capabilities).toContain('brightness-v1')
+    expect(hello.capabilities).toContain('import-v1')
     expect(messages.some((message) => message.type === 'hello')).toBe(true)
 
     const helloMessage: ClientMessage = {
@@ -660,5 +714,176 @@ describe('DeckServer phone brightness', () => {
 
     ws.close()
     await waitFor(() => h.server.getClients().length === 0)
+  })
+})
+
+describe('DeckServer phone backup import', () => {
+  it('previews and applies a valid backup after approval', async () => {
+    const source = createDefaultConfig()
+    source.serverName = 'Phone backup'
+    source.profiles[0]!.pages[0]!.buttons[0]!.actions = [
+      { type: 'launch', path: 'notepad.exe' },
+      { type: 'command', command: 'echo hi', hidden: true },
+      { type: 'macro', steps: [{ type: 'command', command: 'echo nested', hidden: true }] },
+    ]
+    const zip = makeBackup(source, { 'wallpaper.png': Buffer.from([1, 2, 3, 4]) })
+
+    let seen: BackupPreview | null = null
+    let fileExistedDuringApproval = false
+    const h = await harness(
+      { ok: true },
+      {
+        importBackup: async (filePath, preview) => {
+          fileExistedDuringApproval = existsSync(filePath)
+          seen = preview
+          return { ok: true }
+        },
+      },
+    )
+    const before = new Set(importTempDirs())
+    const response = await fetch(url(`http://127.0.0.1:${h.port}`, '/api/import', h.token), {
+      method: 'POST',
+      body: new Uint8Array(zip),
+    })
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as { ok: boolean; preview: BackupPreview }
+    expect(body.ok).toBe(true)
+    expect(fileExistedDuringApproval).toBe(true)
+    expect(seen).not.toBeNull()
+    expect(seen).toMatchObject({
+      serverName: 'Phone backup',
+      profiles: 1,
+      pages: 2,
+      buttons: 25,
+      assets: 1,
+      bytes: 4,
+      dangerousActions: 4,
+      warnings: [],
+    })
+    expect(body.preview).toEqual(seen)
+    await waitForImportCleanup(before)
+  })
+
+  it('includes skipped-asset warnings in the preview', async () => {
+    const source = createDefaultConfig()
+    source.serverName = 'Warned backup'
+    const zip = new AdmZip()
+    zip.addFile('phonedek-config.json', Buffer.from(JSON.stringify(source)))
+    zip.addFile('assets/notes.txt', Buffer.from('not an asset'))
+    let seen: BackupPreview | null = null
+    const h = await harness(
+      { ok: true },
+      {
+        importBackup: async (_filePath, preview) => {
+          seen = preview
+          return { ok: true }
+        },
+      },
+    )
+    const response = await fetch(url(`http://127.0.0.1:${h.port}`, '/api/import', h.token), {
+      method: 'POST',
+      body: new Uint8Array(zip.toBuffer()),
+    })
+    expect(response.status).toBe(200)
+    expect(seen).not.toBeNull()
+    expect(seen!.assets).toBe(0)
+    expect(seen!.warnings).toContain('Skipped unsupported asset: notes.txt')
+  })
+
+  it('requires the pairing PIN', async () => {
+    const h = await harness()
+    const zip = makeBackup(createDefaultConfig())
+    const response = await fetch(`http://127.0.0.1:${h.port}/api/import`, {
+      method: 'POST',
+      body: new Uint8Array(zip),
+    })
+    expect(response.status).toBe(401)
+  })
+
+  it('rejects an invalid ZIP without calling approval', async () => {
+    let called = false
+    const h = await harness(
+      { ok: true },
+      {
+        importBackup: async () => {
+          called = true
+          return { ok: true }
+        },
+      },
+    )
+    const before = new Set(importTempDirs())
+    const response = await fetch(url(`http://127.0.0.1:${h.port}`, '/api/import', h.token), {
+      method: 'POST',
+      body: new Uint8Array(Buffer.from('this is not a zip')),
+    })
+    expect(response.status).toBe(400)
+    expect(called).toBe(false)
+    await waitForImportCleanup(before)
+  })
+
+  it('returns 500 when the desktop rejects the import', async () => {
+    const h = await harness(
+      { ok: true },
+      {
+        importBackup: async () => ({ ok: false, error: 'Import cancelled on the PC.' }),
+      },
+    )
+    const before = new Set(importTempDirs())
+    const response = await fetch(url(`http://127.0.0.1:${h.port}`, '/api/import', h.token), {
+      method: 'POST',
+      body: new Uint8Array(makeBackup(createDefaultConfig())),
+    })
+    expect(response.status).toBe(500)
+    expect(await response.json()).toEqual({ ok: false, error: 'Import cancelled on the PC.' })
+    await waitForImportCleanup(before)
+  })
+
+  it('rejects a concurrent import with 409', async () => {
+    let release!: () => void
+    let markStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve
+    })
+    const h = await harness(
+      { ok: true },
+      {
+        importBackup: async () => {
+          await new Promise<void>((resolve) => {
+            release = resolve
+            markStarted()
+          })
+          return { ok: true }
+        },
+      },
+    )
+    const target = url(`http://127.0.0.1:${h.port}`, '/api/import', h.token)
+    const zip = makeBackup(createDefaultConfig())
+    const first = fetch(target, { method: 'POST', body: new Uint8Array(zip) })
+    await started
+
+    const second = await fetch(target, { method: 'POST', body: new Uint8Array(zip) })
+    expect(second.status).toBe(409)
+    expect(await second.json()).toMatchObject({ ok: false })
+
+    release()
+    expect((await first).status).toBe(200)
+  })
+
+  it('rejects an oversize declared upload with 413', async () => {
+    const h = await harness()
+    const before = new Set(importTempDirs())
+    const result = await postRaw(
+      h.port,
+      '/api/import',
+      {
+        Authorization: `Bearer ${h.token}`,
+        'Content-Type': 'application/zip',
+        'Content-Length': String(300 * 1024 * 1024 + 1),
+      },
+      Buffer.alloc(0),
+    )
+    expect(result.status).toBe(413)
+    expect(result.body).toContain('300 MB')
+    await waitForImportCleanup(before)
   })
 })

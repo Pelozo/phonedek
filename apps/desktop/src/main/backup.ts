@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import AdmZip from 'adm-zip'
 import { assetKindFromName, assetMaxBytes, validateConfig } from '@phonedek/shared'
@@ -32,6 +32,60 @@ export interface BackupWriteResult {
   assets: number
   bytes: number
   warnings: string[]
+}
+
+/** Summary shown in the phone-upload approval dialog. */
+export interface BackupPreview {
+  serverName: string
+  profiles: number
+  pages: number
+  buttons: number
+  assets: number
+  bytes: number
+  warnings: string[]
+  /** launch + command actions (including macro steps). */
+  dangerousActions: number
+}
+
+function countDangerousActions(backup: BackupReadResult): number {
+  let count = 0
+  for (const profile of backup.config.profiles) {
+    for (const page of profile.pages) {
+      for (const button of page.buttons) {
+        for (const action of button.actions) {
+          if (action.type === 'launch' || action.type === 'command') count += 1
+          if (action.type === 'macro') {
+            for (const step of action.steps) {
+              if (step.type === 'launch' || step.type === 'command') count += 1
+            }
+          }
+        }
+      }
+    }
+  }
+  return count
+}
+
+/** Build the approval preview from an already validated backup. */
+export function previewBackup(backup: BackupReadResult): BackupPreview {
+  let pages = 0
+  let buttons = 0
+  for (const profile of backup.config.profiles) {
+    pages += profile.pages.length
+    for (const page of profile.pages) buttons += page.buttons.length
+  }
+  let bytes = 0
+  for (const data of backup.assets.values()) bytes += data.length
+  return {
+    serverName: backup.config.serverName,
+    profiles: backup.config.profiles.length,
+    pages,
+    buttons,
+    assets: backup.assets.size,
+    bytes,
+    warnings: [...backup.warnings],
+    dangerousActions: countDangerousActions(backup),
+  }
 }
 
 function parseConfigText(raw: string, label: string): DeckConfig {
@@ -140,4 +194,54 @@ export function writeBackupFile(target: string, config: DeckConfig, assetsDir: s
 
   zip.writeZip(target)
   return { assets: count, bytes, warnings }
+}
+
+export interface ApplyBackupImportOptions {
+  filePath: string
+  /** Current config; its serverName is preserved in the imported config. */
+  currentConfig: DeckConfig
+  /** Current asset directory, used for the pre-import backup. */
+  assetsDir: string
+  /** Directory for the pre-import backup ZIP. */
+  backupDir: string
+  importAsset: (name: string, data: Buffer) => boolean
+  now?: Date
+}
+
+export interface ApplyBackupImportResult {
+  config: DeckConfig
+  preImportPath: string
+  importedAssets: number
+  warnings: string[]
+}
+
+/**
+ * Apply an already-approved phone backup:
+ * 1. re-read and validate the ZIP,
+ * 2. write a pre-import backup of the current deck (abort on failure),
+ * 3. import assets,
+ * 4. return the new config with the target PC's serverName preserved.
+ *
+ * The caller is responsible for `store.replace`/broadcast after this returns.
+ */
+export function applyBackupImport(options: ApplyBackupImportOptions): ApplyBackupImportResult {
+  const backup = readBackupFile(options.filePath)
+
+  mkdirSync(options.backupDir, { recursive: true })
+  const stamp = (options.now ?? new Date()).toISOString().replace(/[:.]/g, '-')
+  const preImportPath = join(options.backupDir, `phonedek-pre-import-${stamp}.zip`)
+  writeBackupFile(preImportPath, options.currentConfig, options.assetsDir)
+
+  let importedAssets = 0
+  for (const [name, data] of backup.assets) {
+    if (!options.importAsset(name, data)) continue
+    importedAssets += 1
+  }
+
+  return {
+    config: { ...backup.config, serverName: options.currentConfig.serverName },
+    preImportPath,
+    importedAssets,
+    warnings: [...backup.warnings],
+  }
 }

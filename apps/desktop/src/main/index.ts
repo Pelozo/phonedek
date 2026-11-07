@@ -6,7 +6,7 @@ import { z } from 'zod'
 import { ActionSchema, controlToActions, validateConfig } from '@phonedek/shared'
 import type { Action, AssetKind, DeckConfig, PressResult } from '@phonedek/shared'
 import { AssetStore } from './assets'
-import { readBackupFile, writeBackupFile } from './backup'
+import { applyBackupImport, readBackupFile, writeBackupFile } from './backup'
 import { ConfigStore } from './config-store'
 import { DiscoveryService } from './discovery'
 import { ActionExecutor } from './executor'
@@ -763,6 +763,72 @@ async function bootstrap(): Promise<void> {
       executor.execute(context.button.actions, context.button.label),
     onInput: async (_client, message, context) =>
       router.handle(message, { control: context.control, label: context.button.label }),
+    importBackup: async (filePath, preview) => {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        return { ok: false, error: 'No PhoneDeck window is available for approval.' }
+      }
+
+      const shownWarnings = preview.warnings.slice(0, 5)
+      const detailLines = [
+        `${preview.profiles} profile(s) · ${preview.pages} page(s) · ${preview.buttons} button(s)`,
+        `${preview.assets} asset(s) · ${(preview.bytes / (1024 * 1024)).toFixed(1)} MB`,
+      ]
+      if (shownWarnings.length > 0) {
+        detailLines.push(
+          `Warnings:\n${shownWarnings.join('\n')}${
+            preview.warnings.length > shownWarnings.length
+              ? `\n…and ${preview.warnings.length - shownWarnings.length} more`
+              : ''
+          }`,
+        )
+      }
+      if (preview.dangerousActions > 0) {
+        detailLines.push(
+          `${preview.dangerousActions} launch/command action(s) will run as your user.`,
+        )
+      }
+      detailLines.push('A pre-import backup will be saved first.')
+
+      const choice = await dialog.showMessageBox(mainWindow, {
+        type: 'question',
+        buttons: ['Replace deck', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+        title: 'Import deck from phone',
+        message: `Replace this PC's deck with "${preview.serverName}"?`,
+        detail: detailLines.join('\n\n'),
+      })
+      if (choice.response !== 0) {
+        return { ok: false, error: 'Import cancelled on the PC.' }
+      }
+
+      try {
+        const applied = applyBackupImport({
+          filePath,
+          currentConfig: store.get(),
+          assetsDir: store.assetsDir,
+          backupDir: join(app.getPath('userData'), 'backups'),
+          importAsset: (name, data) => assets.importBuffer(name, data),
+        })
+        const config = store.replace(applied.config)
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send(IPC.configChangedEvent, config)
+        }
+        logger.info(
+          `Imported phone backup (${applied.importedAssets} assets); pre-import backup ${applied.preImportPath}`,
+        )
+        if (applied.warnings.length > 0) {
+          logger.warn(`Import warnings: ${applied.warnings.join('; ')}`)
+        }
+        return { ok: true }
+      } catch (error) {
+        return {
+          ok: false,
+          error: `Could not import deck: ${error instanceof Error ? error.message : String(error)}`,
+        }
+      }
+    },
     onClientsChanged: () => {
       void pushServerInfo()
     },

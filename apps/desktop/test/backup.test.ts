@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtempSync, mkdirSync, readFileSync, truncateSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, truncateSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AdmZip from 'adm-zip'
 import { createDefaultConfig } from '@phonedek/shared'
-import { readBackupFile, writeBackupFile } from '../src/main/backup'
+import { applyBackupImport, readBackupFile, writeBackupFile } from '../src/main/backup'
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), 'phonedek-backup-'))
@@ -142,5 +142,77 @@ describe('backup archives', () => {
     const read = readBackupFile(file)
     expect(read.assets.get('clip.mp4')).toEqual(Buffer.from([9, 8, 7]))
     expect(read.warnings.join(' ')).toMatch(/unsupported asset: readme\.txt/)
+  })
+
+  it('applies an approved phone import with a pre-import backup', () => {
+    const dir = tempDir()
+    const assetsDir = join(dir, 'assets')
+    mkdirSync(assetsDir)
+    writeFileSync(join(assetsDir, 'current.png'), Buffer.from([1, 2]))
+
+    const current = createDefaultConfig()
+    current.serverName = 'Target PC'
+
+    const source = createDefaultConfig()
+    source.serverName = 'Phone backup'
+    source.profiles[0]!.name = 'Imported profile'
+    const sourceAssetsDir = join(dir, 'source-assets')
+    mkdirSync(sourceAssetsDir)
+    writeFileSync(join(sourceAssetsDir, 'source.png'), Buffer.from([9, 8, 7]))
+    const sourceZip = join(dir, 'source.zip')
+    writeBackupFile(sourceZip, source, sourceAssetsDir)
+
+    const imported = new Map<string, Buffer>()
+    const result = applyBackupImport({
+      filePath: sourceZip,
+      currentConfig: current,
+      assetsDir,
+      backupDir: join(dir, 'backups'),
+      importAsset: (name, data) => {
+        imported.set(name, data)
+        return true
+      },
+      now: new Date('2026-11-07T12:34:56.789Z'),
+    })
+
+    expect(result.config.serverName).toBe('Target PC')
+    expect(result.config.profiles[0]!.name).toBe('Imported profile')
+    expect(result.importedAssets).toBe(1)
+    expect(imported.get('source.png')).toEqual(Buffer.from([9, 8, 7]))
+    expect(result.preImportPath).toContain('phonedek-pre-import-')
+    expect(existsSync(result.preImportPath)).toBe(true)
+
+    const preImport = readBackupFile(result.preImportPath)
+    expect(preImport.config.serverName).toBe('Target PC')
+    expect(preImport.assets.get('current.png')).toEqual(Buffer.from([1, 2]))
+  })
+
+  it('aborts before importing assets when the pre-import backup fails', () => {
+    const dir = tempDir()
+    const assetsDir = join(dir, 'assets')
+    mkdirSync(assetsDir)
+    const current = createDefaultConfig()
+    current.serverName = 'Target PC'
+
+    const source = createDefaultConfig()
+    const sourceZip = join(dir, 'source.zip')
+    writeBackupFile(sourceZip, source, assetsDir)
+
+    const blocked = join(dir, 'not-a-directory')
+    writeFileSync(blocked, 'x')
+    let imported = false
+    expect(() =>
+      applyBackupImport({
+        filePath: sourceZip,
+        currentConfig: current,
+        assetsDir,
+        backupDir: blocked,
+        importAsset: () => {
+          imported = true
+          return true
+        },
+      }),
+    ).toThrow()
+    expect(imported).toBe(false)
   })
 })
