@@ -3,7 +3,7 @@ import type { MenuItemConstructorOptions, OpenDialogOptions, SaveDialogOptions }
 import { existsSync } from 'node:fs'
 import { basename, isAbsolute, join } from 'node:path'
 import { z } from 'zod'
-import { ActionSchema, validateConfig } from '@phonedek/shared'
+import { ActionSchema, controlToActions, validateConfig } from '@phonedek/shared'
 import type { Action, AssetKind, DeckConfig, PressResult } from '@phonedek/shared'
 import { AssetStore } from './assets'
 import { readBackupFile, writeBackupFile } from './backup'
@@ -383,6 +383,26 @@ function registerIpc(): void {
     }
     return executor.execute(parsed.data, 'test action')
   })
+
+  ipcMain.handle(
+    IPC.testControlInput,
+    async (_event, profileId: unknown, pageId: unknown, buttonId: unknown, delta: unknown): Promise<PressResult> => {
+      if (typeof profileId !== 'string' || typeof pageId !== 'string' || typeof buttonId !== 'string') {
+        return { ok: false, error: 'Invalid control test request' }
+      }
+      if (typeof delta !== 'number' || !Number.isFinite(delta) || Math.abs(delta) > 100) {
+        return { ok: false, error: 'Test delta must be between -100 and 100' }
+      }
+      const config = store.get()
+      const profile = config.profiles.find((item) => item.id === profileId)
+      const page = profile?.pages.find((item) => item.id === pageId)
+      const button = page?.buttons.find((item) => item.id === buttonId)
+      if (!button?.control) return { ok: false, error: 'Control not found' }
+      const actions = controlToActions(button.control, delta)
+      if (actions.length === 0) return { ok: false, error: 'This control has no action' }
+      return executor.execute(actions, `test ${button.label || 'control'}`)
+    },
+  )
 
   ipcMain.handle(IPC.setPort, async (_event, port: number): Promise<OperationResult> => restartServer(port))
 

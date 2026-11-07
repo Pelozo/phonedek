@@ -99,6 +99,7 @@ export interface PhoneDeckApi {
   importAsset(kind?: AssetKind): Promise<AssetPickResult>
   pickApplication(): Promise<string | null>
   testActions(actions: Action[], label?: string): Promise<PressResult>
+  testControlInput(profileId: string, pageId: string, buttonId: string, delta: number): Promise<PressResult>
   setPort(port: number): Promise<OperationResult>
   rotateToken(): Promise<OperationResult>
   setDiscovery(enabled: boolean): Promise<OperationResult>
@@ -133,6 +134,7 @@ export const IPC = {
   importAsset: 'phonedek:import-asset',
   pickApplication: 'phonedek:pick-application',
   testActions: 'phonedek:test-actions',
+  testControlInput: 'phonedek:test-control-input',
   setPort: 'phonedek:set-port',
   rotateToken: 'phonedek:rotate-token',
   setDiscovery: 'phonedek:set-discovery',

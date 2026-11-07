@@ -683,6 +683,46 @@ export function Inspector({
               />
             </div>
 
+            <div className="row gap">
+              <button
+                type="button"
+                className="button secondary small"
+                onClick={() => {
+                  void window.phonedek
+                    .testControlInput(profile.id, page.id, button.id, -1)
+                    .then((result) =>
+                      onToast(
+                        result.ok
+                          ? `Sent one ${control.binding.type === 'volume' ? 'volume' : 'scroll'} step down`
+                          : (result.error ?? 'Control test failed'),
+                        result.ok ? 'success' : 'error',
+                      ),
+                    )
+                }}
+              >
+                Test −
+              </button>
+              <button
+                type="button"
+                className="button secondary small"
+                onClick={() => {
+                  void window.phonedek
+                    .testControlInput(profile.id, page.id, button.id, 1)
+                    .then((result) =>
+                      onToast(
+                        result.ok
+                          ? `Sent one ${control.binding.type === 'volume' ? 'volume' : 'scroll'} step up`
+                          : (result.error ?? 'Control test failed'),
+                        result.ok ? 'success' : 'error',
+                      ),
+                    )
+                }}
+              >
+                Test +
+              </button>
+              <span className="hint">Applies one step on this PC</span>
+            </div>
+
             <div className="two-col">
               <label className="field">
                 <span>Kind</span>
