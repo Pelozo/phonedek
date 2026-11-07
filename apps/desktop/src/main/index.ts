@@ -25,6 +25,7 @@ import type {
   AssetPickResult,
   OperationResult,
   PairView,
+  PermissionStatus,
   SaveConfigResult,
   ServerInfoView,
 } from '../shared/api'
@@ -74,6 +75,18 @@ function requestAccessibilityPermission(prompt: boolean): boolean {
   } catch (error) {
     logger?.warn(`Could not request macOS accessibility permission: ${(error as Error).message}`)
     return false
+  }
+}
+
+function buildPermissionStatus(): PermissionStatus {
+  const supported = process.platform === 'darwin'
+  return {
+    platform: process.platform,
+    supported,
+    granted: supported ? requestAccessibilityPermission(false) : true,
+    paneName: macPrivacyPaneName(),
+    appPath: process.execPath ?? null,
+    helperPath: supported ? helperPath() : null,
   }
 }
 
@@ -364,6 +377,17 @@ function registerIpc(): void {
     await openAccessibilitySettings()
   })
 
+  ipcMain.handle(IPC.getPermissionStatus, async (): Promise<PermissionStatus> => buildPermissionStatus())
+  ipcMain.handle(IPC.requestPermission, async (): Promise<PermissionStatus> => {
+    if (process.platform === 'darwin') requestAccessibilityPermission(true)
+    return buildPermissionStatus()
+  })
+  ipcMain.handle(IPC.revealPermissionHelper, async (): Promise<void> => {
+    if (process.platform !== 'darwin') return
+    const helper = helperPath()
+    shell.showItemInFolder(existsSync(helper) ? helper : process.execPath)
+  })
+
   ipcMain.handle(IPC.openExternal, async (_event, url: string): Promise<void> => {
     const parsed = new URL(url)
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Invalid URL')
@@ -477,11 +501,6 @@ async function bootstrap(): Promise<void> {
   logger = createLogger(userData)
   logger.info(`PhoneDeck ${APP_VERSION} starting on ${process.platform} (${process.arch})`)
   logger.info(`Data directory: ${userData}`)
-
-  // Show the macOS permission alert on startup so PhoneDeck is registered in
-  // the privacy pane automatically. It only appears while permission is
-  // missing, and the alert links straight to the right pane.
-  if (process.platform === 'darwin') requestAccessibilityPermission(true)
 
   store = new ConfigStore({ dir: userData, logger })
   if (store.getLastError()) logger.warn(`Config was repaired: ${store.getLastError()}`)

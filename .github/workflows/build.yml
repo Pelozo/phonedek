@@ -98,6 +98,14 @@ jobs:
           test -x "$HELPER"
           lipo -info "$HELPER" | grep -q arm64
           "$HELPER" --self-test
+          APP="$(find "$TMP" -maxdepth 2 -name 'PhoneDeck.app' -print -quit)"
+          test -n "$APP"
+          EXE="$APP/Contents/MacOS/PhoneDeck"
+          test -x "$EXE"
+          # TCC attributes input permission to these identifiers; a stale
+          # "Electron" identity makes the grant silently miss the helper.
+          codesign -dv --verbose=4 "$EXE" 2>&1 | grep -q 'Identifier=com.phonedek.desktop'
+          codesign -dv --verbose=4 "$HELPER" 2>&1 | grep -q 'Identifier=com.phonedek.desktop.keyboard-helper'
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:

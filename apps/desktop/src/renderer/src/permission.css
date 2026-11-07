@@ -1,0 +1,160 @@
+/* ------------------------------------------------------------------ */
+/* macOS input permission                                              */
+/* ------------------------------------------------------------------ */
+
+.permission-banner {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  background: linear-gradient(90deg, var(--accent-wash), transparent 60%), var(--surface);
+}
+
+.permission-banner-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(242, 106, 46, 0.4);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+}
+
+.permission-banner-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.permission-banner-copy strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.permission-banner-copy span {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.permission-banner-copy b {
+  color: var(--text-soft);
+  font-weight: 600;
+}
+
+.permission-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.permission-banner-dismiss {
+  color: var(--faint);
+}
+
+.permission-banner-dismiss:hover {
+  color: var(--text);
+}
+
+.permission-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.permission-card.warn {
+  border-color: rgba(217, 164, 65, 0.35);
+  background: rgba(217, 164, 65, 0.05);
+}
+
+.permission-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.permission-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+}
+
+.permission-card.ok .permission-card-icon {
+  color: var(--ok);
+  border-color: rgba(131, 192, 146, 0.35);
+  background: rgba(131, 192, 146, 0.07);
+}
+
+.permission-card.warn .permission-card-icon {
+  color: var(--warn);
+  border-color: rgba(217, 164, 65, 0.35);
+}
+
+.permission-card-head > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.permission-card-head strong {
+  font-size: 12px;
+}
+
+.permission-card-head small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.permission-help {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.permission-help summary {
+  cursor: pointer;
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.permission-help summary:hover {
+  color: var(--text);
+}
+
+.permission-help p {
+  margin: 8px 0;
+  line-height: 1.5;
+}
+
+@media (max-width: 1200px) {
+  .permission-banner-copy span {
+    white-space: normal;
+  }
+  .permission-banner-actions .button.secondary {
+    display: none;
+  }
+}

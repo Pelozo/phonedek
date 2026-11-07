@@ -6,6 +6,7 @@ npmRebuild: false
 directories:
   output: release
   buildResources: build
+afterPack: scripts/after-pack.cjs
 files:
   - out/**
   - package.json

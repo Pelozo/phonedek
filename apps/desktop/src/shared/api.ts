@@ -78,6 +78,20 @@ export interface OperationResult {
   path?: string
 }
 
+/** macOS input-control permission (called Accessibility before macOS 27). */
+export interface PermissionStatus {
+  platform: string
+  /** False on platforms that do not gate synthetic input. */
+  supported: boolean
+  granted: boolean
+  /** Localized pane name: "Device Control and Data Access" on macOS 27+. */
+  paneName: string
+  /** Main executable inside the app bundle. */
+  appPath: string | null
+  /** The Swift helper that actually posts input events. */
+  helperPath: string | null
+}
+
 export interface PhoneDeckApi {
   getState(): Promise<AppState>
   saveConfig(config: DeckConfig): Promise<SaveConfigResult>
@@ -95,6 +109,9 @@ export interface PhoneDeckApi {
   openAccessibility(): Promise<void>
   openExternal(url: string): Promise<void>
   copyText(text: string): Promise<void>
+  getPermissionStatus(): Promise<PermissionStatus>
+  requestPermission(): Promise<PermissionStatus>
+  revealPermissionHelper(): Promise<void>
   getUpdateStatus(): Promise<UpdateStatus>
   checkForUpdates(): Promise<UpdateStatus>
   installUpdate(): Promise<void>
@@ -120,6 +137,9 @@ export const IPC = {
   openAccessibility: 'phonedek:open-accessibility',
   openExternal: 'phonedek:open-external',
   copyText: 'phonedek:copy-text',
+  getPermissionStatus: 'phonedek:get-permission-status',
+  requestPermission: 'phonedek:request-permission',
+  revealPermissionHelper: 'phonedek:reveal-permission-helper',
   getUpdateStatus: 'phonedek:update-get-status',
   checkForUpdates: 'phonedek:update-check',
   installUpdate: 'phonedek:update-install',

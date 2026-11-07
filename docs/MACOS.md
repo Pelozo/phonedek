@@ -28,6 +28,7 @@ the DMG/ZIP; Linux development machines cannot build or test those steps.
 | `apps/desktop/resources/mac/keyboard-helper.swift` | JSONL helper: CGEvent keys/text/media/mouse, Accessibility check. |
 | `apps/desktop/scripts/build-mac-helper.sh` | `swiftc` arm64 build; `universal` uses `lipo`. Not committed as a binary. |
 | `apps/desktop/src/main/key-sender.ts` | Shared persistent helper sender + `MacKeySender`; maps permission errors to actionable text. |
+| `apps/desktop/scripts/after-pack.cjs` | Ad-hoc signs the main executable and helper with stable identifiers so TCC matches the grant. |
 | `apps/desktop/src/main/platform.ts` | Tested packaged/dev helper paths for Windows and macOS. |
 | `apps/desktop/src/main/index.ts` | Helper prewarm, macOS menu, Accessibility settings action, dock/window lifecycle. |
 | `apps/desktop/src/main/host-actions.ts` | `open -a … --args …` for macOS application bundles. |
@@ -105,16 +106,14 @@ ZIP and verifies that the bundled helper is executable, arm64 and passes
    **System Settings → Privacy & Security → Open Anyway**, or
    right-click → **Open**. CLI equivalent:
    `xattr -dr com.apple.quarantine /Applications/PhoneDeck.app`.
-3. Grant **Accessibility**: System Settings → Privacy & Security →
-   Accessibility. **macOS 27 (Golden Gate) renamed this pane to “Device Control
-   and Data Access”** — it is the same TCC service and the deep link
-   (`…?Privacy_Accessibility`) is unchanged. PhoneDeck triggers the native
-   permission alert on launch, which registers the app in the list; the app
-   menu also has **Grant … Permission** and **Open … Settings** items. If the
-   helper is still reported as untrusted, add
-   `/Applications/PhoneDeck.app/Contents/Resources/keyboard-helper` as well
-   (macOS 27 may attribute the grant to the helper binary). Restart PhoneDeck
-   if input still fails.
+3. Grant **input control**: use the **Grant permission** button in the
+   PhoneDeck banner or **PhoneDeck → Grant … Permission…**, which opens the
+   native macOS alert. In System Settings the pane is **Privacy & Security →
+   Accessibility**, renamed **Device Control and Data Access** on macOS 27
+   (same TCC service, same `…?Privacy_Accessibility` deep link). The app menu
+   also has **Open … Settings**. If an existing grant survives a rebuild but
+   input still fails, remove the row and re-add it — rebuilding changes the
+   ad-hoc signature. Restart PhoneDeck if input still fails.
 4. Allow incoming connections and, on macOS 15+, **Local Network** access so
    pairing/discovery work. Third-party firewalls need TCP 47654 and UDP 47655.
 
@@ -125,6 +124,10 @@ injection. Secure Input/password prompts can still block synthetic input.
 
 - **Unsigned**: every rebuild may change the ad-hoc signature and revoke the
   Accessibility grant. Gatekeeper bypass is required on each reinstall.
+- **TCC identity**: `scripts/after-pack.cjs` ad-hoc signs the main executable
+  and the helper with the app identifier (`com.phonedek.desktop` and
+  `…keyboard-helper`). Without that, macOS 27 attributes input permission to
+  the prebuilt Electron identity and the privacy toggle misses the helper.
 - **No auto-update**: Squirrel.Mac requires a signed, notarized app. The in-app
   updater is disabled on macOS and points users at manual DMG updates. Config
   and assets in `~/Library/Application Support/PhoneDeck` survive replacement.

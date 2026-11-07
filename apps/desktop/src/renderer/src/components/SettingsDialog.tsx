@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { DeckConfig } from '@phonedek/shared'
-import type { ServerInfoView, SettingsView, UpdateStatus } from '../../../shared/api'
+import type { ServerInfoView, SettingsView, UpdateStatus, PermissionStatus } from '../../../shared/api'
 import {
   canCheckForUpdates,
   formatProgressDetail,
@@ -15,6 +15,9 @@ export function SettingsDialog({
   settings,
   serverName,
   updateStatus,
+  permission,
+  onGrantPermission,
+  onOpenPermissionSettings,
   onCheckForUpdates,
   onInstallUpdate,
   onRenameServer,
@@ -27,6 +30,9 @@ export function SettingsDialog({
   settings: SettingsView
   serverName: string
   updateStatus: UpdateStatus | null
+  permission: PermissionStatus | null
+  onGrantPermission: () => Promise<void>
+  onOpenPermissionSettings: () => Promise<void>
   onCheckForUpdates: () => Promise<UpdateStatus>
   onInstallUpdate: () => Promise<void>
   onRenameServer: (name: string) => void
@@ -109,6 +115,24 @@ export function SettingsDialog({
     }
   }
 
+  const grantPermission = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      await onGrantPermission()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const copyHelperPath = async (path: string): Promise<void> => {
+    try {
+      await window.phonedek.copyText(path)
+      onToast('Helper path copied', 'success')
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : String(error), 'error')
+    }
+  }
+
   const updateSummary = updateStatus
     ? summarizeUpdateStatus(updateStatus)
     : {
@@ -149,13 +173,88 @@ export function SettingsDialog({
       <div className="settings-section">
         <h3>Startup</h3>
         <Toggle
-          label="Start PhoneDeck with Windows"
+          label="Start PhoneDeck with your computer"
           description="The deck keeps working after you sign in."
           checked={settings.launchAtLogin}
           onChange={(enabled) => void toggleLogin(enabled)}
           disabled={busy}
         />
       </div>
+
+      {permission?.supported && (
+        <div className="settings-section">
+          <h3>Input permission</h3>
+          <div className={`permission-card ${permission.granted ? 'ok' : 'warn'}`}>
+            <div className="permission-card-head">
+              <span className="permission-card-icon" aria-hidden="true">
+                <Icon name={permission.granted ? 'check' : 'lock'} size={17} />
+              </span>
+              <div>
+                <strong>{permission.granted ? 'Input control allowed' : 'Input control blocked'}</strong>
+                <small>
+                  {permission.granted
+                    ? 'PhoneDeck can send keystrokes, clicks and media keys.'
+                    : `macOS needs PhoneDeck allowed in ${permission.paneName}. The phone can connect, but actions fail until it is enabled.`}
+                </small>
+              </div>
+            </div>
+
+            {!permission.granted && (
+              <>
+                <div className="row gap">
+                  <button
+                    type="button"
+                    className="button primary small"
+                    onClick={() => void grantPermission()}
+                    disabled={busy}
+                  >
+                    <Icon name="check" size={14} /> Grant permission
+                  </button>
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    onClick={() => void onOpenPermissionSettings()}
+                  >
+                    Open {permission.paneName}
+                  </button>
+                </div>
+
+                <details className="permission-help">
+                  <summary>Already enabled but still blocked?</summary>
+                  <p>
+                    macOS may attribute the permission to PhoneDeck&apos;s helper instead of the app. Add this file to
+                    the same list, then relaunch PhoneDeck:
+                  </p>
+                  {permission.helperPath && (
+                    <div className="path-box" title={permission.helperPath}>
+                      <Icon name="folder" size={15} />
+                      <code>{permission.helperPath}</code>
+                    </div>
+                  )}
+                  <div className="row gap">
+                    <button
+                      type="button"
+                      className="button ghost small"
+                      onClick={() => void window.phonedek.revealPermissionHelper()}
+                    >
+                      <Icon name="folder" size={14} /> Show in Finder
+                    </button>
+                    {permission.helperPath && (
+                      <button
+                        type="button"
+                        className="button ghost small"
+                        onClick={() => void copyHelperPath(permission.helperPath as string)}
+                      >
+                        <Icon name="copy" size={14} /> Copy path
+                      </button>
+                    )}
+                  </div>
+                </details>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="settings-section">
         <h3>Updates</h3>

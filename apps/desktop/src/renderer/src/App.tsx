@@ -5,12 +5,13 @@ import {
   nextFreeSlot,
 } from '@phonedek/shared'
 import type { DeckConfig } from '@phonedek/shared'
-import type { AppState, ServerInfoView, UpdateStatus } from '../../shared/api'
+import type { AppState, ServerInfoView, UpdateStatus, PermissionStatus } from '../../shared/api'
 import { isUpdateNoticeVisible, updateIndicatorLabel } from '../../shared/update-status'
 import { DeckCanvas } from './components/DeckCanvas'
 import { Icon } from './components/Icons'
 import { Inspector } from './components/Inspector'
 import { PairDialog } from './components/PairDialog'
+import { PermissionBanner } from './components/PermissionBanner'
 import { SettingsDialog } from './components/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
 
@@ -35,6 +36,9 @@ export default function App() {
   const [pairOpen, setPairOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
+  const [permission, setPermission] = useState<PermissionStatus | null>(null)
+  const [permissionBusy, setPermissionBusy] = useState(false)
+  const [permissionDismissed, setPermissionDismissed] = useState(false)
 
   const skipSave = useRef(true)
   const saveNonce = useRef(0)
@@ -118,6 +122,54 @@ export default function App() {
   const installUpdate = useCallback(async (): Promise<void> => {
     await window.phonedek.installUpdate()
   }, [])
+
+  // Poll while input permission is missing so the banner disappears as soon
+  // as the user flips the switch in System Settings.
+  useEffect(() => {
+    let active = true
+    const refresh = async (): Promise<void> => {
+      try {
+        const next = await window.phonedek.getPermissionStatus()
+        if (active) setPermission(next)
+      } catch {
+        // Permission status is informational; leave the rest of the app alone.
+      }
+    }
+    void refresh()
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refresh()
+    }, 2500)
+    const onFocus = (): void => {
+      void refresh()
+    }
+    window.addEventListener('focus', onFocus)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [])
+
+  const grantPermission = useCallback(async (): Promise<void> => {
+    setPermissionBusy(true)
+    try {
+      const next = await window.phonedek.requestPermission()
+      setPermission(next)
+      if (!next.granted) showToast('Follow the macOS prompt, then return to PhoneDeck.', 'info')
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error')
+    } finally {
+      setPermissionBusy(false)
+    }
+  }, [showToast])
+
+  const openPermissionSettings = useCallback(async (): Promise<void> => {
+    try {
+      await window.phonedek.openAccessibility()
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error')
+    }
+  }, [showToast])
 
   const save = useCallback(
     async (target: DeckConfig) => {
@@ -330,6 +382,16 @@ export default function App() {
           </div>
         </header>
 
+        {permission && !permissionDismissed && (
+          <PermissionBanner
+            permission={permission}
+            busy={permissionBusy}
+            onGrant={() => void grantPermission()}
+            onOpenSettings={() => void openPermissionSettings()}
+            onDismiss={() => setPermissionDismissed(true)}
+          />
+        )}
+
         <div className="workspace-body">
           <DeckCanvas
             config={config}
@@ -384,6 +446,9 @@ export default function App() {
           settings={server.settings}
           serverName={config.serverName}
           updateStatus={updateStatus}
+          permission={permission}
+          onGrantPermission={grantPermission}
+          onOpenPermissionSettings={openPermissionSettings}
           onCheckForUpdates={checkForUpdates}
           onInstallUpdate={installUpdate}
           onRenameServer={(name) => setConfig({ ...config, serverName: name })}
