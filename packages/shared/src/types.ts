@@ -395,9 +395,24 @@ export interface PressMessage {
   buttonId: string
 }
 
+/** Continuous-control input: relative deltas are coalesced on the desktop. */
+export interface InputMessage {
+  type: 'input'
+  requestId: string
+  profileId: string
+  pageId: string
+  controlId: string
+  phase: 'start' | 'move' | 'end'
+  /** Absolute value (0..1) for future value controls; unused by the MVP. */
+  value?: number
+  /** Signed delta for relative controls. */
+  delta?: number
+}
+
 export type ClientMessage =
   | { type: 'hello'; protocol: typeof PROTOCOL_VERSION; device: DeviceInfo }
   | PressMessage
+  | InputMessage
   | { type: 'ping'; t: number }
 
 export type ServerMessage =
@@ -408,14 +423,23 @@ export type ServerMessage =
       config: DeckConfig
       /** Server clock in ms, used to detect skew. */
       serverTime: number
+      /** Optional feature markers (additive; older servers omit this). */
+      capabilities?: string[]
     }
   | { type: 'config'; config: DeckConfig }
   | { type: 'pressResult'; requestId: string; buttonId: string; ok: boolean; error?: string }
+  | { type: 'inputResult'; requestId: string; controlId: string; ok: boolean; error?: string }
   | { type: 'navigate'; direction: 'next' | 'prev' | 'goto'; pageId?: string }
   | { type: 'error'; code: string; message: string }
   | { type: 'pong'; t: number }
 
 export interface PressResult {
+  ok: boolean
+  error?: string
+}
+
+/** Result of a continuous-control input batch (sent on end or error). */
+export interface InputResult {
   ok: boolean
   error?: string
 }

@@ -11,10 +11,13 @@ import {
 import type {
   ClientMessage,
   ConnectedClient,
+  ControlSpec,
   DeckButton,
   DeckConfig,
   DeckPage,
   DeckProfile,
+  InputMessage,
+  InputResult,
   PressMessage,
   PressResult,
   ServerMessage,
@@ -24,12 +27,16 @@ import { writeBackupFile } from './backup'
 import type { Logger } from './logger'
 
 /** LAN endpoints advertised to clients that understand optional features. */
-export const SERVER_CAPABILITIES = ['backup-export-v1'] as const
+export const SERVER_CAPABILITIES = ['backup-export-v1', 'input-v1'] as const
 
 export interface PressContext {
   profile: DeckProfile
   page: DeckPage
   button: DeckButton
+}
+
+export interface InputContext extends PressContext {
+  control: ControlSpec
 }
 
 export interface DeckServerOptions {
@@ -40,6 +47,7 @@ export interface DeckServerOptions {
   getConfig: () => DeckConfig
   getServerName: () => string
   onPress: (client: ConnectedClient, message: PressMessage, context: PressContext) => Promise<PressResult>
+  onInput?: (client: ConnectedClient, message: InputMessage, context: InputContext) => Promise<InputResult>
   onClientsChanged?: (clients: ConnectedClient[]) => void
   logger?: Logger
 }
@@ -49,6 +57,7 @@ interface ClientRecord {
   info: ConnectedClient
   alive: boolean
   pressTimes: number[]
+  inputTimes: number[]
 }
 
 interface AuthResult {
@@ -59,6 +68,7 @@ interface AuthResult {
 const AUTH_WINDOW_MS = 60_000
 const AUTH_MAX_FAILURES = 6
 const AUTH_BLOCK_MS = 60_000
+const INPUT_RATE_LIMIT = 60
 
 function bearerToken(request: IncomingMessage, url: URL): string | undefined {
   const query = url.searchParams.get('token')
@@ -326,7 +336,7 @@ export class DeckServer {
       connectedAt: now,
       lastSeenAt: now,
     }
-    const record: ClientRecord = { ws, info, alive: true, pressTimes: [] }
+    const record: ClientRecord = { ws, info, alive: true, pressTimes: [], inputTimes: [] }
     this.clients.set(id, record)
     this.options.logger?.info(`Phone connected from ${info.address}`)
 
@@ -356,6 +366,7 @@ export class DeckServer {
       serverName: this.options.getServerName(),
       config: this.options.getConfig(),
       serverTime: Date.now(),
+      capabilities: [...SERVER_CAPABILITIES],
     })
     this.notifyClients()
   }
@@ -386,6 +397,9 @@ export class DeckServer {
         break
       case 'press':
         await this.handlePress(record, message)
+        break
+      case 'input':
+        await this.handleInput(record, message)
         break
     }
   }
@@ -434,6 +448,74 @@ export class DeckServer {
       ok: result.ok,
       ...(result.error ? { error: result.error } : {}),
     })
+  }
+
+  private sendInputResult(record: ClientRecord, message: InputMessage, result: InputResult): void {
+    this.send(record.ws, {
+      type: 'inputResult',
+      requestId: message.requestId,
+      controlId: message.controlId,
+      ok: result.ok,
+      ...(result.error ? { error: result.error } : {}),
+    })
+  }
+
+  private async handleInput(record: ClientRecord, message: InputMessage): Promise<void> {
+    const now = Date.now()
+    // Moves are rate-limited; `end` always gets through so coalesced deltas
+    // flush even after a burst. Input has its own bucket, separate from presses.
+    if (message.phase !== 'end') {
+      record.inputTimes = record.inputTimes.filter((time) => now - time < 1000)
+      if (record.inputTimes.length >= INPUT_RATE_LIMIT) {
+        this.sendInputResult(record, message, {
+          ok: false,
+          error: 'Too many control events, slow down',
+        })
+        return
+      }
+      record.inputTimes.push(now)
+    }
+
+    const config = this.options.getConfig()
+    const profile = config.profiles.find((item) => item.id === message.profileId)
+    const page = profile?.pages.find((item) => item.id === message.pageId)
+    const button = page?.buttons.find((item) => item.id === message.controlId)
+    if (!profile || !page || !button) {
+      this.sendInputResult(record, message, {
+        ok: false,
+        error: 'Control not found. Refresh the deck.',
+      })
+      return
+    }
+    if (!button.control) {
+      this.sendInputResult(record, message, {
+        ok: false,
+        error: 'This button is not a continuous control.',
+      })
+      return
+    }
+
+    let result: InputResult
+    if (!this.options.onInput) {
+      result = { ok: false, error: 'Control input is not supported by this desktop.' }
+    } else {
+      try {
+        result = await this.options.onInput(record.info, message, {
+          profile,
+          page,
+          button,
+          control: button.control,
+        })
+      } catch (error) {
+        result = { ok: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    }
+
+    // Success is acknowledged only on `end`; start/move stay silent to keep
+    // the stream cheap. Errors are acknowledged immediately.
+    if (message.phase === 'end' || !result.ok) {
+      this.sendInputResult(record, message, result)
+    }
   }
 
   private async handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {

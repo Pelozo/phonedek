@@ -1,5 +1,6 @@
 import type {
   Action,
+  ControlSpec,
   KeyboardPlanStep,
   MacroStep,
   PagePlanStep,
@@ -118,6 +119,56 @@ export function pageActions(actions: readonly Action[]): PagePlanStep[] {
 
 export function hasHostActions(actions: readonly Action[]): boolean {
   return actionsToPlan(actions).some((step) => step.kind !== 'page')
+}
+
+/* ------------------------------------------------------------------ */
+/* Continuous controls                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Convert the MVP control bindings into existing actions.
+ *
+ * - `volume` (relative): one media volume step per unit of delta, capped at 20.
+ *   `stepPercent` is display metadata for now, not applied here.
+ * - `scroll`: one macro containing a mouse wheel action; positive delta means
+ *   up/right, negative means down/left, flipped by `invert`. Amount is capped
+ *   at 100.
+ *
+ * Absolute/value controls and unknown bindings return an empty batch.
+ */
+export function controlToActions(control: ControlSpec, delta: number): Action[] {
+  if (!Number.isFinite(delta) || delta === 0) return []
+  const magnitude = Math.ceil(Math.abs(delta))
+
+  switch (control.binding.type) {
+    case 'volume': {
+      const steps = Math.max(1, Math.min(20, magnitude))
+      const key: 'volumeup' | 'volumedown' = delta > 0 ? 'volumeup' : 'volumedown'
+      const actions: Action[] = []
+      for (let index = 0; index < steps; index += 1) actions.push({ type: 'media', key })
+      return actions
+    }
+    case 'scroll': {
+      const amount = Math.max(1, Math.min(100, magnitude))
+      const positive = (delta > 0) !== (control.binding.invert ?? false)
+      const direction: 'up' | 'down' | 'left' | 'right' =
+        control.binding.axis === 'vertical'
+          ? positive
+            ? 'up'
+            : 'down'
+          : positive
+            ? 'right'
+            : 'left'
+      return [
+        {
+          type: 'macro',
+          steps: [{ type: 'mouse', button: 'left', action: 'scroll', direction, amount }],
+        },
+      ]
+    }
+    default:
+      return []
+  }
 }
 
 /* ------------------------------------------------------------------ */

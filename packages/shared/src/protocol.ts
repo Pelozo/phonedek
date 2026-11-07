@@ -20,6 +20,16 @@ export const ClientMessageSchema = z.union([
     pageId: z.string().min(1).max(64),
     buttonId: z.string().min(1).max(128),
   }),
+  z.object({
+    type: z.literal('input'),
+    requestId: z.string().min(1).max(64),
+    profileId: z.string().min(1).max(64),
+    pageId: z.string().min(1).max(64),
+    controlId: z.string().min(1).max(128),
+    phase: z.enum(['start', 'move', 'end']),
+    value: z.number().finite().min(0).max(1).optional(),
+    delta: z.number().finite().min(-100).max(100).optional(),
+  }),
   z.object({ type: z.literal('ping'), t: z.number().finite() }),
 ])
 
@@ -35,4 +45,8 @@ export function parseClientMessage(input: unknown): ParsedClientMessage {
 
 export function isPressMessage(message: ClientMessage): message is Extract<ClientMessage, { type: 'press' }> {
   return message.type === 'press'
+}
+
+export function isInputMessage(message: ClientMessage): message is Extract<ClientMessage, { type: 'input' }> {
+  return message.type === 'input'
 }

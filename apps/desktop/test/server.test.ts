@@ -5,9 +5,21 @@ import { join } from 'node:path'
 import AdmZip from 'adm-zip'
 import { WebSocket } from 'ws'
 import { createDefaultConfig } from '@phonedek/shared'
-import type { ClientMessage, DeckConfig, PressMessage, ServerMessage } from '@phonedek/shared'
+import type {
+  ClientMessage,
+  ControlSpec,
+  DeckConfig,
+  InputMessage,
+  PressMessage,
+  ServerMessage,
+} from '@phonedek/shared'
 import { AssetStore } from '../src/main/assets'
-import { DeckServer, type PressContext } from '../src/main/server'
+import { DeckServer, type InputContext, type PressContext } from '../src/main/server'
+
+interface InputCall {
+  message: InputMessage
+  context: InputContext
+}
 
 interface Harness {
   server: DeckServer
@@ -17,6 +29,7 @@ interface Harness {
   assets: AssetStore
   presses: PressMessage[]
   contexts: PressContext[]
+  inputs: InputCall[]
 }
 
 const cleanups: Array<() => Promise<void>> = []
@@ -28,6 +41,7 @@ async function harness(): Promise<Harness> {
   const assets = new AssetStore(join(dir, 'assets'))
   const presses: PressMessage[] = []
   const contexts: PressContext[] = []
+  const inputs: InputCall[] = []
   const token = 'test-token-123'
   const server = new DeckServer({
     port: 0,
@@ -41,10 +55,20 @@ async function harness(): Promise<Harness> {
       contexts.push(context)
       return { ok: true }
     },
+    onInput: async (_client, message, context) => {
+      inputs.push({ message, context })
+      return { ok: true }
+    },
   })
   const port = await server.start()
   cleanups.push(() => server.stop())
-  return { server, port, token, config, assets, presses, contexts }
+  return { server, port, token, config, assets, presses, contexts, inputs }
+}
+
+function attachControl(h: Harness, buttonId: string, control: ControlSpec): void {
+  const button = h.config.profiles[0]!.pages[0]!.buttons.find((candidate) => candidate.id === buttonId)
+  if (!button) throw new Error(`Missing button ${buttonId}`)
+  button.control = control
 }
 
 function url(base: string, path: string, token?: string): string {
@@ -101,6 +125,7 @@ describe('DeckServer HTTP', () => {
     }
     expect(infoBody).toMatchObject({ app: 'PhoneDeck', serverName: 'Test deck', protocol: 1 })
     expect(infoBody.capabilities).toContain('backup-export-v1')
+    expect(infoBody.capabilities).toContain('input-v1')
 
     expect((await fetch(`${base}/api/config`)).status).toBe(401)
     expect((await fetch(`${base}/api/config?token=wrong`)).status).toBe(401)
@@ -312,6 +337,7 @@ describe('DeckServer WebSocket', () => {
 
     const hello = await waitFor(() => messages.find((message) => message.type === 'hello'))
     expect(hello.config.serverName).toBe('Test deck')
+    expect(hello.capabilities).toContain('input-v1')
     expect(messages.some((message) => message.type === 'hello')).toBe(true)
 
     const helloMessage: ClientMessage = {
@@ -373,5 +399,115 @@ describe('DeckServer WebSocket', () => {
   it('rejects a bad WebSocket token', async () => {
     const h = await harness()
     await expect(openSocket(`ws://127.0.0.1:${h.port}/ws?token=nope`)).rejects.toBeTruthy()
+  })
+})
+
+describe('DeckServer continuous input', () => {
+  const volumeControl: ControlSpec = {
+    kind: 'slider',
+    emit: 'delta',
+    binding: { type: 'volume', mode: 'relative' },
+  }
+
+  function inputMessage(
+    h: Harness,
+    requestId: string,
+    phase: 'start' | 'move' | 'end',
+    controlId: string,
+    delta?: number,
+  ) {
+    return {
+      type: 'input',
+      requestId,
+      profileId: h.config.profiles[0]!.id,
+      pageId: h.config.profiles[0]!.pages[0]!.id,
+      controlId,
+      phase,
+      ...(delta === undefined ? {} : { delta }),
+    }
+  }
+
+  it('routes start/move/end through onInput and acknowledges only end', async () => {
+    const h = await harness()
+    attachControl(h, 'btn-vol-down', volumeControl)
+    const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await waitFor(() => messages.find((message) => message.type === 'hello'))
+
+    ws.send(JSON.stringify(inputMessage(h, 'in-start', 'start', 'btn-vol-down')))
+    ws.send(JSON.stringify(inputMessage(h, 'in-move', 'move', 'btn-vol-down', 2)))
+    ws.send(JSON.stringify(inputMessage(h, 'in-end', 'end', 'btn-vol-down')))
+
+    const result = await waitFor(() =>
+      messages.find((message) => message.type === 'inputResult' && message.requestId === 'in-end'),
+    )
+    expect(result).toMatchObject({
+      type: 'inputResult',
+      requestId: 'in-end',
+      controlId: 'btn-vol-down',
+      ok: true,
+    })
+    expect(h.inputs.map((call) => call.message.phase)).toEqual(['start', 'move', 'end'])
+    expect(h.inputs[0]!.context.button.id).toBe('btn-vol-down')
+    expect(h.inputs[0]!.context.control).toEqual(volumeControl)
+    // start/move successes stay silent.
+    expect(messages.filter((message) => message.type === 'inputResult')).toHaveLength(1)
+
+    ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
+  it('rejects non-control buttons and unknown controls', async () => {
+    const h = await harness()
+    const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await waitFor(() => messages.find((message) => message.type === 'hello'))
+
+    ws.send(JSON.stringify(inputMessage(h, 'not-control', 'end', 'btn-mute')))
+    const notControl = await waitFor(() =>
+      messages.find((message) => message.type === 'inputResult' && message.requestId === 'not-control'),
+    )
+    expect(notControl).toMatchObject({ type: 'inputResult', ok: false })
+    if (notControl.type === 'inputResult') expect(notControl.error).toMatch(/not a continuous control/)
+
+    ws.send(JSON.stringify(inputMessage(h, 'missing-control', 'end', 'does-not-exist')))
+    const missing = await waitFor(() =>
+      messages.find((message) => message.type === 'inputResult' && message.requestId === 'missing-control'),
+    )
+    expect(missing).toMatchObject({ type: 'inputResult', ok: false })
+    if (missing.type === 'inputResult') expect(missing.error).toMatch(/not found/i)
+
+    ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
+  it('limits moves to 60/s but always accepts end', async () => {
+    const h = await harness()
+    attachControl(h, 'btn-vol-down', volumeControl)
+    const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await waitFor(() => messages.find((message) => message.type === 'hello'))
+
+    for (let index = 0; index < 61; index += 1) {
+      ws.send(JSON.stringify(inputMessage(h, `burst-${index}`, 'move', 'btn-vol-down', 0.1)))
+    }
+
+    const limited = await waitFor(() =>
+      messages.find(
+        (message) =>
+          message.type === 'inputResult' &&
+          typeof message.error === 'string' &&
+          /Too many control events/.test(message.error),
+      ),
+    )
+    expect(limited).toMatchObject({ type: 'inputResult', ok: false })
+
+    ws.send(JSON.stringify(inputMessage(h, 'after-burst-end', 'end', 'btn-vol-down')))
+    const endResult = await waitFor(() =>
+      messages.find(
+        (message) => message.type === 'inputResult' && message.requestId === 'after-burst-end',
+      ),
+    )
+    expect(endResult).toMatchObject({ type: 'inputResult', ok: true })
+
+    ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
   })
 })

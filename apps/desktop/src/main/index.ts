@@ -11,6 +11,7 @@ import { ConfigStore } from './config-store'
 import { DiscoveryService } from './discovery'
 import { ActionExecutor } from './executor'
 import { createHostActions } from './host-actions'
+import { ControlInputRouter } from './control-input'
 import { createKeySender, type KeySender } from './key-sender'
 import { createLogger, type Logger } from './logger'
 import { lanAddresses, primaryLanAddress, urlsForPort } from './lan'
@@ -44,6 +45,7 @@ let server: DeckServer
 let discovery: DiscoveryService
 let keySender: KeySender
 let executor: ActionExecutor
+let inputRouter: ControlInputRouter | null = null
 let updater: UpdateService
 let serverError: string | null = null
 let pairCache: { key: string; value: PairView } | null = null
@@ -546,6 +548,11 @@ async function bootstrap(): Promise<void> {
     openExternal: async (url) => shell.openExternal(url),
   })
   executor = new ActionExecutor(keySender, host, logger)
+  const router = new ControlInputRouter({
+    execute: (actions, label) => executor.execute(actions, label),
+    logger,
+  })
+  inputRouter = router
 
   server = new DeckServer({
     port: settings.get().port,
@@ -557,6 +564,8 @@ async function bootstrap(): Promise<void> {
     logger,
     onPress: async (_client, _message, context: PressContext) =>
       executor.execute(context.button.actions, context.button.label),
+    onInput: async (_client, message, context) =>
+      router.handle(message, { control: context.control, label: context.button.label }),
     onClientsChanged: () => {
       void pushServerInfo()
     },
@@ -654,6 +663,7 @@ if (!gotLock) {
     shuttingDown = true
     void (async () => {
       try {
+        inputRouter?.dispose()
         keySender?.dispose?.()
         discovery?.stop()
         await server?.stop()
