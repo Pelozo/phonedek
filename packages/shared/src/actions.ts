@@ -214,6 +214,8 @@ export class MacroRecorder {
     this.flushText()
     this.paused = true
     this.lastTime = time
+    this.held.clear()
+    this.heldOrder = []
   }
 
   resume(time: number): void {

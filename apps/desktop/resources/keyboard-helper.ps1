@@ -157,7 +157,8 @@ function Send-Mouse([string]$Button, [string]$Action, $X, $Y, [string]$Direction
         $dir = if ($Direction) { $Direction.ToLowerInvariant() } else { 'down' }
         if ($dir -eq 'down' -or $dir -eq 'left') { $delta = -$delta }
         $flag = if ($dir -eq 'left' -or $dir -eq 'right') { 0x01000 } else { 0x0800 }
-        [PhoneDeckNative]::mouse_event([System.UInt32]$flag, 0, 0, [System.UInt32](([System.Int64]$delta) -band 0xFFFFFFFF), [UIntPtr]::Zero)
+        $wheel = if ($delta -lt 0) { [System.UInt32]([System.Int64]$delta + 4294967296) } else { [System.UInt32]$delta }
+        [PhoneDeckNative]::mouse_event([System.UInt32]$flag, 0, 0, $wheel, [UIntPtr]::Zero)
         return
     }
 
