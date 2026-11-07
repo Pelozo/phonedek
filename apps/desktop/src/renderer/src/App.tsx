@@ -324,7 +324,7 @@ function AppContent() {
     }
 
     const volumeControl = (volumeKind: 'slider' | 'dial'): ControlSpec =>
-      hostPlatform === 'darwin'
+      (hostPlatform === 'darwin' || hostPlatform === 'win32')
         ? {
             kind: volumeKind,
             ...(volumeKind === 'slider' ? { axis: 'horizontal' as const } : {}),
@@ -486,13 +486,13 @@ function AppContent() {
                 {
                   label: 'Volume slider',
                   icon: 'music',
-                  description: `3 × 1 · ${hostPlatform === 'darwin' ? 'absolute volume' : 'relative volume'}`,
+                  description: `3 × 1 · ${hostPlatform === 'darwin' || hostPlatform === 'win32' ? 'absolute volume' : 'relative volume'}`,
                   onClick: () => addNewControl('volume'),
                 },
                 {
                   label: 'Volume wheel',
                   icon: 'sliders',
-                  description: `2 × 1 · ${hostPlatform === 'darwin' ? 'absolute volume' : 'relative volume'}`,
+                  description: `2 × 1 · ${hostPlatform === 'darwin' || hostPlatform === 'win32' ? 'absolute volume' : 'relative volume'}`,
                   onClick: () => addNewControl('volume-wheel'),
                 },
                 {
