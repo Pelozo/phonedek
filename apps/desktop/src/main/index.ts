@@ -16,6 +16,12 @@ import { createKeySender, type KeySender } from './key-sender'
 import { createLogger, type Logger } from './logger'
 import { lanAddresses, primaryLanAddress, urlsForPort } from './lan'
 import { keyboardHelperPath } from './platform'
+import { PointerRouter } from './pointer-input'
+import {
+  createPointerSender,
+  pointerPlatformSupport,
+  type PointerSender,
+} from './pointer-sender'
 import { createPairInfo } from './qr'
 import { DeckServer, type PressContext } from './server'
 import { SettingsStore } from './settings-store'
@@ -47,6 +53,8 @@ let discovery: DiscoveryService
 let keySender: KeySender
 let executor: ActionExecutor
 let inputRouter: ControlInputRouter | null = null
+let pointerSender: PointerSender | null = null
+let pointerRouter: PointerRouter | null = null
 let updater: UpdateService
 let serverError: string | null = null
 let pairCache: { key: string; value: PairView } | null = null
@@ -778,6 +786,20 @@ async function bootstrap(): Promise<void> {
   })
   inputRouter = router
 
+  pointerSender = createPointerSender(process.platform, helperPath(), logger)
+  pointerRouter = pointerSender
+    ? new PointerRouter({
+        sender: pointerSender,
+        logger,
+      })
+    : null
+  if (pointerRouter) {
+    logger.info(`Pointer control enabled on ${process.platform}`)
+  } else {
+    const support = pointerPlatformSupport()
+    logger.info(`Pointer control disabled: ${support.reason ?? 'not supported on this host'}`)
+  }
+
   server = new DeckServer({
     port: settings.get().port,
     token: settings.get().token,
@@ -790,6 +812,22 @@ async function bootstrap(): Promise<void> {
       executor.execute(context.button.actions, context.button.label),
     onInput: async (_client, message, context) =>
       router.handle(message, { control: context.control, label: context.button.label }),
+    pointerSupported: pointerRouter !== null,
+    onPointer: async (client, message, context) => {
+      if (!pointerRouter) {
+        return {
+          seq: message.seq,
+          ok: false,
+          error: 'Pointer control is not supported by this desktop.',
+        }
+      }
+      return pointerRouter.handle(
+        client.id,
+        message,
+        context ? { control: context.control, label: context.label } : undefined,
+      )
+    },
+    onClientClosed: (client) => pointerRouter?.clientDisconnected(client.id),
     importBackup: async (filePath, preview) => {
       if (!mainWindow || mainWindow.isDestroyed()) {
         return { ok: false, error: 'No PhoneDeck window is available for approval.' }
@@ -823,6 +861,7 @@ async function bootstrap(): Promise<void> {
       mainWindow.focus()
       mainWindow.setAlwaysOnTop(true, 'screen-saver')
       logger.info(`Showing phone import approval dialog for "${preview.serverName}"`)
+      pointerRouter?.setBlocked(true)
       const choice = await (async () => {
         try {
           return await dialog.showMessageBox(mainWindow, {
@@ -837,6 +876,7 @@ async function bootstrap(): Promise<void> {
           })
         } finally {
           mainWindow.setAlwaysOnTop(false)
+          pointerRouter?.setBlocked(false)
         }
       })()
       logger.info(`Phone import approval: ${choice.response === 0 ? 'approved' : 'cancelled'}`)
@@ -972,6 +1012,8 @@ if (!gotLock) {
     void (async () => {
       try {
         inputRouter?.dispose()
+        pointerRouter?.dispose()
+        pointerSender?.dispose()
         keySender?.dispose?.()
         discovery?.stop()
         await server?.stop()

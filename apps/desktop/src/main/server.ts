@@ -3,9 +3,11 @@ import { createReadStream, createWriteStream, mkdtempSync, rmSync, statSync } fr
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import type { Socket } from 'node:net'
 import { WebSocket, WebSocketServer } from 'ws'
 import {
   BRIGHTNESS_CAPABILITY,
+  POINTER_CAPABILITY,
   PROTOCOL_VERSION,
   parseClientMessage,
 } from '@phonedek/shared'
@@ -20,6 +22,8 @@ import type {
   DeckProfile,
   InputMessage,
   InputResult,
+  PointerMessage,
+  PointerResult,
   PressMessage,
   PressResult,
   ServerMessage,
@@ -39,7 +43,18 @@ export const SERVER_CAPABILITIES = [
   'import-v1',
   'input-v1',
   BRIGHTNESS_CAPABILITY,
+  POINTER_CAPABILITY,
 ] as const
+
+/**
+ * Capabilities for a specific host. Wayland/unsupported platforms must not
+ * advertise `pointer-v1`, so the desktop computes this at startup.
+ */
+export function serverCapabilities(pointerSupported: boolean): string[] {
+  return SERVER_CAPABILITIES.filter(
+    (capability) => pointerSupported || capability !== POINTER_CAPABILITY,
+  )
+}
 
 export interface PressContext {
   profile: DeckProfile
@@ -51,6 +66,12 @@ export interface InputContext extends PressContext {
   control: ControlSpec
 }
 
+/** Trackpad resolved from the `start` message; null for move/end/cancel. */
+export interface PointerContext {
+  control: ControlSpec
+  label: string
+}
+
 export interface DeckServerOptions {
   port: number
   token: string
@@ -60,6 +81,15 @@ export interface DeckServerOptions {
   getServerName: () => string
   onPress: (client: ConnectedClient, message: PressMessage, context: PressContext) => Promise<PressResult>
   onInput?: (client: ConnectedClient, message: InputMessage, context: InputContext) => Promise<InputResult>
+  onPointer?: (
+    client: ConnectedClient,
+    message: PointerMessage,
+    context: PointerContext | null,
+  ) => Promise<PointerResult>
+  /** Set false on Wayland/unsupported hosts so `pointer-v1` is not advertised. */
+  pointerSupported?: boolean
+  /** Called when a phone disconnects, so held pointer buttons can be released. */
+  onClientClosed?: (client: ConnectedClient) => void
   /** Called only after an uploaded backup validates; show native approval here. */
   importBackup?: (filePath: string, preview: BackupPreview) => Promise<{ ok: boolean; error?: string }>
   onClientsChanged?: (clients: ConnectedClient[]) => void
@@ -73,6 +103,7 @@ interface ClientRecord {
   pressTimes: number[]
   inputTimes: number[]
   brightnessTimes: number[]
+  pointerTimes: number[]
 }
 
 interface AuthResult {
@@ -84,6 +115,7 @@ const AUTH_WINDOW_MS = 60_000
 const AUTH_MAX_FAILURES = 6
 const AUTH_BLOCK_MS = 60_000
 const INPUT_RATE_LIMIT = 60
+const POINTER_RATE_LIMIT = 120
 const BRIGHTNESS_RATE_LIMIT = 20
 const MAX_IMPORT_BYTES = 300 * 1024 * 1024
 const IMPORT_TEMP_PREFIX = 'phonedek-import-'
@@ -293,6 +325,10 @@ export class DeckServer {
     return this.token
   }
 
+  private get capabilities(): string[] {
+    return serverCapabilities(this.options.pointerSupported !== false)
+  }
+
   async start(): Promise<number> {
     if (this.httpServer) return this.actualPort
 
@@ -308,6 +344,9 @@ export class DeckServer {
     this.wss = wss
 
     server.on('upgrade', (request, socket, head) => {
+      // Nagle can add ~40 ms of jitter to a 60 Hz pointer stream.
+      const upgradeSocket = socket as Socket
+      upgradeSocket.setNoDelay(true)
       const url = new URL(request.url ?? '/', 'http://localhost')
       if (url.pathname !== '/ws') {
         socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n')
@@ -472,7 +511,15 @@ export class DeckServer {
       connectedAt: now,
       lastSeenAt: now,
     }
-    const record: ClientRecord = { ws, info, alive: true, pressTimes: [], inputTimes: [], brightnessTimes: [] }
+    const record: ClientRecord = {
+      ws,
+      info,
+      alive: true,
+      pressTimes: [],
+      inputTimes: [],
+      brightnessTimes: [],
+      pointerTimes: [],
+    }
     this.clients.set(id, record)
     this.options.logger?.info(`Phone connected from ${info.address}`)
 
@@ -488,6 +535,11 @@ export class DeckServer {
       })
     })
     ws.on('close', () => {
+      try {
+        this.options.onClientClosed?.(record.info)
+      } catch (error) {
+        this.options.logger?.warn(`Client close handler failed: ${String(error)}`)
+      }
       this.clients.delete(id)
       this.notifyClients()
       this.options.logger?.info(`Phone disconnected: ${info.address}`)
@@ -502,7 +554,7 @@ export class DeckServer {
       serverName: this.options.getServerName(),
       config: this.options.getConfig(),
       serverTime: Date.now(),
-      capabilities: [...SERVER_CAPABILITIES],
+      capabilities: this.capabilities,
     })
     this.notifyClients()
   }
@@ -537,6 +589,9 @@ export class DeckServer {
         break
       case 'input':
         await this.handleInput(record, message)
+        break
+      case 'pointer':
+        await this.handlePointer(record, message)
         break
     }
   }
@@ -656,6 +711,79 @@ export class DeckServer {
     }
   }
 
+  private sendPointerResult(record: ClientRecord, message: PointerMessage, result: PointerResult): void {
+    this.send(record.ws, {
+      type: 'pointerResult',
+      seq: message.seq,
+      ok: result.ok,
+      ...(result.error ? { error: result.error } : {}),
+    })
+  }
+
+  private async handlePointer(record: ClientRecord, message: PointerMessage): Promise<void> {
+    const now = Date.now()
+    // Moves are rate-limited with their own bucket. end/cancel always get
+    // through so a final position and button release are never dropped.
+    if (message.phase !== 'end' && message.phase !== 'cancel') {
+      record.pointerTimes = record.pointerTimes.filter((time) => now - time < 1_000)
+      if (record.pointerTimes.length >= POINTER_RATE_LIMIT) {
+        this.sendPointerResult(record, message, {
+          seq: message.seq,
+          ok: false,
+          error: 'Too many pointer events, slow down',
+        })
+        return
+      }
+      record.pointerTimes.push(now)
+    }
+
+    let context: PointerContext | null = null
+    if (message.phase === 'start') {
+      const config = this.options.getConfig()
+      const profile = config.profiles.find((item) => item.id === message.profileId)
+      const page = profile?.pages.find((item) => item.id === message.pageId)
+      const button = page?.buttons.find((item) => item.id === message.controlId)
+      if (!profile || !page || !button) {
+        this.sendPointerResult(record, message, {
+          seq: message.seq,
+          ok: false,
+          error: 'Trackpad not found. Refresh the deck.',
+        })
+        return
+      }
+      if (!button.control || button.control.kind !== 'trackpad') {
+        this.sendPointerResult(record, message, {
+          seq: message.seq,
+          ok: false,
+          error: 'This button is not a trackpad.',
+        })
+        return
+      }
+      context = { control: button.control, label: button.label }
+    }
+
+    let result: PointerResult
+    if (!this.options.onPointer) {
+      result = { seq: message.seq, ok: false, error: 'Pointer control is not supported by this desktop.' }
+    } else {
+      try {
+        result = await this.options.onPointer(record.info, message, context)
+      } catch (error) {
+        result = {
+          seq: message.seq,
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        }
+      }
+    }
+
+    // Movement has no success acks; a single result closes end/cancel and
+    // errors are reported immediately.
+    if (message.phase === 'end' || message.phase === 'cancel' || !result.ok) {
+      this.sendPointerResult(record, message, { ...result, seq: message.seq })
+    }
+  }
+
   private async handleImport(request: IncomingMessage, response: ServerResponse): Promise<void> {
     if (this.importInProgress) {
       request.resume()
@@ -754,7 +882,7 @@ export class DeckServer {
         serverName: this.options.getServerName(),
         version: this.options.version,
         pairingRequired: true,
-        capabilities: [...SERVER_CAPABILITIES],
+        capabilities: this.capabilities,
       })
       return
     }

@@ -11,17 +11,29 @@ import type {
   ControlSpec,
   DeckConfig,
   InputMessage,
+  PointerMessage,
+  PointerResult,
   PressMessage,
   PressResult,
   ServerMessage,
 } from '@phonedek/shared'
 import { AssetStore } from '../src/main/assets'
 import { writeBackupFile, type BackupPreview } from '../src/main/backup'
-import { DeckServer, type InputContext, type PressContext } from '../src/main/server'
+import {
+  DeckServer,
+  type InputContext,
+  type PointerContext,
+  type PressContext,
+} from '../src/main/server'
 
 interface InputCall {
   message: InputMessage
   context: InputContext
+}
+
+interface PointerCall {
+  message: PointerMessage
+  context: PointerContext | null
 }
 
 interface Harness {
@@ -33,12 +45,14 @@ interface Harness {
   presses: PressMessage[]
   contexts: PressContext[]
   inputs: InputCall[]
+  pointers: PointerCall[]
 }
 
 const cleanups: Array<() => Promise<void>> = []
 
 interface HarnessOptions {
   importBackup?: (filePath: string, preview: BackupPreview) => Promise<{ ok: boolean; error?: string }>
+  pointerSupported?: boolean
 }
 
 async function harness(
@@ -52,6 +66,7 @@ async function harness(
   const presses: PressMessage[] = []
   const contexts: PressContext[] = []
   const inputs: InputCall[] = []
+  const pointers: PointerCall[] = []
   const token = 'test-token-123'
   const server = new DeckServer({
     port: 0,
@@ -69,11 +84,16 @@ async function harness(
       inputs.push({ message, context })
       return { ok: true }
     },
+    onPointer: async (_client, message, context) => {
+      pointers.push({ message, context })
+      return { seq: message.seq, ok: true }
+    },
+    pointerSupported: options.pointerSupported,
     importBackup: options.importBackup,
   })
   const port = await server.start()
   cleanups.push(() => server.stop())
-  return { server, port, token, config, assets, presses, contexts, inputs }
+  return { server, port, token, config, assets, presses, contexts, inputs, pointers }
 }
 
 function attachControl(h: Harness, buttonId: string, control: ControlSpec): void {
@@ -181,6 +201,7 @@ describe('DeckServer HTTP', () => {
     expect(infoBody.capabilities).toContain('import-v1')
     expect(infoBody.capabilities).toContain('input-v1')
     expect(infoBody.capabilities).toContain('brightness-v1')
+    expect(infoBody.capabilities).toContain('pointer-v1')
 
     expect((await fetch(`${base}/api/config`)).status).toBe(401)
     expect((await fetch(`${base}/api/config?token=wrong`)).status).toBe(401)
@@ -395,6 +416,7 @@ describe('DeckServer WebSocket', () => {
     expect(hello.capabilities).toContain('input-v1')
     expect(hello.capabilities).toContain('brightness-v1')
     expect(hello.capabilities).toContain('import-v1')
+    expect(hello.capabilities).toContain('pointer-v1')
     expect(messages.some((message) => message.type === 'hello')).toBe(true)
 
     const helloMessage: ClientMessage = {
@@ -618,6 +640,93 @@ describe('DeckServer continuous input', () => {
     ws.close()
     await waitFor(() => h.server.getClients().length === 0)
   })
+})
+
+describe('DeckServer pointer input', () => {
+  const trackpad: ControlSpec = {
+    kind: 'trackpad',
+    emit: 'delta',
+    binding: { type: 'pointer' },
+  }
+
+  function pointerStart(h: Harness, seq = 1, controlId = 'btn-vol-down'): PointerMessage {
+    return {
+      type: 'pointer',
+      seq,
+      phase: 'start',
+      profileId: h.config.profiles[0]!.id,
+      pageId: h.config.profiles[0]!.pages[0]!.id,
+      controlId,
+    }
+  }
+
+  function pointerMove(seq: number): PointerMessage {
+    return { type: 'pointer', seq, phase: 'move', dx: 0.1, dy: -0.1 }
+  }
+
+  it('advertises pointer-v1 only when pointer injection is supported', async () => {
+    const supported = await harness({ ok: true }, { pointerSupported: true })
+    const a = await openSocket(`ws://127.0.0.1:${supported.port}/ws?token=${supported.token}`)
+    const hello = await waitFor(() => a.messages.find((message) => message.type === 'hello'))
+    expect(hello.capabilities).toContain('pointer-v1')
+    a.ws.close()
+
+    const unsupported = await harness({ ok: true }, { pointerSupported: false })
+    const b = await openSocket(`ws://127.0.0.1:${unsupported.port}/ws?token=${unsupported.token}`)
+    const noHello = await waitFor(() => b.messages.find((message) => message.type === 'hello'))
+    expect(noHello.capabilities).not.toContain('pointer-v1')
+    b.ws.close()
+  })
+
+  it('routes start/move/end through onPointer and acknowledges only end', async () => {
+    const h = await harness()
+    attachControl(h, 'btn-vol-down', trackpad)
+    const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await waitFor(() => messages.find((message) => message.type === 'hello'))
+
+    ws.send(JSON.stringify(pointerStart(h)))
+    ws.send(JSON.stringify(pointerMove(2)))
+    ws.send(JSON.stringify({ type: 'pointer', seq: 3, phase: 'end' }))
+
+    const result = await waitFor(() =>
+      messages.find((message) => message.type === 'pointerResult' && message.seq === 3),
+    )
+    expect(result).toEqual({ type: 'pointerResult', seq: 3, ok: true })
+    expect(h.pointers.map((call) => call.message.phase)).toEqual(['start', 'move', 'end'])
+    expect(h.pointers[0]!.context?.control).toEqual(trackpad)
+    expect(h.pointers[0]!.context?.label).toBe('Volume down')
+    expect(h.pointers[1]!.context).toBeNull()
+    // Moves never produce success acks.
+    expect(messages.filter((message) => message.type === 'pointerResult')).toHaveLength(1)
+
+    ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
+  it('rejects a start that is not a trackpad control', async () => {
+    const h = await harness()
+    const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await waitFor(() => messages.find((message) => message.type === 'hello'))
+
+    ws.send(JSON.stringify(pointerStart(h, 1, 'btn-mute')))
+    const notTrackpad = await waitFor(() =>
+      messages.find((message) => message.type === 'pointerResult' && message.seq === 1),
+    )
+    expect(notTrackpad).toMatchObject({ type: 'pointerResult', ok: false })
+    if (notTrackpad.type === 'pointerResult') expect(notTrackpad.error).toMatch(/not a trackpad/)
+    expect(h.pointers).toHaveLength(0)
+
+    ws.send(JSON.stringify(pointerStart(h, 2, 'does-not-exist')))
+    const missing = await waitFor(() =>
+      messages.find((message) => message.type === 'pointerResult' && message.seq === 2),
+    )
+    expect(missing).toMatchObject({ type: 'pointerResult', ok: false })
+    if (missing.type === 'pointerResult') expect(missing.error).toMatch(/not found/i)
+
+    ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
 })
 
 describe('DeckServer phone brightness', () => {

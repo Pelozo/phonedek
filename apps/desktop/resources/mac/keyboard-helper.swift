@@ -56,6 +56,16 @@ func intValue(_ value: Any?) -> Int? {
     return nil
 }
 
+func doubleValue(_ value: Any?) -> Double? {
+    if let number = value as? NSNumber {
+        return number.doubleValue
+    }
+    if let string = value as? String {
+        return Double(string)
+    }
+    return nil
+}
+
 func clampInt(_ value: Int, _ minimum: Int, _ maximum: Int) -> Int {
     return max(minimum, min(maximum, value))
 }
@@ -118,6 +128,7 @@ final class KeyboardHelper {
     private let source = CGEventSource(stateID: .hidSystemState)
     private var held: Set<String> = []
     private var heldOrder: [String] = []
+    private var heldButtons: Set<String> = []
 
     func requireAccessibility() throws {
         if !AXIsProcessTrusted() {
@@ -146,6 +157,8 @@ final class KeyboardHelper {
             try sendMedia(step)
         case "mouse":
             try sendMouse(step)
+        case "pointer":
+            try sendPointer(step)
         default:
             throw HelperFailure("Unknown step kind: \(kind)")
         }
@@ -155,6 +168,16 @@ final class KeyboardHelper {
         for key in Array(heldOrder.reversed()) {
             _ = try? keyUp(key)
         }
+    }
+
+    func releaseHeldMouseButtons() {
+        guard !heldButtons.isEmpty else { return }
+        let point = CGEvent(source: nil)?.location ?? .zero
+        for name in ["left", "right", "middle"] where heldButtons.contains(name) {
+            let button = mouseButton(name)
+            _ = try? postMouse(upType(for: button), at: point, button: button, clickState: 1)
+        }
+        heldButtons.removeAll()
     }
 
     // MARK: - Keyboard
@@ -494,6 +517,142 @@ final class KeyboardHelper {
         }
         event.post(tap: .cghidEventTap)
     }
+
+    // MARK: - Relative pointer
+
+    private func sendPointer(_ step: [String: Any]) throws {
+        try requireAccessibility()
+
+        let current = CGEvent(source: nil)?.location ?? .zero
+        let displays = activeDisplays()
+        let screen = unionBounds(of: displays) ?? CGDisplayBounds(CGMainDisplayID())
+        let height = displayHeight(containing: current, displays: displays) ?? screen.height
+
+        let dx = doubleValue(step["dx"]) ?? 0
+        let dy = doubleValue(step["dy"]) ?? 0
+        let target = clamp(
+            CGPoint(x: current.x + dx * height, y: current.y + dy * height),
+            to: screen
+        )
+
+        if let type = dragType() {
+            try postMouse(type, at: target, button: dragButton(), clickState: 0)
+        } else {
+            try postMouse(.mouseMoved, at: target, button: .left, clickState: 0)
+        }
+
+        try scrollNotches(x: doubleValue(step["scrollX"]) ?? 0, y: doubleValue(step["scrollY"]) ?? 0)
+
+        if let buttons = step["buttons"] as? [[String: Any]] {
+            for event in buttons {
+                try applyPointerButton(event, at: target)
+            }
+        }
+    }
+
+    private func activeDisplays() -> [CGDirectDisplayID] {
+        var count: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else {
+            return [CGMainDisplayID()]
+        }
+        var displays = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetActiveDisplayList(count, &displays, &count) == .success else {
+            return [CGMainDisplayID()]
+        }
+        return Array(displays.prefix(Int(count)))
+    }
+
+    private func unionBounds(of displays: [CGDirectDisplayID]) -> CGRect? {
+        var union = CGRect.null
+        for display in displays {
+            union = union.union(CGDisplayBounds(display))
+        }
+        return union.isNull ? nil : union
+    }
+
+    private func displayHeight(containing point: CGPoint, displays: [CGDirectDisplayID]) -> CGFloat? {
+        for display in displays {
+            let bounds = CGDisplayBounds(display)
+            if bounds.contains(point) {
+                return bounds.height
+            }
+        }
+        return nil
+    }
+
+    private func clamp(_ point: CGPoint, to rect: CGRect) -> CGPoint {
+        return CGPoint(
+            x: min(max(point.x, rect.minX), rect.maxX),
+            y: min(max(point.y, rect.minY), rect.maxY)
+        )
+    }
+
+    private func dragType() -> CGEventType? {
+        if heldButtons.contains("left") {
+            return .leftMouseDragged
+        }
+        if heldButtons.contains("right") {
+            return .rightMouseDragged
+        }
+        if heldButtons.contains("middle") {
+            return .otherMouseDragged
+        }
+        return nil
+    }
+
+    private func dragButton() -> CGMouseButton {
+        if heldButtons.contains("left") {
+            return .left
+        }
+        if heldButtons.contains("right") {
+            return .right
+        }
+        return .center
+    }
+
+    private func applyPointerButton(_ event: [String: Any], at point: CGPoint) throws {
+        let name = (event["button"] as? String ?? "left").lowercased()
+        let action = (event["action"] as? String ?? "click").lowercased()
+        let button = mouseButton(name)
+
+        switch action {
+        case "down":
+            try postMouse(downType(for: button), at: point, button: button, clickState: 1)
+            heldButtons.insert(name)
+        case "up":
+            try postMouse(upType(for: button), at: point, button: button, clickState: 1)
+            heldButtons.remove(name)
+        case "click":
+            try click(at: point, button: button, double: false)
+        case "doubleclick":
+            try click(at: point, button: button, double: true)
+        default:
+            throw HelperFailure("Unknown pointer button action: \(action)")
+        }
+    }
+
+    private func scrollNotches(x: Double, y: Double) throws {
+        // Protocol: +scrollY is up and +scrollX is right, matching CGEvent's
+        // positive wheel1/wheel2 directions. The router already keeps the
+        // fractional residual, so rounding here only protects against a
+        // fractional frame from an older client.
+        let wheel1 = Int32(max(-100, min(100, Int(y.rounded()))))
+        let wheel2 = Int32(max(-100, min(100, Int(x.rounded()))))
+        guard wheel1 != 0 || wheel2 != 0 else {
+            return
+        }
+        guard let event = CGEvent(
+            scrollWheelEvent2Source: source,
+            units: .line,
+            wheelCount: 2,
+            wheel1: wheel1,
+            wheel2: wheel2,
+            wheel3: 0
+        ) else {
+            throw HelperFailure("Could not create a scroll event")
+        }
+        event.post(tap: .cghidEventTap)
+    }
 }
 
 // MARK: - Entry point
@@ -529,6 +688,9 @@ if CommandLine.arguments.contains("--check") {
 }
 
 let helper = KeyboardHelper()
+// A restarted helper, or anything that detached the cursor, must be
+// re-associated before relative movement can work.
+_ = CGAssociateMouseAndMouseCursorPosition(1)
 emit(["ready": true, "accessibility": AXIsProcessTrusted()])
 
 while let line = readLine(strippingNewline: true) {
@@ -563,3 +725,4 @@ while let line = readLine(strippingNewline: true) {
 }
 
 helper.releaseHeldKeys()
+helper.releaseHeldMouseButtons()

@@ -268,25 +268,31 @@ export class HelperKeySender implements KeySender {
   }
 }
 
+/** Launch description for the Windows PowerShell helper. */
+export function windowsHelperLaunch(helperPath: string): HelperLaunch {
+  return {
+    command: 'powershell.exe',
+    args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', helperPath],
+    label: 'PowerShell keyboard helper',
+  }
+}
+
+/** Launch description for the compiled macOS helper. */
+export function macHelperLaunch(helperPath: string): HelperLaunch {
+  return { command: helperPath, args: [], label: 'macOS keyboard helper' }
+}
+
 /** Windows helper: powershell.exe running resources/keyboard-helper.ps1. */
 export class WindowsKeySender extends HelperKeySender {
   constructor(helperPath: string, logger?: Logger) {
-    super(
-      helperPath,
-      {
-        command: 'powershell.exe',
-        args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', helperPath],
-        label: 'PowerShell keyboard helper',
-      },
-      logger,
-    )
+    super(helperPath, windowsHelperLaunch(helperPath), logger)
   }
 }
 
 /** macOS helper: a compiled Swift executable with the same JSONL protocol. */
 export class MacKeySender extends HelperKeySender {
   constructor(helperPath: string, logger?: Logger) {
-    super(helperPath, { command: helperPath, args: [], label: 'macOS keyboard helper' }, logger)
+    super(helperPath, macHelperLaunch(helperPath), logger)
   }
 }
 

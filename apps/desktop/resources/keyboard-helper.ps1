@@ -54,6 +54,28 @@ public static class PhoneDeckNative {
         public INPUTUNION u;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MONITORINFO {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
+    }
+
     [DllImport("user32.dll", SetLastError = true)]
     public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
@@ -64,7 +86,55 @@ public static class PhoneDeckNative {
     public static extern bool SetCursorPos(int X, int Y);
 
     [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool GetCursorPos(out POINT point);
+
+    [DllImport("user32.dll")]
+    public static extern int GetSystemMetrics(int index);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetProcessDPIAware();
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr MonitorFromPoint(POINT point, uint flags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
+
+    [DllImport("user32.dll", SetLastError = true)]
     public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+
+    public static void EnableDpiAwareness() {
+        try {
+            // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4. GetCursorPos and
+            // SetCursorPos then use physical pixels on every monitor.
+            if (SetProcessDpiAwarenessContext(new IntPtr(-4))) return;
+        } catch (Exception) {
+            // Older Windows builds do not export this entry point.
+        }
+        try { SetProcessDPIAware(); } catch (Exception) { }
+    }
+
+    public static int MonitorHeightAt(int x, int y) {
+        try {
+            POINT point = new POINT();
+            point.X = x;
+            point.Y = y;
+            IntPtr monitor = MonitorFromPoint(point, 2); // MONITOR_DEFAULTTONEAREST
+            if (monitor != IntPtr.Zero) {
+                MONITORINFO info = new MONITORINFO();
+                info.cbSize = Marshal.SizeOf(typeof(MONITORINFO));
+                if (GetMonitorInfo(monitor, ref info)) {
+                    int height = info.rcMonitor.Bottom - info.rcMonitor.Top;
+                    if (height > 0) return height;
+                }
+            }
+        } catch (Exception) { }
+        int fallback = GetSystemMetrics(1); // SM_CYSCREEN
+        return fallback > 0 ? fallback : 1080;
+    }
 
     public static void UnicodeChar(ushort codeUnit) {
         INPUT down = new INPUT();
@@ -236,6 +306,54 @@ function Send-Mouse([string]$Button, [string]$Action, $X, $Y, [string]$Direction
     }
 }
 
+function Send-Pointer($Step) {
+    $point = [PhoneDeckNative+POINT]::new()
+    if (-not [PhoneDeckNative]::GetCursorPos([ref]$point)) {
+        throw 'Could not read the cursor position'
+    }
+
+    $dx = if ($null -ne $Step.dx) { [double]$Step.dx } else { 0.0 }
+    $dy = if ($null -ne $Step.dy) { [double]$Step.dy } else { 0.0 }
+    $height = [PhoneDeckNative]::MonitorHeightAt($point.X, $point.Y)
+    $targetX = [int][Math]::Round($point.X + $dx * $height)
+    $targetY = [int][Math]::Round($point.Y + $dy * $height)
+
+    # GetSystemMetrics 76..79 = virtual screen X, Y, width, height. A
+    # per-monitor-aware process sees physical pixels, so this clamp is exact.
+    $left = [PhoneDeckNative]::GetSystemMetrics(76)
+    $top = [PhoneDeckNative]::GetSystemMetrics(77)
+    $width = [PhoneDeckNative]::GetSystemMetrics(78)
+    $screenHeight = [PhoneDeckNative]::GetSystemMetrics(79)
+    if ($width -gt 0 -and $screenHeight -gt 0) {
+        $targetX = [Math]::Max($left, [Math]::Min($left + $width - 1, $targetX))
+        $targetY = [Math]::Max($top, [Math]::Min($top + $screenHeight - 1, $targetY))
+    }
+    [void][PhoneDeckNative]::SetCursorPos($targetX, $targetY)
+
+    if ($null -ne $Step.scrollY) {
+        $delta = [int][Math]::Round(([double]$Step.scrollY) * 120.0)
+        $delta = [Math]::Max(-12000, [Math]::Min(12000, $delta))
+        if ($delta -ne 0) {
+            $wheel = if ($delta -lt 0) { [System.UInt32]([System.Int64]$delta + 4294967296) } else { [System.UInt32]$delta }
+            [PhoneDeckNative]::mouse_event([System.UInt32]0x0800, 0, 0, $wheel, [UIntPtr]::Zero)
+        }
+    }
+    if ($null -ne $Step.scrollX) {
+        $delta = [int][Math]::Round(([double]$Step.scrollX) * 120.0)
+        $delta = [Math]::Max(-12000, [Math]::Min(12000, $delta))
+        if ($delta -ne 0) {
+            $wheel = if ($delta -lt 0) { [System.UInt32]([System.Int64]$delta + 4294967296) } else { [System.UInt32]$delta }
+            [PhoneDeckNative]::mouse_event([System.UInt32]0x01000, 0, 0, $wheel, [UIntPtr]::Zero)
+        }
+    }
+
+    if ($null -ne $Step.buttons) {
+        foreach ($buttonEvent in $Step.buttons) {
+            Send-Mouse ([string]$buttonEvent.button) ([string]$buttonEvent.action) $null $null $null $null
+        }
+    }
+}
+
 function Set-SystemVolume([int]$Level) {
     $clamped = [Math]::Max(0, [Math]::Min(100, $Level))
     [PhoneDeckVolume]::Set([single]($clamped / 100.0))
@@ -257,10 +375,12 @@ function Invoke-Step($Step) {
             Send-Chord @($key) 30
         }
         'mouse' { Send-Mouse ([string]$Step.button) ([string]$Step.action) $Step.x $Step.y ([string]$Step.direction) $Step.amount }
+        'pointer' { Send-Pointer $Step }
         default { throw "Unknown step kind: $($Step.kind)" }
     }
 }
 
+[PhoneDeckNative]::EnableDpiAwareness()
 [Console]::Out.WriteLine('{"ready":true}')
 [Console]::Out.Flush()
 
