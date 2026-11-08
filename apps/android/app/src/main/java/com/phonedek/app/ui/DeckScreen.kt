@@ -24,10 +24,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -849,73 +849,38 @@ private fun DeckGrid(
         val gap = grid.gap.dp
         val cellWidth = ((maxWidth - gap * (grid.columns - 1)) / grid.columns)
             .coerceAtLeast(0.dp)
+        val cellHeight = ((maxHeight - gap * (grid.rows - 1)) / grid.rows)
+            .coerceAtLeast(0.dp)
 
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(gap),
-        ) {
-            repeat(grid.rows) { row ->
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    var column = 0
-                    while (column < grid.columns) {
-                        val slot = row * grid.columns + column
-                        val button = bySlot[slot]
-                        if (button != null) {
-                            val spanColumns = (button.span?.columns ?: 1)
-                                .coerceIn(1, grid.columns - column)
-                            val spanRows = button.span?.rows ?: 1
-                            val tileWidth = cellWidth * spanColumns +
-                                gap * (spanColumns - 1)
-                            Box(
-                                modifier = Modifier
-                                    .width(tileWidth)
-                                    .fillMaxHeight(),
-                            ) {
-                                DeckButtonView(
-                                    button = button,
-                                    theme = profile.theme,
-                                    pairing = pairing,
-                                    isActive = isActive,
-                                    onPress = { onPress(button) },
-                                    onControlInput = onControlInput,
-                                    onControlInteracting = onControlInteracting,
-                                )
-                                if (spanRows > 1) {
-                                    Text(
-                                        text = "ROWS $spanRows → 1",
-                                        color = Color.White.copy(alpha = 0.55f),
-                                        fontFamily = ConsoleMono,
-                                        fontSize = 7.sp,
-                                        maxLines = 1,
-                                        modifier = Modifier
-                                            .align(Alignment.BottomEnd)
-                                            .padding(4.dp)
-                                            .background(
-                                                Color.Black.copy(alpha = 0.45f),
-                                                RoundedCornerShape(2.dp),
-                                            )
-                                            .padding(horizontal = 3.dp, vertical = 1.dp),
-                                    )
-                                }
-                            }
-                            if (column + spanColumns < grid.columns) {
-                                Spacer(Modifier.width(gap))
-                            }
-                            column += spanColumns
-                        } else {
-                            Spacer(Modifier.width(cellWidth))
-                            if (column + 1 < grid.columns) {
-                                Spacer(Modifier.width(gap))
-                            }
-                            column += 1
-                        }
-                    }
-                }
+        // Absolute placement instead of a Column of Rows so a tile can span
+        // both columns and rows (the desktop preview already does this).
+        bySlot.values.sortedBy { it.slot }.forEach { button ->
+            val anchorRow = button.slot / grid.columns
+            val anchorColumn = button.slot % grid.columns
+            val spanColumns = (button.span?.columns ?: 1)
+                .coerceIn(1, grid.columns - anchorColumn)
+            val spanRows = (button.span?.rows ?: 1)
+                .coerceIn(1, grid.rows - anchorRow)
+            val tileWidth = cellWidth * spanColumns + gap * (spanColumns - 1)
+            val tileHeight = cellHeight * spanRows + gap * (spanRows - 1)
+            Box(
+                modifier = Modifier
+                    .offset(
+                        x = (cellWidth + gap) * anchorColumn,
+                        y = (cellHeight + gap) * anchorRow,
+                    )
+                    .width(tileWidth)
+                    .height(tileHeight),
+            ) {
+                DeckButtonView(
+                    button = button,
+                    theme = profile.theme,
+                    pairing = pairing,
+                    isActive = isActive,
+                    onPress = { onPress(button) },
+                    onControlInput = onControlInput,
+                    onControlInteracting = onControlInteracting,
+                )
             }
         }
     }
