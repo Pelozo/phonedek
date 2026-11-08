@@ -114,6 +114,18 @@ data class ControlBindingDto(
     val stepPercent: Int? = null,
     val axis: String? = null,
     val invert: Boolean? = null,
+    // Trackpad/pointer binding settings. The desktop applies sensitivity; the
+    // phone only mirrors the flags for its local gesture classifier.
+    val sensitivity: Float? = null,
+    val naturalScroll: Boolean? = null,
+    val tapToClick: Boolean? = null,
+    val dragLock: Boolean? = null,
+)
+
+/** Ordered pointer button transition carried by a `pointer` move/end message. */
+data class PointerButtonEvent(
+    val button: String,
+    val action: String,
 )
 
 @Serializable
@@ -376,14 +388,40 @@ private fun ControlBindingDto.normalized(): ControlBindingDto? {
             invert = invert ?: false,
         )
 
+        "pointer" -> ControlBindingDto(
+            type = "pointer",
+            sensitivity = sensitivity
+                ?.takeIf { it.isFinite() }
+                ?.coerceIn(0.25f, 3f)
+                ?: 1f,
+            naturalScroll = naturalScroll ?: true,
+            tapToClick = tapToClick ?: true,
+            dragLock = dragLock ?: true,
+        )
+
         else -> null
     }
 }
 
 private fun ControlDto.normalized(): ControlDto? {
     val controlKind = kind.trim().lowercase()
-    if (controlKind != "slider" && controlKind != "dial") return null
     val controlEmit = emit.trim().lowercase()
+
+    // Trackpads are launch tiles: the full-screen pad owns the gesture. The
+    // binding must be a pointer so a value binding cannot be smuggled in.
+    if (controlKind == "trackpad") {
+        if (controlEmit != "delta") return null
+        val pointerBinding = binding.normalized() ?: return null
+        if (pointerBinding.type != "pointer") return null
+        return ControlDto(
+            kind = "trackpad",
+            emit = "delta",
+            binding = pointerBinding,
+            haptics = haptics,
+        )
+    }
+
+    if (controlKind != "slider" && controlKind != "dial") return null
     val safeBinding = binding.normalized() ?: return null
 
     val emitMatchesBinding = when {

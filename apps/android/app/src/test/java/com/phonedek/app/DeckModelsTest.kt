@@ -574,6 +574,88 @@ class DeckModelsTest {
     }
 
     @Test
+    fun parsesTrackpadPointerControlAndDropsUnknownKinds() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "grid": { "columns": 5, "rows": 3, "gap": 8, "padding": 10 },
+                "pages": [{
+                  "id": "page",
+                  "buttons": [
+                    {
+                      "id": "pad",
+                      "slot": 0,
+                      "label": "Trackpad",
+                      "control": {
+                        "kind": "trackpad",
+                        "emit": "delta",
+                        "binding": {
+                          "type": "pointer",
+                          "sensitivity": 9,
+                          "naturalScroll": false,
+                          "tapToClick": false,
+                          "dragLock": false
+                        }
+                      },
+                      "span": { "columns": 3, "rows": 2 }
+                    },
+                    {
+                      "id": "bad-binding",
+                      "slot": 3,
+                      "icon": "?",
+                      "control": {
+                        "kind": "trackpad",
+                        "emit": "delta",
+                        "binding": { "type": "volume", "mode": "relative" }
+                      }
+                    },
+                    {
+                      "id": "bad-emit",
+                      "slot": 4,
+                      "icon": "?",
+                      "control": {
+                        "kind": "trackpad",
+                        "emit": "value",
+                        "binding": { "type": "pointer" }
+                      }
+                    },
+                    {
+                      "id": "unknown",
+                      "slot": 8,
+                      "icon": "?",
+                      "control": {
+                        "kind": "knob",
+                        "emit": "delta",
+                        "binding": { "type": "pointer" }
+                      }
+                    }
+                  ]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val buttons = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons
+        val pad = buttons.first { it.id == "pad" }
+        val control = pad.control!!
+        assertEquals("trackpad", control.kind)
+        assertEquals("delta", control.emit)
+        assertEquals("pointer", control.binding.type)
+        assertEquals(3f, control.binding.sensitivity!!, 0.001f)
+        assertEquals(false, control.binding.naturalScroll)
+        assertEquals(false, control.binding.tapToClick)
+        assertEquals(false, control.binding.dragLock)
+        assertEquals(3, pad.span!!.columns)
+        assertEquals(2, pad.span!!.rows)
+
+        assertNull(buttons.first { it.id == "bad-binding" }.control)
+        assertNull(buttons.first { it.id == "bad-emit" }.control)
+        assertNull(buttons.first { it.id == "unknown" }.control)
+        assertEquals("?", buttons.first { it.id == "unknown" }.icon)
+    }
+
+    @Test
     fun endpointParserAcceptsCommonForms() {
         assertEquals(parseEndpoint("192.168.1.4")!!.port, 47654)
         assertEquals(parseEndpoint("192.168.1.4:5000")!!.port, 5000)

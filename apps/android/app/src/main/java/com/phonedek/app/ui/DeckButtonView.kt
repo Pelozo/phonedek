@@ -2,6 +2,7 @@ package com.phonedek.app.ui
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -27,7 +28,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
@@ -41,6 +46,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.phonedek.app.data.DeckButton
@@ -141,7 +147,17 @@ fun DeckButtonView(
     ) {
         BackgroundLayer(spec, Modifier.fillMaxSize(), isActive = isActive)
 
-        if (control != null) {
+        if (control?.kind == "trackpad") {
+            TrackpadLauncher(
+                label = button.label,
+                sublabel = button.sublabel,
+                textColor = textColor,
+                contentRotation = contentRotation,
+                interaction = interaction,
+                onPress = onPress,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else if (control != null) {
             DeckControlView(
                 control = control,
                 label = button.label,
@@ -229,6 +245,86 @@ fun DeckButtonView(
 
         if (pressed) {
             Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.06f)))
+        }
+    }
+}
+
+@Composable
+private fun TrackpadLauncher(
+    label: String,
+    sublabel: String?,
+    textColor: Color,
+    contentRotation: Float,
+    interaction: MutableInteractionSource,
+    onPress: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val haptics = LocalHapticFeedback.current
+    val title = label.trim().ifBlank { "TRACKPAD" }
+    val caption = sublabel?.trim()?.takeIf { it.isNotEmpty() } ?: "TAP TO OPEN"
+    BoxWithConstraints(modifier) {
+        val glyph = minOf(maxHeight * 0.34f, 34.dp)
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { rotationZ = contentRotation }
+                .clickable(
+                    interactionSource = interaction,
+                    indication = LocalIndication.current,
+                    role = Role.Button,
+                    onClickLabel = "Open trackpad",
+                ) {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onPress()
+                },
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Canvas(Modifier.size(glyph)) {
+                val inset = 2.dp.toPx()
+                val width = size.width - inset * 2
+                val height = size.height - inset * 2
+                drawRoundRect(
+                    color = textColor.copy(alpha = 0.5f),
+                    topLeft = Offset(inset, inset),
+                    size = Size(width, height),
+                    cornerRadius = CornerRadius(height * 0.18f),
+                    style = Stroke(width = 1.dp.toPx()),
+                )
+                drawLine(
+                    color = textColor.copy(alpha = 0.35f),
+                    start = Offset(inset + width * 0.2f, inset + height * 0.62f),
+                    end = Offset(inset + width * 0.8f, inset + height * 0.62f),
+                    strokeWidth = 1.dp.toPx(),
+                )
+                drawCircle(
+                    color = Accent,
+                    radius = 2.dp.toPx(),
+                    center = Offset(inset + width * 0.5f, inset + height * 0.38f),
+                )
+            }
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = title,
+                color = textColor,
+                fontSize = 10.sp,
+                lineHeight = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = caption.uppercase(),
+                color = textColor.copy(alpha = 0.6f),
+                fontFamily = ConsoleMono,
+                fontSize = 7.sp,
+                lineHeight = 9.sp,
+                letterSpacing = 1.sp,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

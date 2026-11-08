@@ -55,7 +55,11 @@ fun PhoneDeckApp(viewModel: MainViewModel, state: UiState) {
 
     PhoneDeckTheme {
         Box(Modifier.fillMaxSize().background(Ink)) {
-            KeepScreenOn(state.ready && state.pairing != null && state.keepScreenOn)
+            KeepScreenOn(
+                state.ready &&
+                    state.pairing != null &&
+                    (state.keepScreenOn || state.pointerPadOpen),
+            )
 
             when {
                 !state.ready -> SplashScreen()
@@ -87,6 +91,14 @@ fun PhoneDeckApp(viewModel: MainViewModel, state: UiState) {
                     onStartPairing = {},
                     onSkip = {},
                     onClose = { showOnboardingGuide = false },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+
+            if (state.pointerPadOpen) {
+                PointerPadOverlay(
+                    viewModel = viewModel,
+                    options = state.pointerPadOptions,
                     modifier = Modifier.fillMaxSize(),
                 )
             }

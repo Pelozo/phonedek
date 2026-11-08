@@ -4,6 +4,7 @@ import android.os.SystemClock
 import com.phonedek.app.data.DeckJson
 import com.phonedek.app.data.DeviceInfo
 import com.phonedek.app.data.PROTOCOL_VERSION
+import com.phonedek.app.data.PointerButtonEvent
 import com.phonedek.app.util.Diag
 import java.util.UUID
 import kotlin.math.min
@@ -23,6 +24,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
@@ -45,7 +47,7 @@ internal fun buildWebSocketUrl(host: String, port: Int, token: String): HttpUrl?
         .build()
 }.getOrNull()
 
-internal val CLIENT_CAPABILITIES = listOf("input-v1", "brightness-v1")
+internal val CLIENT_CAPABILITIES = listOf("input-v1", "brightness-v1", "pointer-v1")
 
 internal fun buildHelloPayload(device: DeviceInfo): JsonObject = buildJsonObject {
     put("type", "hello")
@@ -90,6 +92,7 @@ class DeckConnection(
             message: String?,
         )
         fun onInputResult(requestId: String, controlId: String, ok: Boolean, error: String?)
+        fun onPointerResult(seq: Long, ok: Boolean, error: String?)
         fun onBrightness(level: Float?)
         fun onServerError(code: String, message: String)
         fun onNavigate(direction: String, pageId: String?)
@@ -190,6 +193,39 @@ class DeckConnection(
     }
 
     fun newRequestId(): String = "r-${UUID.randomUUID()}"
+
+    /** Relative trackpad input. `start` carries the control ids; see the pointer protocol. */
+    fun sendPointer(
+        seq: Long,
+        phase: String,
+        profileId: String? = null,
+        pageId: String? = null,
+        controlId: String? = null,
+        dx: Float? = null,
+        dy: Float? = null,
+        scrollX: Float? = null,
+        scrollY: Float? = null,
+        buttons: List<PointerButtonEvent> = emptyList(),
+    ): Boolean {
+        val socket = webSocketRef
+        if (!active || !connected || socket == null) {
+            Diag.w("sendPointer dropped: connected=$connected active=$active socket=${socket != null}")
+            return false
+        }
+        val payload = buildPointerPayload(
+            seq = seq,
+            phase = phase,
+            profileId = profileId,
+            pageId = pageId,
+            controlId = controlId,
+            dx = dx,
+            dy = dy,
+            scrollX = scrollX,
+            scrollY = scrollY,
+            buttons = buttons,
+        )
+        return socket.send(payload.toString())
+    }
 
     private fun connect() {
         if (!active) return
@@ -368,6 +404,11 @@ class DeckConnection(
                 )
             }
 
+            "pointerResult" -> {
+                val result = parsePointerResult(obj)
+                listener.onPointerResult(result.seq, result.ok, result.error)
+            }
+
             "brightness" -> {
                 when (val brightness = parseBrightness(obj)) {
                     is BrightnessMessage.Level -> listener.onBrightness(brightness.level)
@@ -433,6 +474,75 @@ internal fun buildInputPayload(
     if (value != null) put("value", value.coerceIn(0f, 1f).toDouble())
 }
 
+private val POINTER_PHASES = setOf("start", "move", "end", "cancel")
+private val POINTER_BUTTONS = setOf("left", "right", "middle")
+private val POINTER_ACTIONS = setOf("down", "up", "click", "doubleclick")
+
+/**
+ * Pointer payload shared by [DeckConnection.sendPointer] and tests. Only
+ * `start` carries ids, and only `move`/`end` carry movement and buttons.
+ * Movement and scroll are clamped again here even though the accumulator
+ * already does it, so a caller cannot emit an out-of-protocol message.
+ */
+internal fun buildPointerPayload(
+    seq: Long,
+    phase: String,
+    profileId: String? = null,
+    pageId: String? = null,
+    controlId: String? = null,
+    dx: Float? = null,
+    dy: Float? = null,
+    scrollX: Float? = null,
+    scrollY: Float? = null,
+    buttons: List<PointerButtonEvent> = emptyList(),
+): JsonObject = buildJsonObject {
+    val safePhase = phase.takeIf { it in POINTER_PHASES } ?: "cancel"
+    put("type", "pointer")
+    put("seq", seq.coerceAtLeast(0L))
+    put("phase", safePhase)
+
+    if (safePhase == "start") {
+        profileId?.let { put("profileId", it) }
+        pageId?.let { put("pageId", it) }
+        controlId?.let { put("controlId", it) }
+    }
+
+    if (safePhase == "move" || safePhase == "end") {
+        dx?.takeIf { it.isFinite() }?.let { put("dx", it.coerceIn(-2f, 2f).toDouble()) }
+        dy?.takeIf { it.isFinite() }?.let { put("dy", it.coerceIn(-2f, 2f).toDouble()) }
+        scrollX?.takeIf { it.isFinite() }
+            ?.let { put("scrollX", it.coerceIn(-10f, 10f).toDouble()) }
+        scrollY?.takeIf { it.isFinite() }
+            ?.let { put("scrollY", it.coerceIn(-10f, 10f).toDouble()) }
+
+        val safeButtons = buttons
+            .filter { it.button in POINTER_BUTTONS && it.action in POINTER_ACTIONS }
+            .take(4)
+        if (safeButtons.isNotEmpty()) {
+            put("buttons", buildJsonArray {
+                safeButtons.forEach { event ->
+                    add(buildJsonObject {
+                        put("button", event.button)
+                        put("action", event.action)
+                    })
+                }
+            })
+        }
+    }
+}
+
+internal data class PointerResultPayload(
+    val seq: Long,
+    val ok: Boolean,
+    val error: String?,
+)
+
+internal fun parsePointerResult(obj: JsonObject): PointerResultPayload = PointerResultPayload(
+    seq = obj.long("seq") ?: 0L,
+    ok = obj.bool("ok") ?: false,
+    error = obj.string("error"),
+)
+
 internal fun parseCapabilities(obj: JsonObject): Set<String> =
     obj.stringList("capabilities").orEmpty().toSet()
 
@@ -465,6 +575,9 @@ private fun JsonObject.string(key: String): String? =
 
 private fun JsonObject.int(key: String): Int? =
     (this[key] as? JsonPrimitive)?.intOrNull
+
+private fun JsonObject.long(key: String): Long? =
+    (this[key] as? JsonPrimitive)?.longOrNull
 
 private fun JsonObject.bool(key: String): Boolean? =
     (this[key] as? JsonPrimitive)?.booleanOrNull

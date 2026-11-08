@@ -19,6 +19,7 @@ import com.phonedek.app.data.DeckProfile
 import com.phonedek.app.data.DeviceInfo
 import com.phonedek.app.data.Pairing
 import com.phonedek.app.data.PairingDraft
+import com.phonedek.app.data.PointerButtonEvent
 import com.phonedek.app.data.PrefsRepository
 import com.phonedek.app.net.BackupResult
 import com.phonedek.app.net.ConnectionStatus
@@ -50,6 +51,18 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 private const val CONTROL_INPUT_FLUSH_MS = 40L
+private const val POINTER_FLUSH_MS = 16L
+private const val POINTER_KEEPALIVE_MS = 2_000L
+
+/** Immutable settings captured when the pad opens. */
+data class PointerPadOptions(
+    val controlId: String = "",
+    val label: String = "",
+    val sensitivity: Float = 1f,
+    val naturalScroll: Boolean = true,
+    val tapToClick: Boolean = true,
+    val dragLock: Boolean = true,
+)
 
 data class UiState(
     val ready: Boolean = false,
@@ -60,6 +73,9 @@ data class UiState(
     val activePageId: String? = null,
     val connection: ConnectionStatus = ConnectionStatus.OFFLINE,
     val inputCapable: Boolean = false,
+    val pointerCapable: Boolean = false,
+    val pointerPadOpen: Boolean = false,
+    val pointerPadOptions: PointerPadOptions = PointerPadOptions(),
     val phoneBrightness: Float? = null,
     val keepScreenOn: Boolean = true,
     val hideTopBarWhenConnected: Boolean = true,
@@ -126,8 +142,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var pendingInputValue: Float? = null
     private var lastInputSentAt = 0L
     private var inputUnsupportedShown = false
+    private var pointerUnsupportedShown = false
     private var protocolWarningShown = false
     private var authWarningShown = false
+
+    private var pointerSeq = 0L
+    private var pointerFlushJob: Job? = null
+    private var pointerKeepaliveJob: Job? = null
+    private var pointerAccumulator = PointerAccumulator()
+    private var pointerHeldButtons = mutableSetOf<String>()
+    private var pointerControlId: String? = null
+    private var pointerProfileId: String? = null
+    private var pointerPageId: String? = null
+    private var pointerGestureActive = false
+    private var pointerLastFlushAt = 0L
 
     private val connection = DeckConnection(
         client = socketClient,
@@ -136,9 +164,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         listener = object : DeckConnection.Listener {
             override fun onStatus(status: ConnectionStatus) {
                 _state.update { it.copy(connection = status) }
+                if (status != ConnectionStatus.CONNECTED && _state.value.pointerPadOpen) {
+                    // The socket is gone; there is nobody to receive `cancel`.
+                    closePointerPad(sendCancel = false)
+                }
             }
 
             override fun onOpen() {
+                pointerSeq = 0L
                 refreshConfig()
             }
 
@@ -149,9 +182,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ) {
                 val inputCapable = "input-v1" in capabilities
                 val brightnessCapable = "brightness-v1" in capabilities
+                val pointerCapable = "pointer-v1" in capabilities
                 _state.update { current ->
                     current.copy(
                         inputCapable = inputCapable,
+                        pointerCapable = pointerCapable,
                         phoneBrightness = if (brightnessCapable) {
                             current.phoneBrightness
                         } else {
@@ -160,6 +195,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
                 if (inputCapable) inputUnsupportedShown = false
+                if (pointerCapable) pointerUnsupportedShown = false
+                if (!pointerCapable && _state.value.pointerPadOpen) {
+                    closePointerPad(sendCancel = false)
+                }
                 if (protocol != 1 && !protocolWarningShown) {
                     protocolWarningShown = true
                     emit("This desktop uses protocol v$protocol; some features may not work.")
@@ -213,6 +252,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(phoneBrightness = normalized) }
             }
 
+            override fun onPointerResult(seq: Long, ok: Boolean, error: String?) {
+                if (ok) return
+                Diag.w("Pointer rejected seq=$seq error=\"${error.orEmpty()}\"")
+                emit(
+                    error?.takeIf { it.isNotBlank() }
+                        ?: "The desktop could not start trackpad control.",
+                )
+                closePointerPad(sendCancel = false)
+            }
+
             override fun onServerError(code: String, message: String) {
                 Diag.w("Server error code=$code message=\"$message\"")
                 emit(message.ifBlank { "The desktop reported an error." })
@@ -241,6 +290,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onBackground() {
         Diag.i("App backgrounded; stopping WebSocket")
+        closePointerPad()
         foreground = false
         connection.stop()
     }
@@ -394,6 +444,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         pendingInputDelta = 0f
         pendingInputValue = null
         inputUnsupportedShown = false
+        pointerUnsupportedShown = false
+        resetPointerState()
         connection.stop()
         lastRawConfig = null
         lastPageId = null
@@ -699,6 +751,248 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Opens the full-screen pad for a trackpad launch tile. The press itself is
+     * intentionally never sent: the pad's first touch sends `pointer/start`.
+     */
+    fun openPointerPad(button: DeckButton) {
+        val snapshot = _state.value
+        if (!snapshot.pointerCapable) {
+            if (!pointerUnsupportedShown) {
+                pointerUnsupportedShown = true
+                emit("Update PhoneDeck on your PC to use the trackpad.")
+            }
+            return
+        }
+        val profile = snapshot.config?.profiles?.firstOrNull {
+            it.id == snapshot.activeProfileId
+        } ?: return
+        val page = profile.pages.firstOrNull { it.id == snapshot.activePageId } ?: return
+        val binding = button.control?.binding
+        pointerProfileId = profile.id
+        pointerPageId = page.id
+        pointerControlId = button.id
+        pointerAccumulator.clear()
+        pointerHeldButtons.clear()
+        pointerGestureActive = false
+        pointerFlushJob?.cancel()
+        pointerFlushJob = null
+        stopPointerKeepalive()
+        _state.update {
+            it.copy(
+                pointerPadOpen = true,
+                pointerPadOptions = PointerPadOptions(
+                    controlId = button.id,
+                    label = button.label,
+                    sensitivity = binding?.sensitivity
+                        ?.takeIf { value -> value.isFinite() }
+                        ?.coerceIn(0.25f, 3f)
+                        ?: 1f,
+                    naturalScroll = binding?.naturalScroll ?: true,
+                    tapToClick = binding?.tapToClick ?: true,
+                    dragLock = binding?.dragLock ?: true,
+                ),
+            )
+        }
+        Diag.i("Pointer pad opened control=${button.id} page=${page.id}")
+    }
+
+    /**
+     * Closes the pad and aborts the active gesture. A `cancel` releases every
+     * held button on the desktop; pass false when the socket is already gone.
+     */
+    fun closePointerPad(sendCancel: Boolean = true) {
+        val wasOpen = _state.value.pointerPadOpen
+        pointerFlushJob?.cancel()
+        pointerFlushJob = null
+        stopPointerKeepalive()
+        if (wasOpen && sendCancel && connection.isConnected() && pointerControlId != null) {
+            sendPointerNow("cancel")
+        }
+        if (wasOpen) Diag.i("Pointer pad closed")
+        resetPointerState()
+        if (wasOpen) _state.update { it.copy(pointerPadOpen = false) }
+    }
+
+    fun onPointerPhase(controlId: String, phase: String) {
+        onPointerInput(controlId, phase)
+    }
+
+    /**
+     * One pointer-pad event. Movement and scroll are summed in
+     * [PointerAccumulator] and flushed at most every 16 ms; button transitions
+     * flush immediately so a click cannot be delayed behind movement.
+     */
+    fun onPointerInput(
+        controlId: String,
+        phase: String,
+        dx: Float = 0f,
+        dy: Float = 0f,
+        scrollX: Float = 0f,
+        scrollY: Float = 0f,
+        buttons: List<PointerButtonEvent> = emptyList(),
+    ) {
+        val snapshot = _state.value
+        if (!snapshot.pointerPadOpen || controlId != pointerControlId) return
+        if (!snapshot.pointerCapable || snapshot.connection != ConnectionStatus.CONNECTED) {
+            closePointerPad(sendCancel = false)
+            return
+        }
+
+        when (phase) {
+            "start" -> {
+                pointerFlushJob?.cancel()
+                pointerFlushJob = null
+                pointerAccumulator.clear()
+                pointerGestureActive = true
+                pointerLastFlushAt = SystemClock.elapsedRealtime()
+                sendPointerNow("start")
+            }
+
+            "move" -> {
+                if (!pointerGestureActive) {
+                    // Defensive: a move without a start still opens the gesture.
+                    pointerGestureActive = true
+                    pointerLastFlushAt = SystemClock.elapsedRealtime()
+                    sendPointerNow("start")
+                }
+                pointerAccumulator.addMove(dx, dy)
+                pointerAccumulator.addScroll(scrollX, scrollY)
+                val elapsed = SystemClock.elapsedRealtime() - pointerLastFlushAt
+                if (buttons.isNotEmpty() || elapsed >= POINTER_FLUSH_MS) {
+                    flushPointer("move", buttons)
+                } else if (pointerFlushJob?.isActive != true) {
+                    pointerFlushJob = viewModelScope.launch {
+                        delay(POINTER_FLUSH_MS - elapsed)
+                        flushPointer("move", emptyList())
+                    }
+                }
+            }
+
+            "end" -> {
+                pointerFlushJob?.cancel()
+                pointerFlushJob = null
+                pointerAccumulator.addMove(dx, dy)
+                pointerAccumulator.addScroll(scrollX, scrollY)
+                val frame = pointerAccumulator.take()
+                pointerLastFlushAt = SystemClock.elapsedRealtime()
+                if (pointerGestureActive) {
+                    // Always send end, even with a zero delta, so the desktop
+                    // sees the final position and button release.
+                    sendPointerNow(
+                        "end",
+                        frame.dx,
+                        frame.dy,
+                        frame.scrollX,
+                        frame.scrollY,
+                        buttons,
+                    )
+                }
+                pointerGestureActive = false
+                updatePointerButtons(buttons)
+            }
+
+            "cancel" -> {
+                pointerFlushJob?.cancel()
+                pointerFlushJob = null
+                pointerAccumulator.clear()
+                if (pointerGestureActive) sendPointerNow("cancel")
+                pointerGestureActive = false
+                pointerHeldButtons.clear()
+                stopPointerKeepalive()
+            }
+        }
+    }
+
+    private fun flushPointer(phase: String, buttons: List<PointerButtonEvent>) {
+        pointerFlushJob = null
+        if (!pointerGestureActive) return
+        pointerLastFlushAt = SystemClock.elapsedRealtime()
+        val frame = pointerAccumulator.take()
+        if (phase != "move" || frame.hasDelta || buttons.isNotEmpty()) {
+            sendPointerNow(phase, frame.dx, frame.dy, frame.scrollX, frame.scrollY, buttons)
+        }
+        updatePointerButtons(buttons)
+    }
+
+    private fun sendPointerNow(
+        phase: String,
+        dx: Float = 0f,
+        dy: Float = 0f,
+        scrollX: Float = 0f,
+        scrollY: Float = 0f,
+        buttons: List<PointerButtonEvent> = emptyList(),
+    ) {
+        val profileId = pointerProfileId ?: return
+        val pageId = pointerPageId ?: return
+        val controlId = pointerControlId ?: return
+        val sent = connection.sendPointer(
+            seq = pointerSeq++,
+            phase = phase,
+            profileId = profileId,
+            pageId = pageId,
+            controlId = controlId,
+            dx = dx,
+            dy = dy,
+            scrollX = scrollX,
+            scrollY = scrollY,
+            buttons = buttons,
+        )
+        if (!sent) {
+            Diag.w("Pointer message dropped: phase=$phase")
+            closePointerPad(sendCancel = false)
+        }
+    }
+
+    private fun updatePointerButtons(buttons: List<PointerButtonEvent>) {
+        buttons.forEach { event ->
+            when (event.action) {
+                "down" -> pointerHeldButtons.add(event.button)
+                "up" -> pointerHeldButtons.remove(event.button)
+                // click/doubleclick are atomic on the desktop.
+            }
+        }
+        if (pointerHeldButtons.isEmpty()) {
+            stopPointerKeepalive()
+        } else {
+            startPointerKeepalive()
+        }
+    }
+
+    private fun startPointerKeepalive() {
+        if (pointerKeepaliveJob?.isActive == true) return
+        pointerKeepaliveJob = viewModelScope.launch {
+            while (true) {
+                delay(POINTER_KEEPALIVE_MS)
+                if (!_state.value.pointerPadOpen ||
+                    pointerHeldButtons.isEmpty()
+                ) {
+                    break
+                }
+                if (connection.isConnected()) sendPointerNow("move")
+            }
+            pointerKeepaliveJob = null
+        }
+    }
+
+    private fun stopPointerKeepalive() {
+        pointerKeepaliveJob?.cancel()
+        pointerKeepaliveJob = null
+    }
+
+    private fun resetPointerState() {
+        pointerFlushJob?.cancel()
+        pointerFlushJob = null
+        stopPointerKeepalive()
+        pointerAccumulator.clear()
+        pointerHeldButtons.clear()
+        pointerControlId = null
+        pointerProfileId = null
+        pointerPageId = null
+        pointerGestureActive = false
+        pointerLastFlushAt = 0L
+    }
+
+    /**
      * Relative slider/dial input. Moves are coalesced to about 25 Hz; `end`
      * always flushes the pending delta and is sent even when it is zero.
      */
@@ -917,6 +1211,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onButtonPressed(button: DeckButton) {
         val snapshot = _state.value
+        if (button.control?.kind == "trackpad") {
+            openPointerPad(button)
+            return
+        }
         val profile = snapshot.config?.profiles?.firstOrNull {
             it.id == snapshot.activeProfileId
         } ?: return
@@ -1116,6 +1414,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         backupJob?.cancel()
         importJob?.cancel()
         inputFlushJob?.cancel()
+        stopPointerKeepalive()
+        pointerFlushJob?.cancel()
         connection.stop()
         super.onCleared()
     }
