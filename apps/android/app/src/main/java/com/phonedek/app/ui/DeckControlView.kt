@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -41,6 +42,7 @@ import com.phonedek.app.data.ControlDto
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -78,6 +80,11 @@ fun DeckControlView(
     val displayUnit = control.unit ?: if (isVolume) "%" else ""
     val contentRotation = LocalButtonContentRotation.current
     val haptics = LocalHapticFeedback.current
+    val density = LocalDensity.current
+    // Vertical drag distance per wheel detent (used near the hub, where the
+    // polar angle is too unstable to drive a rotary gesture).
+    val dialDetentPx = with(density) { 12.dp.toPx() }
+    val dialDecidePx = with(density) { 8.dp.toPx() }
 
     var value by remember(control) {
         mutableFloatStateOf(
@@ -102,10 +109,16 @@ fun DeckControlView(
         }
     }
 
-    fun finishGesture() {
+    fun finishGesture(changed: Boolean) {
         if (!interacting) return
         if (absolute) {
-            onInput("end", null, fractionOf(value))
+            // A dial only commits a value when it actually turned; tapping a
+            // wheel must not jump the desktop volume to the shown readout.
+            if (changed || control.kind != "dial") {
+                onInput("end", null, fractionOf(value))
+            } else {
+                onInput("end", null, null)
+            }
         } else {
             onInput("end", 0f, null)
         }
@@ -184,23 +197,31 @@ fun DeckControlView(
                         down.consume()
                         interacting = true
                         onInteractingChange(true)
-                        if (absolute) {
+                        if (control.kind == "dial") {
+                            // A dial has no value until it turns; sending the
+                            // readout on touch-down would teleport the desktop
+                            // volume every time the wheel is tapped.
+                            onInput("start", null, if (absolute) null else 0f)
+                        } else if (absolute) {
                             onInput("start", null, fractionOf(value))
                         } else {
                             onInput("start", 0f, null)
                         }
 
+                        var moved = false
+
                         if (control.kind == "dial") {
-                            fun angleAt(position: Offset): Float {
-                                val centerX = size.width / 2f
-                                val centerY = size.height / 2f
-                                return Math.toDegrees(
+                            val centerX = size.width / 2f
+                            val centerY = size.height / 2f
+                            val wheelRadius = min(size.width, size.height) / 2f
+
+                            fun angleAt(position: Offset): Float =
+                                Math.toDegrees(
                                     atan2(
                                         (position.y - centerY).toDouble(),
                                         (position.x - centerX).toDouble(),
                                     ),
                                 ).toFloat()
-                            }
 
                             fun applyDetents(detents: Int) {
                                 if (detents == 0) return
@@ -214,6 +235,7 @@ fun DeckControlView(
                                 }
                                 if (next == value) return
                                 value = next
+                                moved = true
                                 if (absolute) {
                                     onInput("move", null, fractionOf(next))
                                 } else {
@@ -222,26 +244,102 @@ fun DeckControlView(
                                 performDetentHaptic()
                             }
 
+                            val radiusX = down.position.x - centerX
+                            val radiusY = down.position.y - centerY
+                            val startRadius = hypot(radiusX, radiusY)
+                            val modeRotate = 1
+                            val modeVertical = 2
+                            // Near the hub the polar angle is unstable, so a
+                            // wheel touched there always scrubs vertically.
+                            var mode = if (
+                                wheelRadius <= 1f || startRadius < wheelRadius * 0.35f
+                            ) {
+                                modeVertical
+                            } else {
+                                0
+                            }
+
+                            var lastPosition = down.position
+                            var moveX = 0f
+                            var moveY = 0f
                             var lastAngle = angleAt(down.position)
                             var angleAccumulator = 0f
+                            var lastY = down.position.y
+                            var verticalResidual = 0f
+                            // Crossing the hub flips the angle by 180°; pause
+                            // there instead of firing a burst of detents.
+                            val hubDeadZone = wheelRadius * 0.12f
+
                             while (true) {
                                 val event = awaitPointerEvent(PointerEventPass.Initial)
-                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                val change = event.changes.firstOrNull { it.id == down.id }
+                                    ?: break
                                 change.consume()
-                                val angle = angleAt(change.position)
-                                var delta = angle - lastAngle
-                                while (delta > 180f) delta -= 360f
-                                while (delta < -180f) delta += 360f
-                                lastAngle = angle
-                                angleAccumulator += delta
-                                val detents = (angleAccumulator / DIAL_DETENT_DEGREES).toInt()
-                                if (detents != 0) {
-                                    angleAccumulator -= detents * DIAL_DETENT_DEGREES
-                                    applyDetents(detents)
+
+                                if (mode == 0) {
+                                    // Pick one gesture once, from its first few
+                                    // dp: a turn around the ring rotates, a
+                                    // radial/straight drag scrubs vertically.
+                                    moveX += change.position.x - lastPosition.x
+                                    moveY += change.position.y - lastPosition.y
+                                    lastPosition = change.position
+                                    if (hypot(moveX, moveY) >= dialDecidePx) {
+                                        val radial = abs(moveX * radiusX + moveY * radiusY)
+                                        val tangential = abs(moveX * radiusY - moveY * radiusX)
+                                        mode = if (tangential > radial) {
+                                            modeRotate
+                                        } else {
+                                            modeVertical
+                                        }
+                                        lastAngle = angleAt(change.position)
+                                        lastY = change.position.y
+                                    }
+                                } else if (mode == modeRotate) {
+                                    val offsetX = change.position.x - centerX
+                                    val offsetY = change.position.y - centerY
+                                    if (hypot(offsetX, offsetY) < hubDeadZone) {
+                                        lastAngle = angleAt(change.position)
+                                    } else {
+                                        val angle = angleAt(change.position)
+                                        var delta = angle - lastAngle
+                                        while (delta > 180f) delta -= 360f
+                                        while (delta < -180f) delta += 360f
+                                        lastAngle = angle
+                                        angleAccumulator += delta
+                                        val detents =
+                                            (angleAccumulator / DIAL_DETENT_DEGREES).toInt()
+                                        if (detents != 0) {
+                                            angleAccumulator -=
+                                                detents * DIAL_DETENT_DEGREES
+                                            applyDetents(detents)
+                                        }
+                                    }
+                                } else {
+                                    verticalResidual += lastY - change.position.y
+                                    lastY = change.position.y
+                                    val detents = (verticalResidual / dialDetentPx).toInt()
+                                    if (detents != 0) {
+                                        verticalResidual -= detents * dialDetentPx
+                                        applyDetents(detents)
+                                    }
                                 }
+
                                 if (!change.pressed) {
-                                    if (abs(angleAccumulator) >= DIAL_DETENT_DEGREES / 2f) {
-                                        applyDetents(if (angleAccumulator > 0f) 1 else -1)
+                                    when {
+                                        mode == modeRotate &&
+                                            abs(angleAccumulator) >=
+                                            DIAL_DETENT_DEGREES / 2f -> {
+                                            applyDetents(
+                                                if (angleAccumulator > 0f) 1 else -1,
+                                            )
+                                        }
+
+                                        mode == modeVertical &&
+                                            abs(verticalResidual) >= dialDetentPx / 2f -> {
+                                            applyDetents(
+                                                if (verticalResidual > 0f) 1 else -1,
+                                            )
+                                        }
                                     }
                                     break
                                 }
@@ -300,7 +398,7 @@ fun DeckControlView(
                             }
                         }
 
-                        finishGesture()
+                        finishGesture(moved)
                     }
                 },
             contentAlignment = Alignment.Center,
