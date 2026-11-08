@@ -163,6 +163,16 @@ fun DeckControlView(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            if (control.kind == "dial") {
+                // A small affordance: the tile is a wheel, not a slider track.
+                Text(
+                    text = "↻",
+                    color = textColor.copy(alpha = 0.45f),
+                    fontFamily = ConsoleMono,
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(horizontal = 5.dp),
+                )
+            }
             Text(
                 text = valueText,
                 color = textColor,
@@ -325,6 +335,45 @@ fun DeckControlView(
                                 }
 
                                 if (!change.pressed) {
+                                    if (mode == 0) {
+                                        // A tap never reaches the 8dp mode
+                                        // threshold: jump to the tapped arc
+                                        // position, or nudge one step.
+                                        val tapAngle = angleAt(change.position)
+                                        val tapRadius = hypot(
+                                            change.position.x - centerX,
+                                            change.position.y - centerY,
+                                        )
+                                        val tappedFraction = dialArcFraction(tapAngle)
+                                        if (
+                                            tapRadius >= hubDeadZone &&
+                                            tappedFraction != null
+                                        ) {
+                                            if (absolute) {
+                                                val target = snap(
+                                                    minValue + tappedFraction * range,
+                                                )
+                                                if (target != value) {
+                                                    value = target
+                                                    moved = true
+                                                    onInput(
+                                                        "move",
+                                                        null,
+                                                        fractionOf(target),
+                                                    )
+                                                    performDetentHaptic()
+                                                }
+                                            } else {
+                                                val direction = dialTapDirection(
+                                                    tappedFraction,
+                                                    fractionOf(value),
+                                                )
+                                                if (direction != 0) {
+                                                    applyDetents(direction)
+                                                }
+                                            }
+                                        }
+                                    }
                                     when {
                                         mode == modeRotate &&
                                             abs(angleAccumulator) >=
@@ -413,11 +462,14 @@ fun DeckControlView(
                     )
                     val arcSize = Size(diameter, diameter)
                     val stroke = 4.dp.toPx()
-                    val trackColor = textColor.copy(alpha = 0.28f)
+                    // The full track must stay visible: the accent only covers
+                    // the travelled part, and a faint remainder read as a
+                    // broken circle.
+                    val trackColor = textColor.copy(alpha = 0.42f)
                     drawArc(
                         color = trackColor,
-                        startAngle = -135f,
-                        sweepAngle = 270f,
+                        startAngle = DIAL_ARC_START,
+                        sweepAngle = DIAL_ARC_SWEEP,
                         useCenter = false,
                         topLeft = topLeft,
                         size = arcSize,
@@ -425,14 +477,15 @@ fun DeckControlView(
                     )
                     drawArc(
                         color = Accent,
-                        startAngle = -135f,
-                        sweepAngle = 270f * fraction,
+                        startAngle = DIAL_ARC_START,
+                        sweepAngle = DIAL_ARC_SWEEP * fraction,
                         useCenter = false,
                         topLeft = topLeft,
                         size = arcSize,
                         style = Stroke(width = stroke, cap = StrokeCap.Round),
                     )
-                    val radians = Math.toRadians((-135f + 270f * fraction).toDouble())
+                    val radians =
+                        Math.toRadians(dialKnobDegrees(fraction).toDouble())
                     val radius = diameter / 2f
                     val center = Offset(size.width / 2f, size.height / 2f)
                     val knob = Offset(
