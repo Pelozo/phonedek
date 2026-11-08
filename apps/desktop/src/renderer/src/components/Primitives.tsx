@@ -214,6 +214,7 @@ export function NumberField({
   max,
   step = 1,
   suffix,
+  format,
   onChange,
   disabled,
 }: {
@@ -223,6 +224,8 @@ export function NumberField({
   max: number
   step?: number
   suffix?: string
+  /** Optional formatted readout beside the field label, e.g. `1.00×`. */
+  format?: (value: number) => string
   onChange: (value: number) => void
   disabled?: boolean
 }) {
@@ -232,7 +235,10 @@ export function NumberField({
   }
   return (
     <label className={`number-field${disabled ? ' disabled' : ''}`}>
-      <span>{label}</span>
+      <span>
+        {label}
+        {format && <em className="number-format">{format(value)}</em>}
+      </span>
       <div className="number-control">
         <button type="button" onClick={() => set(value - step)} disabled={disabled || value <= min} aria-label={`Decrease ${label}`}>
           −

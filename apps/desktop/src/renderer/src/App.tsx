@@ -294,15 +294,23 @@ function AppContent() {
     }
   }
 
-  const addNewControl = (kind: 'volume' | 'scroll' | 'volume-wheel'): void => {
+  const addNewControl = (kind: 'volume' | 'scroll' | 'volume-wheel' | 'trackpad'): void => {
     if (!config || !profile || !page) return
     const grid = pageGrid(profile, page)
-    const preferredSpan =
-      kind === 'volume'
-        ? { columns: 3, rows: 1 }
-        : kind === 'volume-wheel'
-          ? { columns: 2, rows: 1 }
-          : { columns: 2, rows: 1 }
+    const spanCandidates: Array<{ columns: number; rows: number }> =
+      kind === 'trackpad'
+        ? [
+            { columns: 3, rows: 2 },
+            { columns: 2, rows: 2 },
+            { columns: 1, rows: 1 },
+          ]
+        : [
+            kind === 'volume'
+              ? { columns: 3, rows: 1 }
+              : { columns: 2, rows: 1 },
+            { columns: 1, rows: 1 },
+          ]
+    const preferredSpan = spanCandidates[0]!
 
     const findSlot = (span: { columns: number; rows: number }): number | null => {
       for (let candidate = 0; candidate < grid.columns * grid.rows; candidate += 1) {
@@ -311,17 +319,21 @@ function AppContent() {
       return null
     }
 
-    let span = preferredSpan
-    let slot = findSlot(span)
-    const fallback = slot === null && preferredSpan.columns > 1
-    if (fallback) {
-      span = { columns: 1, rows: 1 }
-      slot = findSlot(span)
+    let span: { columns: number; rows: number } | null = null
+    let slot: number | null = null
+    for (const candidate of spanCandidates) {
+      const found = findSlot(candidate)
+      if (found !== null) {
+        span = candidate
+        slot = found
+        break
+      }
     }
-    if (slot === null) {
+    if (slot === null || span === null) {
       showToast('No free cell left on this page. Resize the grid or remove a button first.', 'error')
       return
     }
+    const fallback = span.columns !== preferredSpan.columns || span.rows !== preferredSpan.rows
 
     const volumeControl = (volumeKind: 'slider' | 'dial'): ControlSpec =>
       (hostPlatform === 'darwin' || hostPlatform === 'win32')
@@ -351,21 +363,37 @@ function AppContent() {
           }
 
     const control: ControlSpec =
-      kind === 'scroll'
+      kind === 'trackpad'
         ? {
-            kind: 'dial',
+            kind: 'trackpad',
             emit: 'delta',
-            binding: { type: 'scroll', axis: 'vertical' },
-            step: 1,
+            binding: {
+              type: 'pointer',
+              sensitivity: 1,
+              naturalScroll: true,
+              tapToClick: true,
+              dragLock: true,
+            },
             haptics: true,
           }
-        : volumeControl(kind === 'volume' ? 'slider' : 'dial')
+        : kind === 'scroll'
+          ? {
+              kind: 'dial',
+              emit: 'delta',
+              binding: { type: 'scroll', axis: 'vertical' },
+              step: 1,
+              haptics: true,
+            }
+          : volumeControl(kind === 'volume' ? 'slider' : 'dial')
+    const label =
+      kind === 'volume' || kind === 'volume-wheel'
+        ? 'Volume'
+        : kind === 'scroll'
+          ? 'Scroll'
+          : 'Trackpad'
     const button: DeckButton = {
-      ...createEmptyButton(
-        slot,
-        kind === 'volume' ? 'Volume' : kind === 'volume-wheel' ? 'Volume' : 'Scroll',
-      ),
-      icon: kind === 'scroll' ? '🖱️' : '🔊',
+      ...createEmptyButton(slot, label),
+      icon: kind === 'scroll' || kind === 'trackpad' ? '🖱️' : '🔊',
       span,
       control,
     }
@@ -374,9 +402,17 @@ function AppContent() {
       setConfig(next)
       setSelectedButtonId(button.id)
       const name =
-        kind === 'volume' ? 'Volume slider' : kind === 'volume-wheel' ? 'Volume wheel' : 'Scroll wheel'
+        kind === 'volume'
+          ? 'Volume slider'
+          : kind === 'volume-wheel'
+            ? 'Volume wheel'
+            : kind === 'scroll'
+              ? 'Scroll wheel'
+              : 'Trackpad'
       showToast(
-        fallback ? `${name} added as 1×1 — no wider space was free` : `${name} added`,
+        fallback
+          ? `${name} added as ${span.columns}×${span.rows} — no ${preferredSpan.columns}×${preferredSpan.rows} space was free`
+          : `${name} added`,
         'success',
       )
     } catch (error) {
@@ -476,7 +512,7 @@ function AppContent() {
             </button>
             <PopMenu
               align="right"
-              width={250}
+              width={270}
               trigger={
                 <button type="button" className="button secondary" title="Add a continuous control">
                   <Icon name="sliders" size={16} /> Add control
@@ -485,6 +521,7 @@ function AppContent() {
               items={[
                 {
                   label: 'Volume slider',
+                  section: 'Audio',
                   icon: 'music',
                   description: '3 × 1 · jump straight to any level',
                   onClick: () => addNewControl('volume'),
@@ -497,9 +534,17 @@ function AppContent() {
                 },
                 {
                   label: 'Scroll wheel',
+                  section: 'Navigation',
                   icon: 'mouse',
                   description: '2 × 1 · one mouse-wheel notch per step',
                   onClick: () => addNewControl('scroll'),
+                },
+                {
+                  label: 'Trackpad',
+                  section: 'Pointer',
+                  icon: 'trackpad',
+                  description: '3 × 2 · full-screen cursor pad',
+                  onClick: () => addNewControl('trackpad'),
                 },
               ]}
             />

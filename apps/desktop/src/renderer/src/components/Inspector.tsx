@@ -4,7 +4,9 @@ import type {
   ActionPack,
   ActionPreset,
   DeckButton,
+  PointerBinding,
   SliderOrDialControlSpec,
+  TrackpadControlSpec,
   DeckConfig,
   DeckPage,
   DeckProfile,
@@ -306,6 +308,23 @@ export function Inspector({
     update({ control: { ...button.control, ...structuredClone(patch) } })
   }
 
+  const updateTrackpad = (
+    patch: Partial<Omit<TrackpadControlSpec, 'kind' | 'binding'>>,
+  ): void => {
+    if (!button.control || button.control.kind !== 'trackpad') return
+    update({ control: { ...button.control, ...structuredClone(patch) } })
+  }
+
+  const updatePointerBinding = (patch: Partial<PointerBinding>): void => {
+    if (!button.control || button.control.kind !== 'trackpad') return
+    update({
+      control: {
+        ...button.control,
+        binding: { ...button.control.binding, ...structuredClone(patch) },
+      },
+    })
+  }
+
   const setControlBinding = (type: 'volume' | 'scroll'): void => {
     if (!button.control || button.control.kind === 'trackpad') return
     if (button.control.binding.type === type) return
@@ -415,6 +434,7 @@ export function Inspector({
   // inspector below must not treat a pointer binding as a value control.
   const control =
     button.control && button.control.kind !== 'trackpad' ? button.control : undefined
+  const trackpad = button.control?.kind === 'trackpad' ? button.control : undefined
   const controlMin = control?.min ?? 0
   const controlMax = control?.max ?? 100
   const controlStep = Math.max(1, control?.step ?? 1)
@@ -767,6 +787,88 @@ export function Inspector({
           )}
         </section>
 
+        {trackpad && (
+          <section className="inspector-section">
+            <div className="section-heading">
+              <h3>Trackpad</h3>
+              <span className="inspector-badge mono">PAD · POINTER</span>
+            </div>
+
+            <div className="control-preview-shell">
+              <ControlPreview
+                control={trackpad}
+                label={button.label}
+                sublabel={button.sublabel}
+                className="inspector-control-preview"
+              />
+            </div>
+
+            <p className="hint">Tap this tile on the phone to open the full-screen cursor pad.</p>
+
+            <NumberField
+              label="Sensitivity"
+              value={trackpad.binding.sensitivity ?? 1}
+              min={0.25}
+              max={3}
+              step={0.05}
+              format={(value) => `${value.toFixed(2)}×`}
+              onChange={(sensitivity) =>
+                updatePointerBinding({ sensitivity: Math.round(sensitivity * 100) / 100 })
+              }
+            />
+
+            <Toggle
+              label="Natural scroll"
+              description="Two-finger scroll follows your fingers."
+              checked={trackpad.binding.naturalScroll !== false}
+              onChange={(naturalScroll) => updatePointerBinding({ naturalScroll })}
+            />
+            <Toggle
+              label="Tap to click"
+              description="A short tap clicks the left button."
+              checked={trackpad.binding.tapToClick !== false}
+              onChange={(tapToClick) => updatePointerBinding({ tapToClick })}
+            />
+            <Toggle
+              label="Drag lock"
+              description="Long-press holds the left button until the next tap."
+              checked={trackpad.binding.dragLock !== false}
+              onChange={(dragLock) => updatePointerBinding({ dragLock })}
+            />
+            <Toggle
+              label="Haptics"
+              description="Tick on taps and drag-lock."
+              checked={trackpad.haptics !== false}
+              onChange={(haptics) => updateTrackpad({ haptics })}
+            />
+
+            <div className="two-col">
+              <NumberField
+                label="Span columns"
+                value={controlSpan.columns}
+                min={1}
+                max={activeGrid.columns}
+                onChange={(columns) => updateSpan(columns, controlSpan.rows)}
+              />
+              <NumberField
+                label="Span rows"
+                value={controlSpan.rows}
+                min={1}
+                max={activeGrid.rows}
+                onChange={(rows) => updateSpan(controlSpan.columns, rows)}
+              />
+            </div>
+
+            <p className="hint">
+              Pointer output cannot be previewed from the editor; open the pad on a paired phone to test it.
+            </p>
+
+            <button type="button" className="button danger ghost full" onClick={() => void removeControl()}>
+              <Icon name="trash" size={15} /> Remove control
+            </button>
+          </section>
+        )}
+
         {control && (
           <section className="inspector-section">
             <div className="section-heading">
@@ -1026,7 +1128,9 @@ export function Inspector({
               <Icon name="bolt" size={22} />
               <p>
                 {button.control
-                  ? 'No tap action needed. Drag this control on the phone to send volume or scroll steps; use Test − / Test + above to verify it on this PC.'
+                  ? button.control.kind === 'trackpad'
+                    ? 'No tap action needed. Tapping this tile on the phone opens the full-screen pointer pad.'
+                    : 'No tap action needed. Drag this control on the phone to send volume or scroll steps; use Test − / Test + above to verify it on this PC.'
                   : 'No actions yet. This button will do nothing when pressed.'}
               </p>
             </div>

@@ -1,9 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon, type IconName } from './Icons'
 
 export interface MenuItem {
   label: string
+  /** Optional group heading rendered above the first item of the group. */
+  section?: string
   icon?: IconName
   description?: string
   danger?: boolean
@@ -109,27 +111,32 @@ export function PopMenu({
               transform: position.openUp ? 'translateY(-100%)' : undefined,
             }}
           >
-            {items.map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                className={item.danger ? 'popmenu-item danger' : 'popmenu-item'}
-                onClick={() => {
-                  setOpen(false)
-                  item.onClick()
-                }}
-              >
-                {item.icon && (
-                  <span className="popmenu-icon">
-                    <Icon name={item.icon} size={17} />
-                  </span>
-                )}
-                <span>
-                  <strong>{item.label}</strong>
-                  {item.description && <small>{item.description}</small>}
-                </span>
-              </button>
-            ))}
+            {items.map((item, index) => {
+              const section = item.section && item.section !== items[index - 1]?.section ? item.section : null
+              return (
+                <Fragment key={item.label}>
+                  {section && <span className="popmenu-section">{section}</span>}
+                  <button
+                    type="button"
+                    className={item.danger ? 'popmenu-item danger' : 'popmenu-item'}
+                    onClick={() => {
+                      setOpen(false)
+                      item.onClick()
+                    }}
+                  >
+                    {item.icon && (
+                      <span className="popmenu-icon">
+                        <Icon name={item.icon} size={17} />
+                      </span>
+                    )}
+                    <span>
+                      <strong>{item.label}</strong>
+                      {item.description && <small>{item.description}</small>}
+                    </span>
+                  </button>
+                </Fragment>
+              )
+            })}
           </div>,
           document.body,
         )}

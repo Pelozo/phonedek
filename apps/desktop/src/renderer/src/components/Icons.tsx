@@ -34,6 +34,7 @@ export type IconName =
   | 'drag'
   | 'lock'
   | 'mouse'
+  | 'trackpad'
   | 'clock'
   | 'layers'
   | 'search'
@@ -78,6 +79,7 @@ const paths: Record<IconName, string> = {
   drag: 'M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01',
   lock: 'M6 10h12v11H6zM9 10V7a3 3 0 0 1 6 0v3',
   mouse: 'M7 3h10v18H7zM12 3v7M9 7h6',
+  trackpad: 'M4 4h16v16H4zM12 12.4a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8z',
   clock: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2',
   layers: 'm12 3 9 5-9 5-9-5zM3 13l9 5 9-5M3 18l9 5 9-5',
   search: 'M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM20 20l-4.2-4.2',

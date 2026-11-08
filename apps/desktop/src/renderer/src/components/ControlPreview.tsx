@@ -1,9 +1,5 @@
 import type { ControlSpec, SliderOrDialControlSpec } from '@phonedek/shared'
 
-function isSliderOrDial(control: ControlSpec): control is SliderOrDialControlSpec {
-  return control.kind !== 'trackpad'
-}
-
 function initialPercent(control: SliderOrDialControlSpec): number {
   const min = control.min ?? 0
   const max = control.max ?? 100
@@ -34,13 +30,12 @@ export function ControlPreview({
   sublabel?: string
   className?: string
 }) {
-  if (!isSliderOrDial(control)) {
+  if (control.kind === 'trackpad') {
     return (
-      <div className={`control-preview dial${className ? ` ${className}` : ''}`}>
+      <div className={`control-preview trackpad${className ? ` ${className}` : ''}`}>
         <span className="control-badge">PAD</span>
-        <div className="control-dial" aria-hidden="true">
-          <span className="control-dial-ring" />
-          <span className="control-dial-hub" />
+        <div className="control-pad" aria-hidden="true">
+          <span className="control-pad-dot" />
         </div>
         <span className="control-copy">
           <span className="control-name">{label || 'Trackpad'}</span>
