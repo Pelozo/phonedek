@@ -75,6 +75,7 @@ fun DeckControlView(
     val range = (maxValue - minValue).takeIf { it > 0f } ?: 1f
     val absolute = control.emit == "value"
     val isVolume = control.binding.type == "volume"
+    val scrollControl = control.binding.type == "scroll"
     val volumeStepPercent = control.binding.stepPercent?.coerceIn(1, 25) ?: 2
     val sliderWireScale = if (isVolume) 100f / volumeStepPercent else 100f
     val displayUnit = control.unit ?: if (isVolume) "%" else ""
@@ -259,10 +260,13 @@ fun DeckControlView(
                             val startRadius = hypot(radiusX, radiusY)
                             val modeRotate = 1
                             val modeVertical = 2
-                            // Near the hub the polar angle is unstable, so a
-                            // wheel touched there always scrubs vertically.
+                            // Scrolling is a vertical gesture, not a rotary
+                            // one. Near the hub the polar angle is unstable,
+                            // so those touches also scrub vertically.
                             var mode = if (
-                                wheelRadius <= 1f || startRadius < wheelRadius * 0.35f
+                                scrollControl ||
+                                wheelRadius <= 1f ||
+                                startRadius < wheelRadius * 0.35f
                             ) {
                                 modeVertical
                             } else {
@@ -276,6 +280,9 @@ fun DeckControlView(
                             var angleAccumulator = 0f
                             var lastY = down.position.y
                             var verticalResidual = 0f
+                            var verticalTravel = 0f
+                            var lastMotionTime = down.uptimeMillis
+                            var velocityY = 0f
                             // Crossing the hub flips the angle by 180°; pause
                             // there instead of firing a burst of detents.
                             val hubDeadZone = wheelRadius * 0.12f
@@ -303,6 +310,7 @@ fun DeckControlView(
                                         }
                                         lastAngle = angleAt(change.position)
                                         lastY = change.position.y
+                                        lastMotionTime = change.uptimeMillis
                                     }
                                 } else if (mode == modeRotate) {
                                     val offsetX = change.position.x - centerX
@@ -325,7 +333,14 @@ fun DeckControlView(
                                         }
                                     }
                                 } else {
-                                    verticalResidual += lastY - change.position.y
+                                    val dy = change.position.y - lastY
+                                    verticalResidual -= dy
+                                    verticalTravel += abs(dy)
+                                    val dt = (change.uptimeMillis - lastMotionTime)
+                                        .coerceAtLeast(1)
+                                    velocityY = 0.7f * velocityY +
+                                        0.3f * (dy / dt * 1000f)
+                                    lastMotionTime = change.uptimeMillis
                                     lastY = change.position.y
                                     val detents = (verticalResidual / dialDetentPx).toInt()
                                     if (detents != 0) {
@@ -374,21 +389,44 @@ fun DeckControlView(
                                             }
                                         }
                                     }
-                                    when {
-                                        mode == modeRotate &&
-                                            abs(angleAccumulator) >=
-                                            DIAL_DETENT_DEGREES / 2f -> {
+                                    if (mode == modeVertical) {
+                                        if (
+                                            scrollControl &&
+                                            verticalTravel < dialDecidePx
+                                        ) {
+                                            // Tap: one notch toward the tapped
+                                            // half, so a still finger is useful.
                                             applyDetents(
-                                                if (angleAccumulator > 0f) 1 else -1,
+                                                if (change.position.y < centerY) 1 else -1,
                                             )
-                                        }
-
-                                        mode == modeVertical &&
-                                            abs(verticalResidual) >= dialDetentPx / 2f -> {
+                                        } else if (
+                                            abs(verticalResidual) >= dialDetentPx / 2f
+                                        ) {
                                             applyDetents(
                                                 if (verticalResidual > 0f) 1 else -1,
                                             )
                                         }
+                                    } else if (
+                                        mode == modeRotate &&
+                                        abs(angleAccumulator) >=
+                                        DIAL_DETENT_DEGREES / 2f
+                                    ) {
+                                        applyDetents(
+                                            if (angleAccumulator > 0f) 1 else -1,
+                                        )
+                                    }
+
+                                    // A scroll flick keeps some of its speed:
+                                    // add a bounded burst of notches. The
+                                    // gesture scope cannot delay, and the VM
+                                    // coalesces moves anyway, so send one batch.
+                                    if (scrollControl && abs(velocityY) > 800f) {
+                                        val fling = (abs(velocityY) / 650f)
+                                            .toInt()
+                                            .coerceIn(1, 14)
+                                        applyDetents(
+                                            fling * (if (velocityY < 0f) 1 else -1),
+                                        )
                                     }
                                     break
                                 }
