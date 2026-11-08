@@ -486,19 +486,19 @@ function AppContent() {
                 {
                   label: 'Volume slider',
                   icon: 'music',
-                  description: `3 × 1 · ${hostPlatform === 'darwin' || hostPlatform === 'win32' ? 'absolute volume' : 'relative volume'}`,
+                  description: '3 × 1 · jump straight to any level',
                   onClick: () => addNewControl('volume'),
                 },
                 {
                   label: 'Volume wheel',
                   icon: 'sliders',
-                  description: `2 × 1 · ${hostPlatform === 'darwin' || hostPlatform === 'win32' ? 'absolute volume' : 'relative volume'}`,
+                  description: '2 × 1 · turn or drag for small ± steps',
                   onClick: () => addNewControl('volume-wheel'),
                 },
                 {
                   label: 'Scroll wheel',
                   icon: 'mouse',
-                  description: '2 × 1 · vertical scroll',
+                  description: '2 × 1 · one mouse-wheel notch per step',
                   onClick: () => addNewControl('scroll'),
                 },
               ]}

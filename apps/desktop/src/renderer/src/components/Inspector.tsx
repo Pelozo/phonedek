@@ -3,8 +3,8 @@ import type {
   Action,
   ActionPack,
   ActionPreset,
-  ControlSpec,
   DeckButton,
+  SliderOrDialControlSpec,
   DeckConfig,
   DeckPage,
   DeckProfile,
@@ -301,13 +301,14 @@ export function Inspector({
 
   const activeGrid = pageGrid(profile, page)
 
-  const updateControl = (patch: Partial<ControlSpec>): void => {
-    if (!button.control) return
+  const updateControl = (patch: Partial<SliderOrDialControlSpec>): void => {
+    if (!button.control || button.control.kind === 'trackpad') return
     update({ control: { ...button.control, ...structuredClone(patch) } })
   }
 
   const setControlBinding = (type: 'volume' | 'scroll'): void => {
-    if (!button.control || button.control.binding.type === type) return
+    if (!button.control || button.control.kind === 'trackpad') return
+    if (button.control.binding.type === type) return
     if (type === 'scroll') {
       updateControl({ emit: 'delta', binding: { type: 'scroll', axis: 'vertical' } })
       return
@@ -336,7 +337,7 @@ export function Inspector({
   }
 
   const setVolumeMode = (mode: 'relative' | 'absolute'): void => {
-    if (!button.control) return
+    if (!button.control || button.control.kind === 'trackpad') return
     const binding = button.control.binding
     if (binding.type !== 'volume' || binding.mode === mode) return
     if (mode === 'absolute') {
@@ -363,14 +364,15 @@ export function Inspector({
   }
 
   const updateVolumeBinding = (patch: { stepPercent?: number }): void => {
-    if (!button.control) return
+    if (!button.control || button.control.kind === 'trackpad') return
     const binding = button.control.binding
     if (binding.type !== 'volume' || binding.mode !== 'relative') return
     updateControl({ binding: { ...binding, ...patch } })
   }
 
   const updateScrollBinding = (patch: { axis?: 'vertical' | 'horizontal'; invert?: boolean }): void => {
-    if (!button.control || button.control.binding.type !== 'scroll') return
+    if (!button.control || button.control.kind === 'trackpad') return
+    if (button.control.binding.type !== 'scroll') return
     updateControl({ binding: { ...button.control.binding, ...patch } })
   }
 
@@ -409,7 +411,10 @@ export function Inspector({
     if (confirmed) update({ control: undefined, span: undefined })
   }
 
-  const control = button.control
+  // Trackpad editing has its own section in a later phase; the slider/dial
+  // inspector below must not treat a pointer binding as a value control.
+  const control =
+    button.control && button.control.kind !== 'trackpad' ? button.control : undefined
   const controlMin = control?.min ?? 0
   const controlMax = control?.max ?? 100
   const controlStep = Math.max(1, control?.step ?? 1)
@@ -810,7 +815,9 @@ export function Inspector({
                 <span>Kind</span>
                 <select
                   value={control.kind}
-                  onChange={(event) => updateControl({ kind: event.target.value as ControlSpec['kind'] })}
+                  onChange={(event) =>
+                    updateControl({ kind: event.target.value as 'slider' | 'dial' })
+                  }
                 >
                   <option value="slider">Slider</option>
                   <option value="dial">Dial / wheel</option>
