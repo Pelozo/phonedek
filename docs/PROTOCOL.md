@@ -41,8 +41,9 @@ minute it answers `429` with `Retry-After: 60`.
 | POST   | `/api/press`    | yes  | Optional HTTP fallback for button presses (same body as WS `press`). |
 
 `/api/info` currently advertises `capabilities: ["backup-export-v1", "import-v1",
-"input-v1", "brightness-v1"]`. Clients must treat the array as optional and only
-show a feature when its marker is present. `/api/backup` responds with
+"input-v1", "brightness-v1"]`. A desktop that supports trackpad/pointer control
+additionally advertises `pointer-v1`. Clients must treat the array as optional and
+only show a feature when its marker is present. `/api/backup` responds with
 `Content-Type: application/zip`,
 `Content-Disposition: attachment; filename="phonedek-backup-YYYYMMDD-HHMMSS.zip"`,
 `Content-Length`, and `Cache-Control: no-store`.
@@ -110,6 +111,53 @@ server replies `{ "type": "pong", "t": 123 }`.
 navigation is instant and works even on a slow link. A button that mixes page
 actions with other actions still sends a `press` to execute the rest. The
 desktop ignores `page` actions when executing.
+
+### Pointer / trackpad (`pointer-v1`)
+
+Trackpad cursor control uses its own `pointer` message and `pointer-v1`
+capability; `input-v1` is unchanged. A `trackpad` control opens the full-screen
+pad on the phone and never synthesises an `Action`.
+
+```jsonc
+// Start binds the gesture to a trackpad control.
+{ "type":"pointer", "seq":41, "phase":"start",
+  "profileId":"p1", "pageId":"pg1", "controlId":"btn-pad" }
+
+// Relative move; dx/dy are fractions of the pad height (+right/+down).
+{ "type":"pointer", "seq":42, "phase":"move", "dx":0.012, "dy":-0.004 }
+
+// Two-finger scroll in notches (+up/+right).
+{ "type":"pointer", "seq":43, "phase":"move", "scrollX":0.0, "scrollY":0.75 }
+
+// Ordered button transitions may ride with movement.
+{ "type":"pointer", "seq":44, "phase":"move", "dx":0.01, "dy":0.02,
+  "buttons":[{"button":"left","action":"down"}] }
+
+// End does NOT imply a button release.
+{ "type":"pointer", "seq":45, "phase":"end",
+  "buttons":[{"button":"left","action":"up"}] }
+
+// Abort; the desktop releases every held button.
+{ "type":"pointer", "seq":46, "phase":"cancel" }
+```
+
+Rules:
+
+- `seq` is a per-connection monotonic integer; the desktop ignores stale or
+  duplicate values. `phase` is `start | move | end | cancel`.
+- `dx`/`dy` are finite and clamped to ±2 pad heights per message.
+  `scrollX`/`scrollY` are finite and clamped to ±10 notches per message.
+- `buttons` holds at most 4 ordered entries; `button` is
+  `left | right | middle`, `action` is `down | up | click | doubleclick`.
+  `click` expands to down+up atomically on the desktop.
+- Only `start` carries `profileId`, `pageId` and `controlId`; `cancel` carries
+  nothing else. `move`/`end` may carry movement, scroll and buttons.
+- The desktop sends `{ "type":"pointerResult", "seq":45, "ok":true }` once on
+  `end`/`cancel` and errors immediately on a rejected `start`. Moves are not
+  acked.
+- `cancel`, WebSocket close and a new phone taking over release all held
+  buttons. Platforms without global pointer injection (e.g. Wayland) do not
+  advertise `pointer-v1` and reject `start` with a clear error.
 
 ## Discovery
 

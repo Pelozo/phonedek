@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { isInputMessage, isPressMessage, parseClientMessage } from '../src/protocol'
-import type { BrightnessMessage, ServerMessage } from '../src/types'
+import { isInputMessage, isPointerMessage, isPressMessage, parseClientMessage } from '../src/protocol'
+import type { BrightnessMessage, PointerResult, ServerMessage } from '../src/types'
 
 const press = {
   type: 'press',
@@ -86,6 +86,117 @@ describe('client protocol', () => {
     expect(messages).toEqual([
       { type: 'brightness', level: 0.45 },
       { type: 'brightness', level: null },
+    ])
+  })
+})
+
+describe('pointer protocol', () => {
+  const start = {
+    type: 'pointer',
+    seq: 41,
+    phase: 'start',
+    profileId: 'profile-desktop',
+    pageId: 'page-main',
+    controlId: 'btn-pad',
+  }
+  const move = { type: 'pointer', seq: 42, phase: 'move', dx: 0.012, dy: -0.004 }
+  const end = { type: 'pointer', seq: 45, phase: 'end', buttons: [{ button: 'left', action: 'up' }] }
+  const cancel = { type: 'pointer', seq: 46, phase: 'cancel' }
+
+  it('accepts start, move, end and cancel messages', () => {
+    for (const message of [start, move, end, cancel]) {
+      const parsed = parseClientMessage(message)
+      expect(parsed.ok, JSON.stringify(message)).toBe(true)
+      if (parsed.ok) {
+        expect(isPointerMessage(parsed.message)).toBe(true)
+        expect(isInputMessage(parsed.message)).toBe(false)
+        expect(isPressMessage(parsed.message)).toBe(false)
+      }
+    }
+
+    expect(
+      parseClientMessage({ ...move, scrollX: 0.5, scrollY: -0.75 }).ok,
+    ).toBe(true)
+    expect(
+      parseClientMessage({
+        ...move,
+        buttons: [{ button: 'left', action: 'down' }, { button: 'right', action: 'click' }],
+      }).ok,
+    ).toBe(true)
+    expect(parseClientMessage({ ...move, dx: 2, dy: -2 }).ok).toBe(true)
+    expect(parseClientMessage({ ...move, scrollX: 10, scrollY: -10 }).ok).toBe(true)
+    expect(
+      parseClientMessage({
+        ...move,
+        buttons: Array.from({ length: 4 }, () => ({ button: 'left', action: 'click' })),
+      }).ok,
+    ).toBe(true)
+  })
+
+  it('requires profileId/pageId/controlId on start', () => {
+    for (const key of ['profileId', 'pageId', 'controlId'] as const) {
+      expect(parseClientMessage({ ...start, [key]: undefined }).ok, key).toBe(false)
+      expect(parseClientMessage({ ...start, [key]: '' }).ok, key).toBe(false)
+    }
+    expect(parseClientMessage(start).ok).toBe(true)
+  })
+
+  it('rejects ids outside start and movement on start/cancel', () => {
+    expect(parseClientMessage({ ...move, profileId: 'profile-desktop' }).ok).toBe(false)
+    expect(parseClientMessage({ ...end, pageId: 'page-main' }).ok).toBe(false)
+    expect(parseClientMessage({ ...end, controlId: 'btn-pad' }).ok).toBe(false)
+    expect(parseClientMessage({ ...start, dx: 0.1 }).ok).toBe(false)
+    expect(parseClientMessage({ ...start, buttons: [{ button: 'left', action: 'down' }] }).ok).toBe(false)
+    expect(parseClientMessage({ ...cancel, dx: 0.1 }).ok).toBe(false)
+    expect(parseClientMessage({ ...cancel, buttons: [{ button: 'left', action: 'up' }] }).ok).toBe(false)
+    expect(parseClientMessage({ ...cancel, profileId: 'profile-desktop' }).ok).toBe(false)
+  })
+
+  it('rejects out-of-bounds deltas and scroll notches', () => {
+    for (const dx of [2.01, -2.01, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(parseClientMessage({ ...move, dx }).ok, `dx ${dx}`).toBe(false)
+    }
+    for (const dy of [2.01, -2.01, Number.NaN]) {
+      expect(parseClientMessage({ ...move, dy }).ok, `dy ${dy}`).toBe(false)
+    }
+    for (const scrollY of [10.01, -10.01, Number.NaN]) {
+      expect(parseClientMessage({ ...move, scrollY }).ok, `scrollY ${scrollY}`).toBe(false)
+    }
+    expect(parseClientMessage({ ...move, scrollX: 10.01 }).ok).toBe(false)
+  })
+
+  it('rejects too many buttons and unknown button/action values', () => {
+    const buttons = Array.from({ length: 5 }, () => ({ button: 'left', action: 'click' }))
+    expect(parseClientMessage({ ...move, buttons }).ok).toBe(false)
+    expect(parseClientMessage({ ...move, buttons: [{ button: 'back', action: 'click' }] }).ok).toBe(false)
+    expect(parseClientMessage({ ...move, buttons: [{ button: 'left', action: 'hold' }] }).ok).toBe(false)
+    expect(parseClientMessage({ ...move, buttons: [{ button: 'left' }] }).ok).toBe(false)
+  })
+
+  it('rejects stale, non-integer and missing sequence numbers', () => {
+    for (const seq of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, undefined]) {
+      expect(parseClientMessage({ ...move, seq }).ok, `seq ${seq}`).toBe(false)
+    }
+    expect(parseClientMessage({ ...move, seq: 0 }).ok).toBe(true)
+    expect(parseClientMessage({ ...move, phase: 'hold' }).ok).toBe(false)
+    expect(parseClientMessage({ ...move, type: 'pointerResult' }).ok).toBe(false)
+  })
+
+  it('defines the pointerResult server message shape', () => {
+    const ok: PointerResult = { seq: 45, ok: true }
+    const failed: PointerResult = { seq: 42, ok: false, error: 'Trackpad is not supported on this desktop.' }
+    const messages: ServerMessage[] = [
+      { type: 'pointerResult', ...ok },
+      { type: 'pointerResult', ...failed },
+    ]
+    expect(messages).toEqual([
+      { type: 'pointerResult', seq: 45, ok: true },
+      {
+        type: 'pointerResult',
+        seq: 42,
+        ok: false,
+        error: 'Trackpad is not supported on this desktop.',
+      },
     ])
   })
 })

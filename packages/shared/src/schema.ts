@@ -205,6 +205,15 @@ export const ControlBindingSchema = z.union([
   }),
 ])
 
+/** Pointer bindings are only valid on `trackpad` controls. */
+export const PointerBindingSchema = z.object({
+  type: z.literal('pointer'),
+  sensitivity: z.number().finite().min(0.25).max(3).optional(),
+  naturalScroll: z.boolean().optional(),
+  tapToClick: z.boolean().optional(),
+  dragLock: z.boolean().optional(),
+})
+
 const controlFields = {
   axis: controlAxis,
   emit: z.enum(['value', 'delta']),
@@ -217,7 +226,7 @@ const controlFields = {
   haptics: z.boolean().optional(),
 }
 
-export const ControlSpecSchema = z
+const sliderOrDialControlSchema = z
   .discriminatedUnion('kind', [
     z.object({ kind: z.literal('slider'), ...controlFields }),
     z.object({ kind: z.literal('dial'), ...controlFields }),
@@ -260,6 +269,15 @@ export const ControlSpecSchema = z
       }
     }
   })
+
+export const TrackpadControlSpecSchema = z.object({
+  kind: z.literal('trackpad'),
+  emit: z.literal('delta'),
+  binding: PointerBindingSchema,
+  haptics: z.boolean().optional(),
+})
+
+export const ControlSpecSchema = z.union([sliderOrDialControlSchema, TrackpadControlSpecSchema])
 
 export const ButtonSchema = z.object({
   id,

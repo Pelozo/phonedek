@@ -134,9 +134,11 @@ export function hasHostActions(actions: readonly Action[]): boolean {
  *   up/right, negative means down/left, flipped by `invert`. Amount is capped
  *   at 100.
  *
- * Absolute/value controls and unknown bindings return an empty batch.
+ * Absolute/value controls and trackpad (pointer) controls return an empty batch.
  */
 export function controlToActions(control: ControlSpec, delta: number): Action[] {
+  // Pointer input travels over the `pointer` message; never synthesise actions.
+  if (control.kind === 'trackpad') return []
   if (!Number.isFinite(delta) || delta === 0) return []
   if (control.binding.type === 'volume' && control.binding.mode === 'absolute') return []
   const magnitude = Math.ceil(Math.abs(delta))

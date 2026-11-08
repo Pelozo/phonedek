@@ -11,6 +11,9 @@ export const CONFIG_SCHEMA_VERSION = 1 as const
 /** Phone capability for transient window-brightness control (0..1 / system). */
 export const BRIGHTNESS_CAPABILITY = 'brightness-v1' as const
 
+/** Desktop capability for trackpad/pointer control over the `pointer` message. */
+export const POINTER_CAPABILITY = 'pointer-v1' as const
+
 export const DEFAULT_HTTP_PORT = 47654
 export const DISCOVERY_PORT = 47655
 export const DISCOVERY_MAGIC = 'PHONEDECK'
@@ -245,8 +248,26 @@ export type ControlBinding =
       invert?: boolean
     }
 
-/** Continuous control rendered instead of a tap-only tile. */
-export interface ControlSpec {
+/**
+ * Pointer binding used by a `trackpad` control.
+ *
+ * Pointer input travels over the `pointer` message, not the `input` message, and
+ * never synthesises an `Action`.
+ */
+export interface PointerBinding {
+  type: 'pointer'
+  /** Cursor gain multiplier, 0.25..3, default 1. */
+  sensitivity?: number
+  /** Two-finger scroll follows finger movement (default true). */
+  naturalScroll?: boolean
+  /** Default true. */
+  tapToClick?: boolean
+  /** Default true. */
+  dragLock?: boolean
+}
+
+/** Slider or dial control rendered instead of a tap-only tile. */
+export interface SliderOrDialControlSpec {
   kind: 'slider' | 'dial'
   /** Slider direction; dials may ignore it. */
   axis?: 'horizontal' | 'vertical'
@@ -261,6 +282,21 @@ export interface ControlSpec {
   /** Defaults to true in renderers when omitted. */
   haptics?: boolean
 }
+
+/**
+ * Trackpad launch tile: tapping it opens the full-screen pointer pad on the
+ * phone. Kept separate from sliders/dials so a pointer binding cannot be
+ * attached to a value control.
+ */
+export interface TrackpadControlSpec {
+  kind: 'trackpad'
+  emit: 'delta'
+  binding: PointerBinding
+  haptics?: boolean
+}
+
+/** Continuous control rendered instead of a tap-only tile. */
+export type ControlSpec = SliderOrDialControlSpec | TrackpadControlSpec
 
 export interface DeckButton {
   id: string
@@ -427,7 +463,69 @@ export type ClientMessage =
     }
   | PressMessage
   | InputMessage
+  | PointerMessage
   | { type: 'ping'; t: number }
+
+/* ------------------------------------------------------------------ */
+/* Pointer / trackpad protocol                                        */
+/* ------------------------------------------------------------------ */
+
+export type PointerButton = 'left' | 'right' | 'middle'
+export type PointerButtonAction = 'down' | 'up' | 'click' | 'doubleclick'
+export type PointerPhase = 'start' | 'move' | 'end' | 'cancel'
+
+/** Ordered button transition; `click` expands atomically on the desktop. */
+export interface PointerButtonEvent {
+  button: PointerButton
+  action: PointerButtonAction
+}
+
+/** Binds a gesture to a trackpad control so the desktop can resolve settings. */
+export interface PointerStartMessage {
+  type: 'pointer'
+  /** Per-connection monotonic integer; the desktop ignores stale/duplicate seq. */
+  seq: number
+  phase: 'start'
+  profileId: string
+  pageId: string
+  controlId: string
+}
+
+/**
+ * Relative movement, scroll notches and/or button transitions.
+ *
+ * `dx`/`dy` are fractions of the pad height (+right/+down); `scrollX`/`scrollY`
+ * are wheel notches (+right/+up). `end` does not imply a button release.
+ */
+export interface PointerMoveMessage {
+  type: 'pointer'
+  seq: number
+  phase: 'move' | 'end'
+  /** Clamped to ±2 on both ends. */
+  dx?: number
+  dy?: number
+  /** Clamped to ±10 notches on both ends. */
+  scrollX?: number
+  scrollY?: number
+  /** At most 4 ordered transitions. */
+  buttons?: PointerButtonEvent[]
+}
+
+/** Abort a gesture; the desktop releases every held button. */
+export interface PointerCancelMessage {
+  type: 'pointer'
+  seq: number
+  phase: 'cancel'
+}
+
+export type PointerMessage = PointerStartMessage | PointerMoveMessage | PointerCancelMessage
+
+/** Sent on a rejected `start` and once on `end`/`cancel`; moves are not acked. */
+export interface PointerResult {
+  seq: number
+  ok: boolean
+  error?: string
+}
 
 /** Transient phone window brightness; null restores system/auto brightness. */
 export interface BrightnessMessage {
@@ -450,6 +548,7 @@ export type ServerMessage =
   | { type: 'config'; config: DeckConfig }
   | { type: 'pressResult'; requestId: string; buttonId: string; ok: boolean; error?: string; message?: string }
   | { type: 'inputResult'; requestId: string; controlId: string; ok: boolean; error?: string }
+  | ({ type: 'pointerResult' } & PointerResult)
   | BrightnessMessage
   | { type: 'navigate'; direction: 'next' | 'prev' | 'goto'; pageId?: string }
   | { type: 'error'; code: string; message: string }

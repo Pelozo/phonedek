@@ -7,6 +7,69 @@ export const DeviceInfoSchema = z.object({
   appVersion: z.string().max(40).optional(),
 })
 
+export const PointerButtonEventSchema = z.object({
+  button: z.enum(['left', 'right', 'middle']),
+  action: z.enum(['down', 'up', 'click', 'doubleclick']),
+})
+
+export const PointerMessageSchema = z
+  .object({
+    type: z.literal('pointer'),
+    seq: z.number().int().min(0),
+    phase: z.enum(['start', 'move', 'end', 'cancel']),
+    profileId: z.string().min(1).max(64).optional(),
+    pageId: z.string().min(1).max(64).optional(),
+    controlId: z.string().min(1).max(128).optional(),
+    dx: z.number().finite().min(-2).max(2).optional(),
+    dy: z.number().finite().min(-2).max(2).optional(),
+    scrollX: z.number().finite().min(-10).max(10).optional(),
+    scrollY: z.number().finite().min(-10).max(10).optional(),
+    buttons: z.array(PointerButtonEventSchema).max(4).optional(),
+  })
+  .superRefine((message, ctx) => {
+    const hasMovement =
+      message.dx !== undefined ||
+      message.dy !== undefined ||
+      message.scrollX !== undefined ||
+      message.scrollY !== undefined ||
+      message.buttons !== undefined
+
+    if (message.phase === 'start') {
+      for (const key of ['profileId', 'pageId', 'controlId'] as const) {
+        if (message[key] === undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [key],
+            message: `start requires ${key}`,
+          })
+        }
+      }
+      if (hasMovement) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'start must not carry movement or buttons',
+        })
+      }
+      return
+    }
+
+    for (const key of ['profileId', 'pageId', 'controlId'] as const) {
+      if (message[key] !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [key],
+          message: `${key} is only allowed on start`,
+        })
+      }
+    }
+    if (message.phase === 'cancel' && hasMovement) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'cancel must not carry movement or buttons',
+      })
+    }
+  })
+
 export const ClientMessageSchema = z.union([
   z.object({
     type: z.literal('hello'),
@@ -31,6 +94,7 @@ export const ClientMessageSchema = z.union([
     value: z.number().finite().min(0).max(1).optional(),
     delta: z.number().finite().min(-100).max(100).optional(),
   }),
+  PointerMessageSchema,
   z.object({ type: z.literal('ping'), t: z.number().finite() }),
 ])
 
@@ -50,4 +114,8 @@ export function isPressMessage(message: ClientMessage): message is Extract<Clien
 
 export function isInputMessage(message: ClientMessage): message is Extract<ClientMessage, { type: 'input' }> {
   return message.type === 'input'
+}
+
+export function isPointerMessage(message: ClientMessage): message is Extract<ClientMessage, { type: 'pointer' }> {
+  return message.type === 'pointer'
 }
