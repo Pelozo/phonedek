@@ -93,11 +93,11 @@ export class ActionExecutor {
             break
           default:
             if (KEYBOARD_KINDS.has(step.kind)) {
-              // On macOS WIN maps to Command, so Win+Shift+S would send
-              // Cmd+Shift+S ("Save As…"). Treat it as the screenshot intent
-              // and capture the full screen instead.
+              // Win+Shift+S is the screenshot intent on Windows (Snipping Tool)
+              // and maps to Cmd+Shift+S ("Save As…") on macOS. Capture the
+              // full screen directly instead of sending the shortcut.
               if (
-                this.platform === 'darwin' &&
+                (this.platform === 'darwin' || this.platform === 'win32') &&
                 step.kind === 'keys' &&
                 step.action === 'press' &&
                 isScreenshotShortcut(step.keys)

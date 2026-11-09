@@ -240,7 +240,9 @@ fun DeckControlView(
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
             )
-            if (showStateBadge) {
+            // LIVE is implicit once the value follows the PC; only the LOCAL
+            // fallback (old desktop) needs a label.
+            if (showStateBadge && stateBadge == "LOCAL") {
                 Text(
                     text = stateBadge,
                     color = textColor.copy(alpha = 0.55f),

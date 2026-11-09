@@ -8,7 +8,7 @@ export interface HostActions {
   launch(path: string, args: string[]): Promise<void>
   openUrl(url: string): Promise<void>
   runCommand(command: string, cwd: string | undefined, hidden: boolean): Promise<void>
-  /** Capture the full screen on macOS (no shutter sound); returns the saved path. */
+  /** Capture the full screen on macOS or Windows; returns the saved path. */
   screenshot(): Promise<string>
   /** Set system output volume, 0..100. */
   setVolume(level: number): Promise<void>
@@ -34,6 +34,37 @@ export interface HostActionOptions {
 export const MAC_SCREENSHOT_COMMAND = '/usr/sbin/screencapture'
 /** `-x` = silent, `-t png` = explicit PNG output; the destination file follows. */
 export const MAC_SCREENSHOT_ARGS: readonly string[] = ['-x', '-t', 'png']
+
+export const WINDOWS_SCREENSHOT_COMMAND = 'powershell.exe'
+/**
+ * PowerShell script that captures the whole virtual desktop (all monitors)
+ * directly to PNG. `-EncodedCommand` avoids every quote/argument-escaping trap
+ * between Electron, cmd and PowerShell.
+ */
+export function windowsScreenshotArgs(path: string): string[] {
+  const escaped = path.replace(/'/g, "''")
+  const script = [
+    "Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static extern bool SetProcessDPIAware();' -Name Dpi -Namespace Win32",
+    '[Win32.Dpi]::SetProcessDPIAware() | Out-Null',
+    'Add-Type -AssemblyName System.Windows.Forms',
+    'Add-Type -AssemblyName System.Drawing',
+    '$bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen',
+    '$bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height',
+    '$graphics = [System.Drawing.Graphics]::FromImage($bitmap)',
+    '$graphics.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bitmap.Size)',
+    `$bitmap.Save('${escaped}', [System.Drawing.Imaging.ImageFormat]::Png)`,
+    '$graphics.Dispose()',
+    '$bitmap.Dispose()',
+  ].join('\n')
+  return [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-EncodedCommand',
+    Buffer.from(script, 'utf16le').toString('base64'),
+  ]
+}
 
 export const MAC_VOLUME_COMMAND = '/usr/bin/osascript'
 export function macVolumeArgs(level: number): string[] {
@@ -89,11 +120,18 @@ function uniqueScreenshotPath(basePath: string): string {
   throw new Error(`Could not find an unused screenshot name near ${basePath}`)
 }
 
-function screenshotFailure(message: string, destination: string): Error {
-  return new Error(
-    `macOS screenshot failed: ${message}. Destination: ${destination}. If macOS blocked the capture, ` +
-      'allow Screen Recording for PhoneDeck in System Settings → Privacy & Security.',
-  )
+function screenshotFailure(
+  message: string,
+  destination: string,
+  platform: NodeJS.Platform,
+): Error {
+  const hint =
+    platform === 'darwin'
+      ? ' If macOS blocked the capture, allow Screen Recording for PhoneDeck in ' +
+        'System Settings → Privacy & Security.'
+      : ''
+  const label = platform === 'darwin' ? 'macOS' : platform === 'win32' ? 'Windows' : platform
+  return new Error(`${label} screenshot failed: ${message}. Destination: ${destination}.${hint}`)
 }
 
 function spawnDetached(
@@ -255,8 +293,8 @@ export function createHostActions(options: HostActionOptions = {}): HostActions 
     },
 
     async screenshot() {
-      if (platform !== 'darwin') {
-        throw new Error('Full-screen screenshot is only implemented on macOS')
+      if (platform !== 'darwin' && platform !== 'win32') {
+        throw new Error('Full-screen screenshot is only implemented on macOS and Windows')
       }
 
       const directory = screenshotDirectory()
@@ -266,6 +304,7 @@ export function createHostActions(options: HostActionOptions = {}): HostActions 
         throw screenshotFailure(
           `could not create ${directory}: ${error instanceof Error ? error.message : String(error)}`,
           directory,
+          platform,
         )
       }
       try {
@@ -277,6 +316,7 @@ export function createHostActions(options: HostActionOptions = {}): HostActions 
         throw screenshotFailure(
           `cannot use ${directory}: ${error instanceof Error ? error.message : String(error)}`,
           directory,
+          platform,
         )
       }
 
@@ -287,12 +327,18 @@ export function createHostActions(options: HostActionOptions = {}): HostActions 
         throw screenshotFailure(
           error instanceof Error ? error.message : String(error),
           directory,
+          platform,
         )
       }
 
       try {
         if (options.captureScreen) {
           await options.captureScreen(target)
+        } else if (platform === 'win32') {
+          await runToCompletion(WINDOWS_SCREENSHOT_COMMAND, windowsScreenshotArgs(target))
+          if (!existsSync(target) || statSync(target).size === 0) {
+            throw new Error('the capture did not write a file')
+          }
         } else {
           await runToCompletion(MAC_SCREENSHOT_COMMAND, macScreenshotArgs(target))
         }
@@ -300,6 +346,7 @@ export function createHostActions(options: HostActionOptions = {}): HostActions 
         throw screenshotFailure(
           error instanceof Error ? error.message : String(error),
           target,
+          platform,
         )
       }
       logger?.info(`Saved full-screen screenshot to ${target}`)

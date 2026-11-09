@@ -137,7 +137,7 @@ describe('ActionExecutor', () => {
     expect(log).toEqual(['screenshot', 'delay:10'])
   })
 
-  it('still sends Win+Shift+S on Windows with no saved-path notification', async () => {
+  it('captures the full screen directly on Windows', async () => {
     const log: string[] = []
     const screenshots: string[] = []
     const executor = new ActionExecutor(fakeKeys(log), fakeHost(log), undefined, {
@@ -146,9 +146,12 @@ describe('ActionExecutor', () => {
     })
     await expect(
       executor.execute([{ type: 'hotkey', keys: ['WIN', 'SHIFT', 'S'] }], 'shot'),
-    ).resolves.toEqual({ ok: true })
-    expect(log).toEqual(['keys:SHIFT+WIN+S'])
-    expect(screenshots).toEqual([])
+    ).resolves.toEqual({
+      ok: true,
+      message: `Screenshot saved to Desktop: ${SCREENSHOT_BASENAME}`,
+    })
+    expect(log).toEqual(['screenshot'])
+    expect(screenshots).toEqual([SCREENSHOT_PATH])
   })
 
   it('does not remap other chords on macOS', async () => {

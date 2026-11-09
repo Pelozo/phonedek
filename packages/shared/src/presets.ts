@@ -470,7 +470,7 @@ const system: ActionPack = {
     {
       id: 'system-screenshot',
       name: 'Screenshot',
-      description: 'Region capture on Windows; full-screen PNG on macOS.',
+      description: 'Full-screen PNG capture.',
       icon: '📸',
       actions: [hotkey(['WIN', 'SHIFT', 'S'])],
       platformDescriptions: { darwin: 'Cmd + Shift + S · full-screen capture' },

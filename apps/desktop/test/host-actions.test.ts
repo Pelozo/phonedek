@@ -14,6 +14,8 @@ import {
   macScreenshotArgs,
   macScreenshotPath,
   macVolumeArgs,
+  WINDOWS_SCREENSHOT_COMMAND,
+  windowsScreenshotArgs,
 } from '../src/main/host-actions'
 
 const tempDirs: string[] = []
@@ -194,9 +196,38 @@ describe('macOS screenshot', () => {
     )
   })
 
-  it('rejects on non-macOS hosts', async () => {
-    const host = createHostActions({ platform: 'win32' })
-    await expect(host.screenshot()).rejects.toThrow(/only implemented on macOS/)
+  it('captures directly on Windows', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'phonedek-shot-'))
+    tempDirs.push(home)
+    const captured: string[] = []
+    const host = createHostActions({
+      platform: 'win32',
+      homeDir: home,
+      captureScreen: async (path) => {
+        captured.push(path)
+        writeFileSync(path, 'png')
+      },
+    })
+
+    const saved = await host.screenshot()
+    expect(captured).toEqual([saved])
+    expect(existsSync(saved)).toBe(true)
+    expect(basename(saved)).toMatch(/^PhoneDeck Screenshot \d{4}-\d{2}-\d{2} at \d{2}\.\d{2}\.\d{2}\.png$/)
+  })
+
+  it('builds an encoded PowerShell capture command', () => {
+    expect(WINDOWS_SCREENSHOT_COMMAND).toBe('powershell.exe')
+    const args = windowsScreenshotArgs("C:\\Users\\A B\\shot's.png")
+    const index = args.indexOf('-EncodedCommand')
+    expect(index).toBeGreaterThanOrEqual(0)
+    const script = Buffer.from(args[index + 1] ?? '', 'base64').toString('utf16le')
+    expect(script).toContain("C:\\Users\\A B\\shot''s.png")
+    expect(script).toContain('CopyFromScreen')
+  })
+
+  it('rejects on other hosts', async () => {
+    const host = createHostActions({ platform: 'linux' })
+    await expect(host.screenshot()).rejects.toThrow(/only implemented on macOS and Windows/)
   })
 })
 
