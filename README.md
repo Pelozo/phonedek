@@ -39,7 +39,7 @@ No cloud, no account, no vendor lock-in: the phone talks directly to your PC ove
 - **Per-page grids** — 1×1 to 10×10 cells per page, with optional profile defaults; buttons snap to slots; drag to rearrange or swap. Change one page without touching the rest.
 - **Buttons** — label, sublabel, 175 searchable emoji icons or your own, plus animated GIF/video media icons; solid/gradient/image/video backgrounds, dark overlay, custom text color, per-button radius.
 - **Backgrounds** — curated gradients, color presets, or import PNG/JPG/WEBP/GIF/BMP (up to 25 MB) and MP4/WEBM/M4V/MOV video (up to 100 MB). Animated GIFs and videos play in the editor and on the phone.
-- **Continuous controls** — absolute/relative volume sliders, volume wheels and scroll wheels, plus a trackpad tile (inline on the deck or a full-screen pad). Tiles honour spans and row spans.
+- **Continuous controls** — absolute/relative volume sliders, volume wheels and scroll wheels, microphone gain with tap-to-mute, OBS input volume/mute, plus a trackpad tile (inline on the deck or a full-screen pad). Tiles honour spans and row spans.
 - **Component clipboard** — `Ctrl/Cmd+C/X/V` copy, cut and paste a button or control, and **Move to…** sends it to any page or profile, keeping its settings and finding a free slot.
 - **Live preview** — the editor canvas is the same grid the phone renders, including slots and overflow warnings.
 - **Backups** — export/import a ZIP containing the config and every image/video asset; legacy JSON configs still import.
@@ -67,6 +67,8 @@ No cloud, no account, no vendor lock-in: the phone talks directly to your PC ove
 - **Offline cache** — the phone keeps the last config and can render while the PC is asleep/offline.
 - **Auto-reconnect** with backoff, heartbeat, and a clear connection status.
 - **Live volume state** — absolute volume controls show the PC's actual level and follow external changes. Old desktops fall back to `LOCAL`.
+- **Microphone** — default capture-device gain and tap-to-mute, with live `MUTED` / `NO INPUT` state. Windows Core Audio, macOS input volume, Linux `pactl`.
+- **OBS Studio** — connect to OBS 28+ WebSocket (Settings → OBS Studio, password stored only on the PC), then add an OBS input volume tile (0–200%, 100% = 0 dB) with tap-to-mute and live state (`MUTED`, `NO OBS`, `NO INPUT`).
 - **Pointer safety** — Settings → Input has an **Allow pointer control** master switch; it releases held buttons and suspends cursor/click injection. Native approval dialogs suspend it automatically.
 - **Trackpad** — one-finger move, tap/right-click, two-finger scroll and long-press drag-lock, with sensitivity, natural scroll and drag-lock options. Windows/macOS use relative injection; Linux needs X11 (Wayland is unsupported).
 
