@@ -12,6 +12,7 @@ import { DiscoveryService } from './discovery'
 import { ActionExecutor } from './executor'
 import { createHostActions } from './host-actions'
 import { ControlInputRouter } from './control-input'
+import { ControlStateService } from './control-state'
 import { createKeySender, type KeySender } from './key-sender'
 import { createLogger, type Logger } from './logger'
 import { lanAddresses, primaryLanAddress, urlsForPort } from './lan'
@@ -27,6 +28,7 @@ import { DeckServer, type PressContext } from './server'
 import { SettingsStore } from './settings-store'
 import { UpdateService } from './updater'
 import { isRunningAppSigned, resolveUpdatePolicy } from './update-policy'
+import { createVolumeReader, HelperVolumeProbe, type VolumeReader } from './volume-source'
 import { IPC } from '../shared/api'
 import type {
   AppState,
@@ -53,6 +55,8 @@ let discovery: DiscoveryService
 let keySender: KeySender
 let executor: ActionExecutor
 let inputRouter: ControlInputRouter | null = null
+let controlState: ControlStateService | null = null
+let volumeProbe: HelperVolumeProbe | null = null
 let pointerSender: PointerSender | null = null
 let pointerRouter: PointerRouter | null = null
 let updater: UpdateService
@@ -779,9 +783,27 @@ async function bootstrap(): Promise<void> {
       }
     },
   })
+  const volumeReader: VolumeReader | null =
+    process.platform === 'win32'
+      ? (() => {
+          volumeProbe = new HelperVolumeProbe(helperPath(), logger)
+          return createVolumeReader('win32', { windowsRead: () => volumeProbe!.read() })
+        })()
+      : createVolumeReader(process.platform)
+  controlState = volumeReader ? new ControlStateService({ reader: volumeReader, logger }) : null
+  if (controlState) {
+    logger.info(`Live control state enabled on ${process.platform}`)
+  } else {
+    logger.info('Live control state disabled: no system volume reader on this host')
+  }
+
   const router = new ControlInputRouter({
     execute: (actions, label) => executor.execute(actions, label),
-    applyAbsolute: (_control, value, label) => executor.executeVolume(value * 100, label),
+    applyAbsolute: async (_control, value, label) => {
+      const result = await executor.executeVolume(value * 100, label)
+      if (result.ok) await controlState?.noteVolumeWritten(value * 100)
+      return result
+    },
     logger,
   })
   inputRouter = router
@@ -813,6 +835,8 @@ async function bootstrap(): Promise<void> {
     onInput: async (_client, message, context) =>
       router.handle(message, { control: context.control, label: context.button.label }),
     pointerSupported: pointerRouter !== null,
+    controlState: controlState ?? undefined,
+    controlStateSupported: controlState !== null,
     onPointer: async (client, message, context) => {
       if (!pointerRouter) {
         return {
@@ -1012,6 +1036,8 @@ if (!gotLock) {
     void (async () => {
       try {
         inputRouter?.dispose()
+        controlState?.dispose()
+        volumeProbe?.dispose()
         pointerRouter?.dispose()
         pointerSender?.dispose()
         keySender?.dispose?.()

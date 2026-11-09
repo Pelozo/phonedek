@@ -9,6 +9,7 @@ import { createDefaultConfig } from '@phonedek/shared'
 import type {
   ClientMessage,
   ControlSpec,
+  ControlStateMessage,
   DeckConfig,
   InputMessage,
   PointerMessage,
@@ -16,11 +17,14 @@ import type {
   PressMessage,
   PressResult,
   ServerMessage,
+  WatchMessage,
 } from '@phonedek/shared'
 import { AssetStore } from '../src/main/assets'
 import { writeBackupFile, type BackupPreview } from '../src/main/backup'
+import type { ControlStateSubscription } from '../src/main/control-state'
 import {
   DeckServer,
+  type ControlStateHub,
   type InputContext,
   type PointerContext,
   type PressContext,
@@ -53,6 +57,8 @@ const cleanups: Array<() => Promise<void>> = []
 interface HarnessOptions {
   importBackup?: (filePath: string, preview: BackupPreview) => Promise<{ ok: boolean; error?: string }>
   pointerSupported?: boolean
+  controlState?: ControlStateHub
+  controlStateSupported?: boolean
 }
 
 async function harness(
@@ -89,6 +95,8 @@ async function harness(
       return { seq: message.seq, ok: true }
     },
     pointerSupported: options.pointerSupported,
+    controlState: options.controlState,
+    controlStateSupported: options.controlStateSupported,
     importBackup: options.importBackup,
   })
   const port = await server.start()
@@ -810,6 +818,207 @@ describe('DeckServer pointer input', () => {
     await waitFor(() => h.server.getClients().length === 0)
   })
 
+})
+
+describe('DeckServer control state', () => {
+  const absoluteVolume: ControlSpec = {
+    kind: 'slider',
+    emit: 'value',
+    binding: { type: 'volume', mode: 'absolute' },
+  }
+
+  function fakeHub(): {
+    hub: ControlStateHub
+    subscriptions: Array<{ clientId: string; subscription: ControlStateSubscription }>
+    cleared: string[]
+  } {
+    const subscriptions: Array<{ clientId: string; subscription: ControlStateSubscription }> = []
+    const cleared: string[] = []
+    return {
+      subscriptions,
+      cleared,
+      hub: {
+        subscribe: (clientId, subscription) => {
+          subscriptions.push({ clientId, subscription })
+        },
+        unsubscribe: (clientId) => {
+          cleared.push(clientId)
+        },
+      },
+    }
+  }
+
+  async function sendHello(ws: WebSocket, capabilities: string[]): Promise<void> {
+    ws.send(
+      JSON.stringify({
+        type: 'hello',
+        protocol: 1,
+        device: { name: 'Test phone', model: 'test', appVersion: '0.3.0' },
+        capabilities,
+      } satisfies ClientMessage),
+    )
+    // The server parses hello asynchronously; let capability gating see it.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+
+  function watch(h: Harness, controlIds?: string[], intervalMs?: number): WatchMessage {
+    return {
+      type: 'watch',
+      profileId: h.config.profiles[0]!.id,
+      pageId: h.config.profiles[0]!.pages[0]!.id,
+      ...(controlIds === undefined ? {} : { controlIds }),
+      ...(intervalMs === undefined ? {} : { intervalMs }),
+    }
+  }
+
+  it('advertises control-state-v1 only when a reader exists', async () => {
+    const supported = await harness({ ok: true }, { controlStateSupported: true })
+    const info = await fetch(`http://127.0.0.1:${supported.port}/api/info`)
+    const body = (await info.json()) as { capabilities?: string[] }
+    expect(body.capabilities).toContain('control-state-v1')
+
+    const socket = await openSocket(`ws://127.0.0.1:${supported.port}/ws?token=${supported.token}`)
+    const hello = await waitFor(() => socket.messages.find((message) => message.type === 'hello'))
+    expect(hello.capabilities).toContain('control-state-v1')
+    socket.ws.close()
+
+    const unsupported = await harness()
+    const noInfo = await fetch(`http://127.0.0.1:${unsupported.port}/api/info`)
+    const noBody = (await noInfo.json()) as { capabilities?: string[] }
+    expect(noBody.capabilities).not.toContain('control-state-v1')
+
+    const noSocket = await openSocket(`ws://127.0.0.1:${unsupported.port}/ws?token=${unsupported.token}`)
+    const noHello = await waitFor(() => noSocket.messages.find((message) => message.type === 'hello'))
+    expect(noHello.capabilities).not.toContain('control-state-v1')
+    noSocket.ws.close()
+  })
+
+  it('accepts a watch and sends the batched controlState payload', async () => {
+    const fake = fakeHub()
+    const h = await harness(
+      { ok: true },
+      { controlState: fake.hub, controlStateSupported: true },
+    )
+    attachControl(h, 'btn-vol-down', absoluteVolume)
+    const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await waitFor(() => messages.find((message) => message.type === 'hello'))
+    await sendHello(ws, ['input-v1', 'control-state-v1'])
+
+    ws.send(JSON.stringify(watch(h, ['btn-vol-down'], 750)))
+    const call = await waitFor(() => fake.subscriptions[0])
+    expect(call.subscription.controlIds).toEqual(['btn-vol-down'])
+    expect(call.subscription.intervalMs).toBe(750)
+
+    // A watch has no direct ack; only the service's state message arrives.
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    expect(messages.some((message) => message.type === 'controlState')).toBe(false)
+    expect(messages.some((message) => message.type === 'error')).toBe(false)
+
+    const payload: ControlStateMessage = {
+      type: 'controlState',
+      profileId: call.subscription.profileId,
+      pageId: call.subscription.pageId,
+      states: [
+        { controlId: 'btn-vol-down', revision: 1, value: 0.42, available: true, detail: '42%' },
+      ],
+    }
+    call.subscription.send(payload)
+    const state = await waitFor(() =>
+      messages.find((message) => message.type === 'controlState'),
+    )
+    expect(state).toEqual(payload)
+
+    ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
+  it('drops a watch with an empty control list and clears on close', async () => {
+    const fake = fakeHub()
+    const h = await harness(
+      { ok: true },
+      { controlState: fake.hub, controlStateSupported: true },
+    )
+    attachControl(h, 'btn-vol-down', absoluteVolume)
+    const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await waitFor(() => messages.find((message) => message.type === 'hello'))
+    await sendHello(ws, ['control-state-v1'])
+
+    ws.send(JSON.stringify(watch(h, ['btn-vol-down'])))
+    const call = await waitFor(() => fake.subscriptions[0])
+    expect(call).toBeTruthy()
+
+    ws.send(JSON.stringify(watch(h, [])))
+    await waitFor(() => fake.cleared.includes(call.clientId))
+
+    ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
+  it('rejects unknown pages and ignores old clients', async () => {
+    const fake = fakeHub()
+    const h = await harness(
+      { ok: true },
+      { controlState: fake.hub, controlStateSupported: true },
+    )
+    attachControl(h, 'btn-vol-down', absoluteVolume)
+    const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await waitFor(() => messages.find((message) => message.type === 'hello'))
+    await sendHello(ws, ['control-state-v1'])
+
+    ws.send(
+      JSON.stringify({
+        type: 'watch',
+        profileId: h.config.profiles[0]!.id,
+        pageId: 'does-not-exist',
+        controlIds: ['btn-vol-down'],
+      } satisfies WatchMessage),
+    )
+    const error = await waitFor(() =>
+      messages.find((message) => message.type === 'error' && message.code === 'BAD_MESSAGE'),
+    )
+    expect(error.type).toBe('error')
+    expect(fake.subscriptions).toHaveLength(0)
+
+    // A client that did not advertise the capability gets nothing.
+    const old = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await waitFor(() => old.messages.find((message) => message.type === 'hello'))
+    await sendHello(old.ws, ['input-v1'])
+    await old.ws.send(JSON.stringify(watch(h, ['btn-vol-down'])))
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    expect(fake.subscriptions).toHaveLength(0)
+    expect(
+      old.messages.some((message) => message.type === 'controlState' || message.type === 'error'),
+    ).toBe(false)
+
+    old.ws.close()
+    ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
+  it('limits watches to two per second', async () => {
+    const fake = fakeHub()
+    const h = await harness(
+      { ok: true },
+      { controlState: fake.hub, controlStateSupported: true },
+    )
+    attachControl(h, 'btn-vol-down', absoluteVolume)
+    const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await waitFor(() => messages.find((message) => message.type === 'hello'))
+    await sendHello(ws, ['control-state-v1'])
+
+    ws.send(JSON.stringify(watch(h, ['btn-vol-down'])))
+    ws.send(JSON.stringify(watch(h, ['btn-vol-down'])))
+    ws.send(JSON.stringify(watch(h, ['btn-vol-down'])))
+
+    const limited = await waitFor(() =>
+      messages.find((message) => message.type === 'error' && message.code === 'RATE_LIMITED'),
+    )
+    expect(limited.type).toBe('error')
+    expect(fake.subscriptions).toHaveLength(2)
+
+    ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+  })
 })
 
 describe('DeckServer phone brightness', () => {

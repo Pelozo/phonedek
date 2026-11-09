@@ -42,7 +42,8 @@ minute it answers `429` with `Retry-After: 60`.
 
 `/api/info` currently advertises `capabilities: ["backup-export-v1", "import-v1",
 "input-v1", "brightness-v1"]`. A desktop that supports trackpad/pointer control
-additionally advertises `pointer-v1`. Clients must treat the array as optional and
+additionally advertises `pointer-v1`. A desktop with a system-volume reader
+advertises `control-state-v1`. Clients must treat the array as optional and
 only show a feature when its marker is present. `/api/backup` responds with
 `Content-Type: application/zip`,
 `Content-Disposition: attachment; filename="phonedek-backup-YYYYMMDD-HHMMSS.zip"`,
@@ -158,6 +159,52 @@ Rules:
 - `cancel`, WebSocket close and a new phone taking over release all held
   buttons. Platforms without global pointer injection (e.g. Wayland) do not
   advertise `pointer-v1` and reject `start` with a clear error.
+
+### Live control state (`control-state-v1`)
+
+Phones subscribe to readback for the visible page's absolute-volume controls.
+State is runtime data: it is never written into `DeckConfig`, `hello.config` or
+backups. Absolute volume means a slider/dial with
+`control.binding.type == "volume" && binding.mode == "absolute"`.
+
+```jsonc
+// Subscribe after hello/config and whenever the visible page changes.
+// Omitted controlIds = every absolute-volume control on the page.
+{ "type":"watch", "profileId":"p1", "pageId":"pg1",
+  "controlIds":["btn-vol"], "intervalMs":1000 }
+
+// Empty ids clears the subscription (backgrounded / no live controls).
+{ "type":"watch", "profileId":"p1", "pageId":"pg1", "controlIds":[] }
+```
+
+```jsonc
+// Immediate snapshot, then only on change; batched per tick.
+{ "type":"controlState", "profileId":"p1", "pageId":"pg1",
+  "states":[
+    { "controlId":"btn-vol", "revision":12, "value":0.42, "muted":false,
+      "available":true, "detail":"42%" }
+  ] }
+```
+
+Rules:
+
+- One subscription per connection; the last `watch` replaces the previous one.
+  A watch has no ack. Unknown control ids are ignored; an unknown page/profile
+  clears the subscription and returns `error` with code `BAD_MESSAGE`.
+- `intervalMs` is 500..5000 (default 1000). It is a maximum idle poll hint, not
+  a message rate; the desktop still sends changes only.
+- `revision` is monotonic per control; the phone ignores entries whose revision
+  is not newer. `value` is normalized 0..1. `detail` is a short readout such as
+  `"42%"`.
+- `available:false` (with an optional `detail`) means the host reader failed
+  (no default device, missing `pactl`, unsupported platform); the socket stays
+  open and the phone keeps its local value.
+- A phone write (`input` with an absolute value) makes the desktop invalidate
+  its cached reading and push a fresh snapshot, so the slider shows the real
+  host value. The phone should ignore incoming values while the user drags.
+- The desktop advertises `control-state-v1` only when it has a reader for the
+  platform (Windows helper, macOS `osascript`, or Linux `pactl`). It sends state
+  only to clients that also advertised the capability.
 
 ## Discovery
 

@@ -7,6 +7,7 @@ import type { Socket } from 'node:net'
 import { WebSocket, WebSocketServer } from 'ws'
 import {
   BRIGHTNESS_CAPABILITY,
+  CONTROL_STATE_CAPABILITY,
   POINTER_CAPABILITY,
   PROTOCOL_VERSION,
   parseClientMessage,
@@ -27,8 +28,10 @@ import type {
   PressMessage,
   PressResult,
   ServerMessage,
+  WatchMessage,
 } from '@phonedek/shared'
 import type { AssetStore } from './assets'
+import { resolveAbsoluteVolumeControls, type ControlStateSubscription } from './control-state'
 import {
   previewBackup,
   readBackupFile,
@@ -44,16 +47,26 @@ export const SERVER_CAPABILITIES = [
   'input-v1',
   BRIGHTNESS_CAPABILITY,
   POINTER_CAPABILITY,
+  CONTROL_STATE_CAPABILITY,
 ] as const
 
 /**
  * Capabilities for a specific host. Wayland/unsupported platforms must not
- * advertise `pointer-v1`, so the desktop computes this at startup.
+ * advertise `pointer-v1`, and a host with no volume reader must not advertise
+ * `control-state-v1`, so the desktop computes this at startup.
  */
-export function serverCapabilities(pointerSupported: boolean): string[] {
-  return SERVER_CAPABILITIES.filter(
-    (capability) => pointerSupported || capability !== POINTER_CAPABILITY,
-  )
+export function serverCapabilities(pointerSupported: boolean, stateSupported = false): string[] {
+  return SERVER_CAPABILITIES.filter((capability) => {
+    if (capability === POINTER_CAPABILITY) return pointerSupported
+    if (capability === CONTROL_STATE_CAPABILITY) return stateSupported
+    return true
+  })
+}
+
+/** State-service surface used by the server; injected so tests stay offline. */
+export interface ControlStateHub {
+  subscribe(clientId: string, subscription: ControlStateSubscription): void | Promise<void>
+  unsubscribe(clientId: string): void
 }
 
 interface ControlNeeds {
@@ -128,6 +141,10 @@ export interface DeckServerOptions {
   ) => Promise<PointerResult>
   /** Set false on Wayland/unsupported hosts so `pointer-v1` is not advertised. */
   pointerSupported?: boolean
+  /** Volume readback service; omitted when this host has no reader. */
+  controlState?: ControlStateHub
+  /** Advertise `control-state-v1`; true only when a reader was built. */
+  controlStateSupported?: boolean
   /** Called when a phone disconnects, so held pointer buttons can be released. */
   onClientClosed?: (client: ConnectedClient) => void
   /** Called only after an uploaded backup validates; show native approval here. */
@@ -144,6 +161,7 @@ interface ClientRecord {
   inputTimes: number[]
   brightnessTimes: number[]
   pointerTimes: number[]
+  watchTimes: number[]
   /** Last APP_OUTDATED message sent to this client, to avoid spamming. */
   outdatedNotice: string | null
 }
@@ -159,6 +177,7 @@ const AUTH_BLOCK_MS = 60_000
 const INPUT_RATE_LIMIT = 60
 const POINTER_RATE_LIMIT = 120
 const BRIGHTNESS_RATE_LIMIT = 20
+const WATCH_RATE_LIMIT = 2
 const MAX_IMPORT_BYTES = 300 * 1024 * 1024
 const IMPORT_TEMP_PREFIX = 'phonedek-import-'
 
@@ -368,7 +387,10 @@ export class DeckServer {
   }
 
   private get capabilities(): string[] {
-    return serverCapabilities(this.options.pointerSupported !== false)
+    return serverCapabilities(
+      this.options.pointerSupported !== false,
+      this.options.controlStateSupported === true,
+    )
   }
 
   async start(): Promise<number> {
@@ -437,6 +459,11 @@ export class DeckServer {
     if (this.heartbeat) clearInterval(this.heartbeat)
     this.heartbeat = null
     for (const record of this.clients.values()) {
+      try {
+        this.options.controlState?.unsubscribe(record.info.id)
+      } catch {
+        // ignore
+      }
       try {
         record.ws.close(1001, 'Server stopping')
       } catch {
@@ -562,6 +589,7 @@ export class DeckServer {
       inputTimes: [],
       brightnessTimes: [],
       pointerTimes: [],
+      watchTimes: [],
       outdatedNotice: null,
     }
     this.clients.set(id, record)
@@ -579,6 +607,11 @@ export class DeckServer {
       })
     })
     ws.on('close', () => {
+      try {
+        this.options.controlState?.unsubscribe(record.info.id)
+      } catch (error) {
+        this.options.logger?.warn(`Control state cleanup failed: ${String(error)}`)
+      }
       try {
         this.options.onClientClosed?.(record.info)
       } catch (error) {
@@ -638,6 +671,66 @@ export class DeckServer {
       case 'pointer':
         await this.handlePointer(record, message)
         break
+      case 'watch':
+        await this.handleWatch(record, message)
+        break
+    }
+  }
+
+  private async handleWatch(record: ClientRecord, message: WatchMessage): Promise<void> {
+    if (!this.options.controlState || this.options.controlStateSupported !== true) return
+    // Gate in both directions: only phones that advertised the capability can
+    // subscribe. An old app never sends watch anyway.
+    if (!record.info.capabilities?.includes(CONTROL_STATE_CAPABILITY)) return
+
+    const now = Date.now()
+    record.watchTimes = record.watchTimes.filter((time) => now - time < 1000)
+    if (record.watchTimes.length >= WATCH_RATE_LIMIT) {
+      this.send(record.ws, {
+        type: 'error',
+        code: 'RATE_LIMITED',
+        message: 'Too many watch updates, slow down',
+      })
+      return
+    }
+    record.watchTimes.push(now)
+
+    // An explicit empty list drops the subscription; omitted means every
+    // absolute-volume control on the page.
+    if (message.controlIds !== undefined && message.controlIds.length === 0) {
+      this.options.controlState.unsubscribe(record.info.id)
+      return
+    }
+
+    const controls = resolveAbsoluteVolumeControls(
+      this.options.getConfig(),
+      message.profileId,
+      message.pageId,
+      message.controlIds,
+    )
+    if (!controls) {
+      this.options.controlState.unsubscribe(record.info.id)
+      this.send(record.ws, {
+        type: 'error',
+        code: 'BAD_MESSAGE',
+        message: 'Deck page not found. Refresh the deck.',
+      })
+      return
+    }
+
+    const intervalMs = Math.max(500, Math.min(5000, message.intervalMs ?? 1000))
+    try {
+      await this.options.controlState.subscribe(record.info.id, {
+        profileId: message.profileId,
+        pageId: message.pageId,
+        controlIds: controls.map((control) => control.id),
+        intervalMs,
+        send: (state) => this.send(record.ws, state),
+      })
+    } catch (error) {
+      this.options.logger?.warn(
+        `Could not subscribe to control state: ${error instanceof Error ? error.message : String(error)}`,
+      )
     }
   }
 
@@ -1225,6 +1318,11 @@ export class DeckServer {
       if (!record.alive) {
         try {
           record.ws.terminate()
+        } catch {
+          // ignore
+        }
+        try {
+          this.options.controlState?.unsubscribe(record.info.id)
         } catch {
           // ignore
         }

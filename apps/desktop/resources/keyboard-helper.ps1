@@ -196,6 +196,25 @@ public static class PhoneDeckVolume {
         if (Marshal.IsComObject(device)) Marshal.ReleaseComObject(device);
         if (Marshal.IsComObject(enumerator)) Marshal.ReleaseComObject(enumerator);
     }
+
+    public static float GetScalar() {
+        var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject();
+        IMMDevice device;
+        int hr = enumerator.GetDefaultAudioEndpoint(0, 1, out device); // eRender, eMultimedia
+        if (hr != 0) Marshal.ThrowExceptionForHR(hr);
+        Guid iid = typeof(IAudioEndpointVolume).GUID;
+        object obj;
+        hr = device.Activate(ref iid, 1, IntPtr.Zero, out obj); // CLSCTX_INPROC_SERVER
+        if (hr != 0) Marshal.ThrowExceptionForHR(hr);
+        var volume = (IAudioEndpointVolume)obj;
+        float level;
+        hr = volume.GetMasterVolumeLevelScalar(out level);
+        if (hr != 0) Marshal.ThrowExceptionForHR(hr);
+        if (Marshal.IsComObject(volume)) Marshal.ReleaseComObject(volume);
+        if (Marshal.IsComObject(device)) Marshal.ReleaseComObject(device);
+        if (Marshal.IsComObject(enumerator)) Marshal.ReleaseComObject(enumerator);
+        return Math.Max(0f, Math.Min(1f, level));
+    }
 }
 '@
 
@@ -359,9 +378,14 @@ function Set-SystemVolume([int]$Level) {
     [PhoneDeckVolume]::Set([single]($clamped / 100.0))
 }
 
+function Get-SystemVolume {
+    return @{ value = [double][PhoneDeckVolume]::GetScalar() }
+}
+
 function Invoke-Step($Step) {
     switch ($Step.kind) {
         'set-volume' { Set-SystemVolume ([int]$Step.level) }
+        'get-volume' { return Get-SystemVolume }
         'keys' { Send-Chord $Step.keys ([int]$Step.holdMs) ([string]$Step.action) }
         'text' { Send-Text ([string]$Step.text) ([int]$Step.perCharMs) }
         'delay' { Start-Sleep -Milliseconds ([Math]::Max(0, [Math]::Min(60000, [int]$Step.ms))) }
@@ -390,8 +414,16 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
     try {
         $command = $line | ConvertFrom-Json
         $id = [string]$command.id
-        foreach ($step in $command.steps) { Invoke-Step $step }
-        $response = @{ id = $id; ok = $true } | ConvertTo-Json -Compress
+        $stepData = $null
+        foreach ($step in $command.steps) {
+            $result = Invoke-Step $step
+            if ($null -ne $result) { $stepData = $result }
+        }
+        $response = @{ id = $id; ok = $true }
+        if ($stepData -is [hashtable]) {
+            foreach ($key in $stepData.Keys) { $response[$key] = $stepData[$key] }
+        }
+        $response = $response | ConvertTo-Json -Compress
     } catch {
         $message = $_.Exception.Message
         if (-not $message) { $message = 'Unknown keyboard helper error' }
