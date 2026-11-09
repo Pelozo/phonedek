@@ -217,4 +217,66 @@ class PointerGestureTest {
         assertEquals("left", event.button)
         assertEquals("click", event.action)
     }
+
+    @Test
+    fun rotatePointerDeltaIsIdentityAtZero() {
+        val (dx, dy) = rotatePointerDelta(3f, -4f, 0f)
+        assertEquals(3f, dx, 0.0001f)
+        assertEquals(-4f, dy, 0.0001f)
+    }
+
+    @Test
+    fun rotatePointerDeltaUndoesNinetyDegreeContentRotation() {
+        // Content is clockwise-rotated by 90°, so a raw screen-right drag must
+        // become "up" for the user-facing content.
+        val (dx, dy) = rotatePointerDelta(10f, 0f, 90f)
+        assertEquals(0f, dx, 0.0001f)
+        assertEquals(-10f, dy, 0.0001f)
+    }
+
+    @Test
+    fun rotatePointerDeltaUndoesNegativeNinetyDegreeContentRotation() {
+        val (dx, dy) = rotatePointerDelta(10f, 0f, -90f)
+        assertEquals(0f, dx, 0.0001f)
+        assertEquals(10f, dy, 0.0001f)
+    }
+
+    @Test
+    fun rotatePointerDeltaOneEightyFlipsBothAxes() {
+        val (dx, dy) = rotatePointerDelta(10f, -6f, 180f)
+        assertEquals(-10f, dx, 0.0001f)
+        assertEquals(6f, dy, 0.0001f)
+    }
+
+    @Test
+    fun rotatePointerDeltaPreservesMagnitude() {
+        val angles = listOf(0f, 90f, -90f, 180f, 37f)
+        for (angle in angles) {
+            val (dx, dy) = rotatePointerDelta(3f, 4f, angle)
+            assertEquals(5f, kotlin.math.hypot(dx, dy), 0.0001f)
+        }
+    }
+
+    @Test
+    fun frameRotationMovesBothMovementAndScrollAndKeepsButtons() {
+        val frame = PointerGestureFrame(
+            dx = 1f,
+            dy = 0f,
+            scrollX = 0f,
+            scrollY = 2f,
+            buttons = listOf(PointerButtonEvent("left", "down")),
+            haptic = PointerHaptic.DRAG_LOCK,
+            cancelled = true,
+        )
+
+        val rotated = frame.rotated(90f)
+
+        assertEquals(0f, rotated.dx, 0.0001f)
+        assertEquals(-1f, rotated.dy, 0.0001f)
+        assertEquals(2f, rotated.scrollX, 0.0001f)
+        assertEquals(0f, rotated.scrollY, 0.0001f)
+        assertEquals(listOf("left" to "down"), buttons(rotated))
+        assertEquals(PointerHaptic.DRAG_LOCK, rotated.haptic)
+        assertTrue(rotated.cancelled)
+    }
 }

@@ -1,7 +1,9 @@
 package com.phonedek.app.ui
 
 import com.phonedek.app.data.PointerButtonEvent
+import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.sin
 
 /**
  * Pure, unit-testable gesture state machine for the full-screen pointer pad.
@@ -28,6 +30,30 @@ internal data class PadPoint(
 
 internal enum class PointerHaptic { TAP, RIGHT_CLICK, DRAG_LOCK }
 
+/**
+ * Maps a screen-space pointer delta into the direction the user perceives.
+ *
+ * [rotationDegrees] is the clockwise rotation already applied to the tile
+ * content via [LocalButtonContentRotation]. Touch positions arrive in screen
+ * space, so an upright-looking deck that is counter-rotated by -90° produces
+ * raw deltas rotated by -90°; undo that rotation before sending the frame.
+ * Positive angles follow Compose's `graphicsLayer.rotationZ` convention.
+ */
+internal fun rotatePointerDelta(
+    dx: Float,
+    dy: Float,
+    rotationDegrees: Float,
+): Pair<Float, Float> {
+    if (dx == 0f && dy == 0f) return dx to dy
+    val degrees = rotationDegrees % 360f
+    if (degrees == 0f) return dx to dy
+    val radians = Math.toRadians(degrees.toDouble())
+    val cosValue = cos(radians).toFloat()
+    val sinValue = sin(radians).toFloat()
+    // Inverse rotation (R(-θ)): [cos sin; -sin cos].
+    return (dx * cosValue + dy * sinValue) to (-dx * sinValue + dy * cosValue)
+}
+
 internal data class PointerGestureFrame(
     val dx: Float = 0f,
     val dy: Float = 0f,
@@ -53,6 +79,23 @@ internal data class PointerGestureFrame(
         haptic = other.haptic ?: haptic,
         cancelled = cancelled || other.cancelled,
     )
+
+    /**
+     * Counter-rotates movement and scroll so a physical drag matches the deck
+     * content the user sees. Buttons, haptics and cancel state are untouched.
+     */
+    fun rotated(rotationDegrees: Float): PointerGestureFrame {
+        if (rotationDegrees % 360f == 0f) return this
+        val (rotatedDx, rotatedDy) = rotatePointerDelta(dx, dy, rotationDegrees)
+        val (rotatedScrollX, rotatedScrollY) =
+            rotatePointerDelta(scrollX, scrollY, rotationDegrees)
+        return copy(
+            dx = rotatedDx,
+            dy = rotatedDy,
+            scrollX = rotatedScrollX,
+            scrollY = rotatedScrollY,
+        )
+    }
 }
 
 private enum class Mode {

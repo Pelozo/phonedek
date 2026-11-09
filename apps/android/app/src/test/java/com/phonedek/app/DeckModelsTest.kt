@@ -592,6 +592,7 @@ class DeckModelsTest {
                         "emit": "delta",
                         "binding": {
                           "type": "pointer",
+                          "mode": "fullscreen",
                           "sensitivity": 9,
                           "naturalScroll": false,
                           "tapToClick": false,
@@ -621,6 +622,15 @@ class DeckModelsTest {
                       }
                     },
                     {
+                      "id": "inline-default",
+                      "slot": 9,
+                      "control": {
+                        "kind": "trackpad",
+                        "emit": "delta",
+                        "binding": { "type": "pointer" }
+                      }
+                    },
+                    {
                       "id": "unknown",
                       "slot": 8,
                       "icon": "?",
@@ -642,6 +652,11 @@ class DeckModelsTest {
         assertEquals("trackpad", control.kind)
         assertEquals("delta", control.emit)
         assertEquals("pointer", control.binding.type)
+        assertEquals("fullscreen", control.binding.mode)
+        assertEquals(
+            "inline",
+            buttons.first { it.id == "inline-default" }.control!!.binding.mode,
+        )
         assertEquals(3f, control.binding.sensitivity!!, 0.001f)
         assertEquals(false, control.binding.naturalScroll)
         assertEquals(false, control.binding.tapToClick)

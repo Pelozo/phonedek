@@ -118,6 +118,12 @@ fun DeckScreen(
     val page = pages.getOrNull(resolvePageIndex(pages, state.activePageId, profile?.defaultPageId))
 
     val theme = profile?.theme ?: ProfileTheme()
+    val trackpad = TrackpadActions(
+        capable = state.pointerCapable,
+        arm = viewModel::armPointer,
+        input = viewModel::onPointerInput,
+        end = viewModel::endInlinePointer,
+    )
     val pageBackground = page?.background ?: theme.background
     val background = remember(pageBackground, state.pairing) {
         backgroundSpec(pageBackground, state.pairing, InkDeep)
@@ -202,6 +208,7 @@ fun DeckScreen(
                 onPress = viewModel::onButtonPressed,
                 onControlInput = viewModel::onControlInput,
                 onControlInteracting = { controlInteracting = it },
+                trackpad = trackpad,
             )
         } else {
             BackgroundLayer(background, Modifier.fillMaxSize())
@@ -677,6 +684,7 @@ private fun DeckPager(
         value: Float?,
     ) -> Unit,
     onControlInteracting: (Boolean) -> Unit,
+    trackpad: TrackpadActions,
 ) {
     val pages = profile.pages
     val pageIds = pages.map { it.id }
@@ -772,6 +780,7 @@ private fun DeckPager(
                 onPress = onPress,
                 onControlInput = onControlInput,
                 onControlInteracting = onControlInteracting,
+                trackpad = trackpad,
             )
         }
     }
@@ -792,6 +801,7 @@ private fun DeckPageContent(
         value: Float?,
     ) -> Unit,
     onControlInteracting: (Boolean) -> Unit,
+    trackpad: TrackpadActions,
 ) {
     val spec = remember(page.background, profile.theme.background, pairing) {
         backgroundSpec(page.background ?: profile.theme.background, pairing, InkDeep)
@@ -809,6 +819,7 @@ private fun DeckPageContent(
             onPress = onPress,
             onControlInput = onControlInput,
             onControlInteracting = onControlInteracting,
+            trackpad = trackpad,
         )
     }
 }
@@ -828,6 +839,7 @@ private fun DeckGrid(
         value: Float?,
     ) -> Unit,
     onControlInteracting: (Boolean) -> Unit,
+    trackpad: TrackpadActions,
 ) {
     val grid = pageGrid(profile, page)
     val capacity = grid.columns * grid.rows
@@ -880,6 +892,7 @@ private fun DeckGrid(
                     onPress = { onPress(button) },
                     onControlInput = onControlInput,
                     onControlInteracting = onControlInteracting,
+                    trackpad = trackpad,
                 )
             }
         }

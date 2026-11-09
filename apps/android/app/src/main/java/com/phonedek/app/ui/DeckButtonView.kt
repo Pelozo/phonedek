@@ -47,17 +47,38 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.phonedek.app.data.DeckButton
 import com.phonedek.app.data.MediaIconDto
 import com.phonedek.app.data.Pairing
+import com.phonedek.app.data.PointerButtonEvent
 import com.phonedek.app.data.ProfileTheme
 import com.phonedek.app.net.assetUrl
 
 // Deck fills are user content. Keep the historical default so existing decks
 // render exactly as before even though the surrounding chrome is now ink/orange.
 private val LegacyDeckFallback = Color(0xFF1E293B)
+
+/**
+ * Trackpad plumbing threaded from DeckScreen so a tile can arm/send/end a
+ * pointer session without coupling the view to the ViewModel.
+ */
+data class TrackpadActions(
+    val capable: Boolean = false,
+    val arm: (DeckButton) -> Boolean = { false },
+    val input: (
+        controlId: String,
+        phase: String,
+        dx: Float,
+        dy: Float,
+        scrollX: Float,
+        scrollY: Float,
+        buttons: List<PointerButtonEvent>,
+    ) -> Unit = { _, _, _, _, _, _, _ -> },
+    val end: (controlId: String) -> Unit = {},
+)
 
 @Composable
 fun DeckButtonView(
@@ -72,6 +93,7 @@ fun DeckButtonView(
         value: Float?,
     ) -> Unit = { _, _, _, _ -> },
     onControlInteracting: (Boolean) -> Unit = {},
+    trackpad: TrackpadActions = TrackpadActions(),
     isActive: Boolean = true,
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -148,15 +170,26 @@ fun DeckButtonView(
         BackgroundLayer(spec, Modifier.fillMaxSize(), isActive = isActive)
 
         if (control?.kind == "trackpad") {
-            TrackpadLauncher(
-                label = button.label,
-                sublabel = button.sublabel,
-                textColor = textColor,
-                contentRotation = contentRotation,
-                interaction = interaction,
-                onPress = onPress,
-                modifier = Modifier.fillMaxSize(),
-            )
+            if (control.binding.mode == "fullscreen") {
+                FullscreenTrackpadLauncher(
+                    button = button,
+                    textColor = textColor,
+                    contentRotation = contentRotation,
+                    interaction = interaction,
+                    onOpen = onPress,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                InlineTrackpad(
+                    button = button,
+                    textColor = textColor,
+                    contentRotation = contentRotation,
+                    trackpad = trackpad,
+                    onControlInteracting = onControlInteracting,
+                    onExpand = onPress,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         } else if (control != null) {
             DeckControlView(
                 control = control,
@@ -249,83 +282,237 @@ fun DeckButtonView(
     }
 }
 
+/**
+ * Full-screen trackpad mode: the deck tile is a launcher for the large pad.
+ * Tapping anywhere on the tile opens it; the inline mode is the alternative.
+ */
 @Composable
-private fun TrackpadLauncher(
-    label: String,
-    sublabel: String?,
+private fun FullscreenTrackpadLauncher(
+    button: DeckButton,
     textColor: Color,
     contentRotation: Float,
     interaction: MutableInteractionSource,
-    onPress: () -> Unit,
+    onOpen: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val haptics = LocalHapticFeedback.current
-    val title = label.trim().ifBlank { "TRACKPAD" }
-    val caption = sublabel?.trim()?.takeIf { it.isNotEmpty() } ?: "TAP TO OPEN"
-    BoxWithConstraints(modifier) {
-        val glyph = minOf(maxHeight * 0.34f, 34.dp)
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer { rotationZ = contentRotation }
-                .clickable(
-                    interactionSource = interaction,
-                    indication = LocalIndication.current,
-                    role = Role.Button,
-                    onClickLabel = "Open trackpad",
-                ) {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onPress()
-                },
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Canvas(Modifier.size(glyph)) {
-                val inset = 2.dp.toPx()
-                val width = size.width - inset * 2
-                val height = size.height - inset * 2
-                drawRoundRect(
-                    color = textColor.copy(alpha = 0.5f),
-                    topLeft = Offset(inset, inset),
-                    size = Size(width, height),
-                    cornerRadius = CornerRadius(height * 0.18f),
-                    style = Stroke(width = 1.dp.toPx()),
+    val title = button.label.trim().ifBlank { "TRACKPAD" }
+    val caption = button.sublabel?.trim()?.takeIf { it.isNotEmpty() } ?: "TAP TO OPEN"
+    Column(
+        modifier = modifier
+            .clickable(
+                interactionSource = interaction,
+                indication = LocalIndication.current,
+                role = Role.Button,
+                onClickLabel = "Open trackpad",
+            ) {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                onOpen()
+            }
+            .graphicsLayer { rotationZ = contentRotation }
+            .padding(6.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        PadGlyph(color = textColor.copy(alpha = 0.55f), modifier = Modifier.size(30.dp))
+        Spacer(Modifier.height(3.dp))
+        Text(
+            text = title,
+            color = textColor,
+            fontSize = 10.sp,
+            lineHeight = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = caption.uppercase(),
+            color = textColor.copy(alpha = 0.58f),
+            fontFamily = ConsoleMono,
+            fontSize = 7.sp,
+            lineHeight = 9.sp,
+            letterSpacing = 1.sp,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
+ * Inline trackpad tile: an inset deep well with a faint grid, a live contact
+ * dot and an expand affordance for precision. The gesture surface owns the
+ * well; the expand control is a sibling above it so the surface's Initial-pass
+ * consumption cannot steal its tap.
+ */
+@Composable
+private fun InlineTrackpad(
+    button: DeckButton,
+    textColor: Color,
+    contentRotation: Float,
+    trackpad: TrackpadActions,
+    onControlInteracting: (Boolean) -> Unit,
+    onExpand: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val binding = button.control?.binding
+    val options = remember(button.id, button.label, binding) {
+        PointerPadOptions(
+            controlId = button.id,
+            label = button.label,
+            sensitivity = binding?.sensitivity
+                ?.takeIf { value -> value.isFinite() }
+                ?.coerceIn(0.25f, 3f)
+                ?: 1f,
+            naturalScroll = binding?.naturalScroll ?: true,
+            tapToClick = binding?.tapToClick ?: true,
+            dragLock = binding?.dragLock ?: true,
+        )
+    }
+    val wellShape = RoundedCornerShape(6.dp)
+    val sublabel = button.sublabel?.trim()?.takeIf { it.isNotEmpty() }
+        ?: "DRAG · TAP"
+
+    Box(
+        modifier = modifier
+            .padding(3.dp)
+            .clip(wellShape)
+            .background(InkDeep)
+            .border(1.dp, HairlineStrong, wellShape),
+    ) {
+        if (!trackpad.capable) {
+            // Old desktops: keep the one-shot "update" message on tap instead of
+            // starting a session the server cannot understand.
+            val haptics = LocalHapticFeedback.current
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        role = Role.Button,
+                        onClickLabel = "Trackpad needs a desktop update",
+                    ) {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onExpand()
+                    }
+                    .graphicsLayer { rotationZ = contentRotation },
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                PadGlyph(color = textColor.copy(alpha = 0.4f), modifier = Modifier.size(26.dp))
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = "PAD",
+                    color = textColor.copy(alpha = 0.7f),
+                    fontFamily = ConsoleMono,
+                    fontSize = 8.sp,
+                    letterSpacing = 1.6.sp,
                 )
-                drawLine(
-                    color = textColor.copy(alpha = 0.35f),
-                    start = Offset(inset + width * 0.2f, inset + height * 0.62f),
-                    end = Offset(inset + width * 0.8f, inset + height * 0.62f),
-                    strokeWidth = 1.dp.toPx(),
-                )
-                drawCircle(
-                    color = Accent,
-                    radius = 2.dp.toPx(),
-                    center = Offset(inset + width * 0.5f, inset + height * 0.38f),
+                Text(
+                    text = "UPDATE PC",
+                    color = TextMuted,
+                    fontFamily = ConsoleMono,
+                    fontSize = 7.sp,
+                    letterSpacing = 1.sp,
                 )
             }
-            Spacer(Modifier.height(3.dp))
-            Text(
-                text = title,
-                color = textColor,
-                fontSize = 10.sp,
-                lineHeight = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = caption.uppercase(),
-                color = textColor.copy(alpha = 0.6f),
-                fontFamily = ConsoleMono,
-                fontSize = 7.sp,
-                lineHeight = 9.sp,
-                letterSpacing = 1.sp,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+        } else {
+            PointerSurface(
+                options = options,
+                contentRotation = contentRotation,
+                onStart = { trackpad.arm(button) },
+                onInput = trackpad.input,
+                onEnd = trackpad.end,
+                onInteractingChange = onControlInteracting,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                PadGrid()
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(start = 9.dp, top = 7.dp, end = 30.dp)
+                        .graphicsLayer { rotationZ = contentRotation },
+                ) {
+                    Text(
+                        text = "PAD",
+                        color = textColor.copy(alpha = 0.72f),
+                        fontFamily = ConsoleMono,
+                        fontSize = 8.sp,
+                        letterSpacing = 1.8.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                    )
+                    Text(
+                        text = sublabel.uppercase(),
+                        color = textColor.copy(alpha = 0.38f),
+                        fontFamily = ConsoleMono,
+                        fontSize = 6.sp,
+                        letterSpacing = 0.8.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            ExpandAffordance(
+                onExpand = onExpand,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(4.dp),
             )
         }
+    }
+}
+
+@Composable
+private fun ExpandAffordance(
+    onExpand: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .size(26.dp)
+            .zIndex(2f)
+            .clip(RoundedCornerShape(3.dp))
+            .background(PanelRaised)
+            .border(1.dp, HairlineStrong, RoundedCornerShape(3.dp))
+            .clickable(role = Role.Button, onClickLabel = "Expand trackpad") {
+                onExpand()
+            }
+            .semantics { contentDescription = "Expand trackpad" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "⤢",
+            color = TextSecondary,
+            fontFamily = ConsoleMono,
+            fontSize = 11.sp,
+            lineHeight = 12.sp,
+        )
+    }
+}
+
+@Composable
+private fun PadGlyph(
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier) {
+        val inset = 2.dp.toPx()
+        val width = size.width - inset * 2
+        val height = size.height - inset * 2
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(inset, inset),
+            size = Size(width, height),
+            cornerRadius = CornerRadius(height * 0.18f),
+            style = Stroke(width = 1.dp.toPx()),
+        )
+        drawLine(
+            color = color.copy(alpha = 0.7f),
+            start = Offset(inset + width * 0.2f, inset + height * 0.62f),
+            end = Offset(inset + width * 0.8f, inset + height * 0.62f),
+            strokeWidth = 1.dp.toPx(),
+        )
     }
 }
 

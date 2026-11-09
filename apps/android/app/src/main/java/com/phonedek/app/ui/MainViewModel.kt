@@ -155,6 +155,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var pointerProfileId: String? = null
     private var pointerPageId: String? = null
     private var pointerGestureActive = false
+    private var pointerStartSent = false
     private var pointerLastFlushAt = 0L
 
     private val connection = DeckConnection(
@@ -164,7 +165,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         listener = object : DeckConnection.Listener {
             override fun onStatus(status: ConnectionStatus) {
                 _state.update { it.copy(connection = status) }
-                if (status != ConnectionStatus.CONNECTED && _state.value.pointerPadOpen) {
+                if (status != ConnectionStatus.CONNECTED &&
+                    (_state.value.pointerPadOpen || pointerControlId != null)
+                ) {
                     // The socket is gone; there is nobody to receive `cancel`.
                     closePointerPad(sendCancel = false)
                 }
@@ -196,7 +199,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 if (inputCapable) inputUnsupportedShown = false
                 if (pointerCapable) pointerUnsupportedShown = false
-                if (!pointerCapable && _state.value.pointerPadOpen) {
+                if (!pointerCapable &&
+                    (_state.value.pointerPadOpen || pointerControlId != null)
+                ) {
                     closePointerPad(sendCancel = false)
                 }
                 if (protocol != 1 && !protocolWarningShown) {
@@ -750,36 +755,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         emit(message)
     }
 
+    private fun notePointerUnsupported() {
+        if (pointerUnsupportedShown) return
+        pointerUnsupportedShown = true
+        emit("Update PhoneDeck on your PC to use the trackpad.")
+    }
+
     /**
-     * Opens the full-screen pad for a trackpad launch tile. The press itself is
-     * intentionally never sent: the pad's first touch sends `pointer/start`.
+     * Binds the next pointer gesture to [button]'s trackpad control. Both the
+     * inline tile (at touch-down) and the full-screen pad (on open) call this;
+     * the press itself is intentionally never sent.
      */
-    fun openPointerPad(button: DeckButton) {
+    fun armPointer(button: DeckButton): Boolean {
         val snapshot = _state.value
         if (!snapshot.pointerCapable) {
-            if (!pointerUnsupportedShown) {
-                pointerUnsupportedShown = true
-                emit("Update PhoneDeck on your PC to use the trackpad.")
-            }
-            return
+            notePointerUnsupported()
+            return false
         }
         val profile = snapshot.config?.profiles?.firstOrNull {
             it.id == snapshot.activeProfileId
-        } ?: return
-        val page = profile.pages.firstOrNull { it.id == snapshot.activePageId } ?: return
+        } ?: return false
+        val page = profile.pages.firstOrNull { it.id == snapshot.activePageId } ?: return false
         val binding = button.control?.binding
+        // Moving the gesture to a different control must not strand a button
+        // the previous control was holding.
+        if (pointerControlId != null && pointerControlId != button.id) {
+            abortPointerSession(sendCancel = true)
+        }
         pointerProfileId = profile.id
         pointerPageId = page.id
         pointerControlId = button.id
         pointerAccumulator.clear()
-        pointerHeldButtons.clear()
         pointerGestureActive = false
+        pointerStartSent = false
         pointerFlushJob?.cancel()
         pointerFlushJob = null
-        stopPointerKeepalive()
         _state.update {
             it.copy(
-                pointerPadOpen = true,
                 pointerPadOptions = PointerPadOptions(
                     controlId = button.id,
                     label = button.label,
@@ -793,24 +805,52 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ),
             )
         }
-        Diag.i("Pointer pad opened control=${button.id} page=${page.id}")
+        return true
     }
 
     /**
-     * Closes the pad and aborts the active gesture. A `cancel` releases every
-     * held button on the desktop; pass false when the socket is already gone.
+     * Opens the full-screen pad for a trackpad control. The pad's first touch
+     * sends `pointer/start`; nothing is sent when the tile is merely expanded.
+     */
+    fun openPointerPad(button: DeckButton) {
+        if (!_state.value.pointerCapable) {
+            notePointerUnsupported()
+            return
+        }
+        if (!armPointer(button)) return
+        val pageId = pointerPageId ?: return
+        _state.update { it.copy(pointerPadOpen = true) }
+        Diag.i("Pointer pad opened control=${button.id} page=$pageId")
+    }
+
+    /**
+     * Closes the pad and aborts any active pointer session. A `cancel` releases
+     * every held button on the desktop; pass false when the socket is gone.
      */
     fun closePointerPad(sendCancel: Boolean = true) {
         val wasOpen = _state.value.pointerPadOpen
+        abortPointerSession(sendCancel = sendCancel)
+        resetPointerState()
+        if (wasOpen) {
+            Diag.i("Pointer pad closed")
+            _state.update { it.copy(pointerPadOpen = false) }
+        }
+    }
+
+    /**
+     * Ends an inline tile gesture without touching the full-screen overlay
+     * state. While a drag-lock button is still held the armed session stays
+     * alive so the 2 s keepalive keeps the desktop from releasing it.
+     */
+    fun endInlinePointer(controlId: String) {
+        if (_state.value.pointerPadOpen) return
+        if (controlId != pointerControlId) return
         pointerFlushJob?.cancel()
         pointerFlushJob = null
-        stopPointerKeepalive()
-        if (wasOpen && sendCancel && connection.isConnected() && pointerControlId != null) {
-            sendPointerNow("cancel")
-        }
-        if (wasOpen) Diag.i("Pointer pad closed")
-        resetPointerState()
-        if (wasOpen) _state.update { it.copy(pointerPadOpen = false) }
+        pointerAccumulator.clear()
+        pointerGestureActive = false
+        pointerStartSent = false
+        if (pointerHeldButtons.isEmpty()) resetPointerState()
     }
 
     fun onPointerPhase(controlId: String, phase: String) {
@@ -832,7 +872,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         buttons: List<PointerButtonEvent> = emptyList(),
     ) {
         val snapshot = _state.value
-        if (!snapshot.pointerPadOpen || controlId != pointerControlId) return
+        // Inline and full-screen gestures share the same armed session; the
+        // overlay state is irrelevant here.
+        if (controlId != pointerControlId) return
+        if (pointerProfileId == null || pointerPageId == null) return
         if (!snapshot.pointerCapable || snapshot.connection != ConnectionStatus.CONNECTED) {
             closePointerPad(sendCancel = false)
             return
@@ -844,6 +887,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 pointerFlushJob = null
                 pointerAccumulator.clear()
                 pointerGestureActive = true
+                pointerStartSent = true
                 pointerLastFlushAt = SystemClock.elapsedRealtime()
                 sendPointerNow("start")
             }
@@ -852,6 +896,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (!pointerGestureActive) {
                     // Defensive: a move without a start still opens the gesture.
                     pointerGestureActive = true
+                    pointerStartSent = true
                     pointerLastFlushAt = SystemClock.elapsedRealtime()
                     sendPointerNow("start")
                 }
@@ -888,6 +933,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
                 pointerGestureActive = false
+                pointerStartSent = false
                 updatePointerButtons(buttons)
             }
 
@@ -895,8 +941,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 pointerFlushJob?.cancel()
                 pointerFlushJob = null
                 pointerAccumulator.clear()
-                if (pointerGestureActive) sendPointerNow("cancel")
+                if (pointerStartSent) sendPointerNow("cancel")
                 pointerGestureActive = false
+                pointerStartSent = false
                 pointerHeldButtons.clear()
                 stopPointerKeepalive()
             }
@@ -963,15 +1010,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         pointerKeepaliveJob = viewModelScope.launch {
             while (true) {
                 delay(POINTER_KEEPALIVE_MS)
-                if (!_state.value.pointerPadOpen ||
-                    pointerHeldButtons.isEmpty()
-                ) {
+                if (pointerHeldButtons.isEmpty() || pointerControlId == null) {
                     break
                 }
                 if (connection.isConnected()) sendPointerNow("move")
             }
             pointerKeepaliveJob = null
         }
+    }
+
+    /**
+     * Aborts the gesture (sending `cancel` when the socket is still alive) but
+     * leaves the armed ids and overlay state for the caller to reset.
+     */
+    private fun abortPointerSession(sendCancel: Boolean) {
+        pointerFlushJob?.cancel()
+        pointerFlushJob = null
+        pointerAccumulator.clear()
+        if (sendCancel && connection.isConnected() && pointerControlId != null &&
+            (pointerStartSent || pointerHeldButtons.isNotEmpty())
+        ) {
+            sendPointerNow("cancel")
+        }
+        pointerGestureActive = false
+        pointerStartSent = false
+        pointerHeldButtons.clear()
+        stopPointerKeepalive()
     }
 
     private fun stopPointerKeepalive() {
@@ -989,6 +1053,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         pointerProfileId = null
         pointerPageId = null
         pointerGestureActive = false
+        pointerStartSent = false
         pointerLastFlushAt = 0L
     }
 

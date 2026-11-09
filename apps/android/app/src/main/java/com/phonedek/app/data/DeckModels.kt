@@ -390,6 +390,7 @@ private fun ControlBindingDto.normalized(): ControlBindingDto? {
 
         "pointer" -> ControlBindingDto(
             type = "pointer",
+            mode = if (mode?.trim()?.lowercase() == "fullscreen") "fullscreen" else "inline",
             sensitivity = sensitivity
                 ?.takeIf { it.isFinite() }
                 ?.coerceIn(0.25f, 3f)
