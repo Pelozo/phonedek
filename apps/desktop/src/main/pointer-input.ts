@@ -34,6 +34,8 @@ interface PointerClientState {
   times: number[]
   lastSeen: number
   watchdog: NodeJS.Timeout | null
+  /** Move frames accepted in the current gesture (diagnostics). */
+  moves: number
 }
 
 const DEFAULT_WATCHDOG_MS = 6_000
@@ -201,6 +203,7 @@ export class PointerRouter {
         times: [],
         lastSeen: this.now(),
         watchdog: null,
+        moves: 0,
       }
       this.clients.set(clientId, state)
     }
@@ -234,6 +237,7 @@ export class PointerRouter {
     state.target = target
     state.residualScrollX = 0
     state.residualScrollY = 0
+    state.moves = 0
     this.touchWatchdog(clientId, state)
     this.logger?.info(`Pointer pad opened (${triggerLabel(target)}) by ${clientId}`)
     return { seq: message.seq, ok: true }
@@ -264,7 +268,15 @@ export class PointerRouter {
     state.residualScrollX -= scrollX
     state.residualScrollY -= scrollY
 
-    if (dx !== undefined || dy !== undefined) this.sender.move(dx, dy)
+    if (dx !== undefined || dy !== undefined) {
+      if (state.moves === 0) {
+        this.logger?.info(
+          `Pointer move dx=${dx?.toFixed(3) ?? 0} dy=${dy?.toFixed(3) ?? 0}`,
+        )
+      }
+      state.moves += 1
+      this.sender.move(dx, dy)
+    }
     if (scrollX !== 0 || scrollY !== 0) this.sender.scroll(scrollX, scrollY)
 
     const buttons = message.buttons ?? []
@@ -275,7 +287,7 @@ export class PointerRouter {
     this.touchWatchdog(clientId, state)
 
     if (message.phase === 'end') {
-      this.logger?.info(`Pointer gesture ended by ${clientId}`)
+      this.logger?.info(`Pointer gesture ended by ${clientId} (${state.moves} moves)`)
     }
     return { seq: message.seq, ok: true }
   }
