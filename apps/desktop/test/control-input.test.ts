@@ -340,3 +340,65 @@ describe('ControlInputRouter', () => {
     router.dispose()
   })
 })
+
+describe('OBS control input', () => {
+  const obsVolume: ControlSpec = {
+    kind: 'slider',
+    emit: 'value',
+    binding: { type: 'obs', target: 'inputVolume', input: 'Mic/Aux' },
+    min: 0,
+    max: 200,
+    step: 1,
+    initial: 100,
+    unit: '%',
+  }
+
+  it('routes the latest normalized OBS value to applyAbsolute', async () => {
+    vi.useFakeTimers()
+    const applied: Array<{ value: number; type: string }> = []
+    const router = new ControlInputRouter({
+      execute: async () => ({ ok: true }),
+      applyAbsolute: async (control, value) => {
+        applied.push({ value, type: control.binding.type })
+        return { ok: true }
+      },
+      flushMs: 50,
+    })
+
+    await router.handle(message('move', undefined, 'btn-obs', 0.2), target(obsVolume, 'OBS'))
+    await router.handle(message('move', undefined, 'btn-obs', 0.85), target(obsVolume, 'OBS'))
+    expect(applied).toEqual([])
+    await vi.advanceTimersByTimeAsync(50)
+    expect(applied).toEqual([{ value: 0.85, type: 'obs' }])
+
+    await expect(
+      router.handle(message('end', undefined, 'btn-obs'), target(obsVolume, 'OBS')),
+    ).resolves.toEqual({ ok: true })
+    expect(applied).toEqual([{ value: 0.85, type: 'obs' }])
+    router.dispose()
+  })
+
+  it('rejects an OBS control with a delta emit', async () => {
+    const router = new ControlInputRouter({ execute: async () => ({ ok: true }) })
+    const delta: ControlSpec = {
+      kind: 'slider',
+      emit: 'delta',
+      binding: { type: 'obs', target: 'inputVolume', input: 'Mic/Aux' },
+    }
+    const result = await router.handle(message('move', 0.5, 'btn-obs'), target(delta, 'OBS'))
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/OBS input volume requires a value control/)
+    router.dispose()
+  })
+
+  it('reports a clear error when OBS is not wired', async () => {
+    const router = new ControlInputRouter({ execute: async () => ({ ok: true }) })
+    const result = await router.handle(
+      message('move', undefined, 'btn-obs', 0.5),
+      target(obsVolume, 'OBS'),
+    )
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/OBS input volume is not available/)
+    router.dispose()
+  })
+})

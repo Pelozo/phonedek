@@ -307,3 +307,35 @@ describe('ActionExecutor', () => {
     expect(log).toEqual(['start:A', 'end:A', 'start:B', 'end:B'])
   })
 })
+
+describe('ActionExecutor OBS mute', () => {
+  it('executes an OBS toggleMute plan step through the host hook', async () => {
+    const log: string[] = []
+    const host: HostActions = {
+      ...fakeHost(log),
+      async toggleObsInputMute(input?: string) {
+        log.push(`obs-mute:${input ?? '(auto)'}`)
+      },
+    }
+    const executor = new ActionExecutor(fakeKeys(log), host)
+    await expect(
+      executor.execute(
+        [
+          { type: 'obs', action: 'toggleMute', input: 'Mic/Aux' },
+          { type: 'delay', ms: 5 },
+          { type: 'obs', action: 'toggleMute' },
+        ],
+        'obs',
+      ),
+    ).resolves.toEqual({ ok: true })
+    expect(log).toEqual(['obs-mute:Mic/Aux', 'delay:5', 'obs-mute:(auto)'])
+  })
+
+  it('returns a clear error when OBS is not wired', async () => {
+    const log: string[] = []
+    const executor = new ActionExecutor(fakeKeys(log), fakeHost(log))
+    const result = await executor.execute([{ type: 'obs', action: 'toggleMute' }], 'obs')
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/OBS is not available on this desktop/)
+  })
+})

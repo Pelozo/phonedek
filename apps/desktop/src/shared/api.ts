@@ -23,6 +23,8 @@ export interface ServerInfoView {
   platform: string
   configPath: string
   logPath: string | null
+  /** Live OBS connection status; never includes the password. */
+  obsStatus: ObsStatusView
 }
 
 export interface SettingsView {
@@ -35,6 +37,51 @@ export interface SettingsView {
   pairHost: string
   /** macOS capture folder; empty = OS Desktop. */
   screenshotDirectory: string
+  obsEnabled: boolean
+  obsHost: string
+  obsPort: number
+  /** True when a password is stored; the secret itself is never exposed. */
+  obsHasPassword: boolean
+}
+
+export type ObsStateView =
+  | 'disabled'
+  | 'connecting'
+  | 'connected'
+  | 'auth-failed'
+  | 'disconnected'
+  | 'reconnecting'
+  | 'error'
+
+export interface ObsStatusView {
+  state: ObsStateView
+  host: string
+  port: number
+  obsVersion?: string
+  websocketVersion?: string
+  lastError?: string
+  nextRetryMs?: number
+}
+
+export interface ObsInputView {
+  name: string
+  kind: string
+  audio: boolean
+}
+
+export interface ObsInputsResult {
+  ok: boolean
+  inputs?: ObsInputView[]
+  error?: string
+}
+
+export interface ObsSettingsInput {
+  enabled?: boolean
+  host?: string
+  port?: number
+  /** Omitted/empty keeps the stored password; `clearPassword` removes it. */
+  password?: string
+  clearPassword?: boolean
 }
 
 export type UpdateState =
@@ -118,6 +165,11 @@ export interface PhoneDeckApi {
   setPhoneBrightness(clientId: string, level: number | null): Promise<OperationResult>
   setScreenshotDirectory(path: string): Promise<OperationResult>
   pickScreenshotDirectory(): Promise<string | null>
+  getObsStatus(): Promise<ObsStatusView>
+  setObsSettings(input: ObsSettingsInput): Promise<OperationResult>
+  listObsInputs(): Promise<ObsInputsResult>
+  testObsInputVolume(input: string | undefined, percent: number): Promise<PressResult>
+  testObsMute(input?: string): Promise<PressResult>
   exportConfig(): Promise<OperationResult>
   importConfig(): Promise<SaveConfigResult>
   openLogs(): Promise<void>
@@ -154,6 +206,11 @@ export const IPC = {
   setPhoneBrightness: 'phonedek:set-phone-brightness',
   setScreenshotDirectory: 'phonedek:set-screenshot-directory',
   pickScreenshotDirectory: 'phonedek:pick-screenshot-directory',
+  getObsStatus: 'phonedek:obs-get-status',
+  setObsSettings: 'phonedek:obs-set-settings',
+  listObsInputs: 'phonedek:obs-list-inputs',
+  testObsInputVolume: 'phonedek:obs-test-volume',
+  testObsMute: 'phonedek:obs-test-mute',
   exportConfig: 'phonedek:export-config',
   importConfig: 'phonedek:import-config',
   openLogs: 'phonedek:open-logs',

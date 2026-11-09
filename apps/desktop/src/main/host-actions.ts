@@ -27,6 +27,8 @@ export interface HostActions {
   setInputGain(level: number): Promise<void>
   /** Toggle mute on the default capture device. */
   toggleInputMute(): Promise<void>
+  /** Toggle mute on one OBS input (optional; absent when OBS is not wired). */
+  toggleObsInputMute?(input?: string): Promise<void>
 }
 
 export interface HostActionOptions {
@@ -45,6 +47,8 @@ export interface HostActionOptions {
   setSystemInputGain?: (level: number) => Promise<void>
   /** Test seam / shared controller for microphone mute toggling. */
   toggleSystemInputMute?: () => Promise<void>
+  /** Test seam / shared controller for toggling an OBS input's mute. */
+  toggleObsInputMute?: (input?: string) => Promise<void>
   /** Overrides the user's home directory (used by tests to avoid touching ~/Desktop). */
   homeDir?: string
   logger?: Logger
@@ -401,6 +405,15 @@ export function createHostActions(options: HostActionOptions = {}): HostActions 
       }
       logger?.info('Toggled microphone mute')
     },
+
+    ...(options.toggleObsInputMute
+      ? {
+          async toggleObsInputMute(input?: string) {
+            await options.toggleObsInputMute!(input)
+            logger?.info(input ? `Toggled OBS input mute: ${input}` : 'Toggled OBS input mute')
+          },
+        }
+      : {}),
 
     async screenshot() {
       if (platform !== 'darwin' && platform !== 'win32') {

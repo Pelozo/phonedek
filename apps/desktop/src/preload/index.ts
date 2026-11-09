@@ -4,6 +4,9 @@ import { IPC } from '../shared/api'
 import type {
   AppState,
   AssetPickResult,
+  ObsInputsResult,
+  ObsSettingsInput,
+  ObsStatusView,
   OperationResult,
   PermissionStatus,
   PhoneDeckApi,
@@ -42,6 +45,14 @@ const api: PhoneDeckApi = {
     ipcRenderer.invoke(IPC.setScreenshotDirectory, path),
   pickScreenshotDirectory: (): Promise<string | null> =>
     ipcRenderer.invoke(IPC.pickScreenshotDirectory),
+  getObsStatus: (): Promise<ObsStatusView> => ipcRenderer.invoke(IPC.getObsStatus),
+  setObsSettings: (input: ObsSettingsInput): Promise<OperationResult> =>
+    ipcRenderer.invoke(IPC.setObsSettings, input),
+  listObsInputs: (): Promise<ObsInputsResult> => ipcRenderer.invoke(IPC.listObsInputs),
+  testObsInputVolume: (input: string | undefined, percent: number): Promise<PressResult> =>
+    ipcRenderer.invoke(IPC.testObsInputVolume, input, percent),
+  testObsMute: (input?: string): Promise<PressResult> =>
+    ipcRenderer.invoke(IPC.testObsMute, input),
   exportConfig: (): Promise<OperationResult> => ipcRenderer.invoke(IPC.exportConfig),
   importConfig: (): Promise<SaveConfigResult> => ipcRenderer.invoke(IPC.importConfig),
   openLogs: (): Promise<void> => ipcRenderer.invoke(IPC.openLogs),

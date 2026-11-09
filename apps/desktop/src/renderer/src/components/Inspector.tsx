@@ -74,6 +74,8 @@ function defaultAction(type: Action['type'], platform: string): Action {
       return { type: 'delay', ms: 250 }
     case 'page':
       return { type: 'page', direction: 'next' }
+    case 'obs':
+      return { type: 'obs', action: 'toggleMute' }
   }
 }
 

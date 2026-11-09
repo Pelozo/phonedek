@@ -20,6 +20,9 @@ export const CONTROL_STATE_CAPABILITY = 'control-state-v1' as const
 /** Desktop capability for phone keyboard text/key injection. */
 export const KEYBOARD_CAPABILITY = 'keyboard-v1' as const
 
+/** Desktop capability for OBS WebSocket input volume/mute control. */
+export const OBS_CAPABILITY = 'obs-v1' as const
+
 export const DEFAULT_HTTP_PORT = 47654
 export const DISCOVERY_PORT = 47655
 export const DISCOVERY_MAGIC = 'PHONEDECK'
@@ -214,6 +217,18 @@ export interface MicAction {
   action: 'toggleMute'
 }
 
+/**
+ * Toggle mute on an OBS input.
+ *
+ * `input` is an OBS input name (scene-collection scoped). Omitted = desktop
+ * fallback: first audio-like input, then the first input.
+ */
+export interface ObsAction {
+  type: 'obs'
+  action: 'toggleMute'
+  input?: string
+}
+
 /** A button executes its actions in order. */
 export type Action =
   | HotkeyAction
@@ -225,11 +240,13 @@ export type Action =
   | MediaAction
   | DelayAction
   | PageAction
+  | ObsAction
 
 /**
- * Everything the host can execute. Mic actions are accepted by ActionSchema and
- * the plan builder but deliberately stay out of `Action` so older renderers do
- * not have to handle a new action type.
+ * Everything the host can execute. `MicAction` is accepted by ActionSchema and
+ * the plan builder but deliberately stays out of `Action` so older renderers do
+ * not have to handle it. OBS actions are part of `Action` because the UI needs
+ * to render/edit them directly.
  */
 export type ExecutableAction = Action | MicAction
 
@@ -239,6 +256,18 @@ export interface CellSpan {
   columns: number
   /** 1..10 cells tall. MVP renderers may only honour rows = 1. */
   rows: number
+}
+
+/**
+ * One OBS input's volume, in percent (100 = 0 dB, 200 = +6 dB).
+ *
+ * `input` is scene-collection scoped. Omitted = desktop fallback: the first
+ * audio-like input, then the first input. Max 128 chars.
+ */
+export interface ObsInputVolumeBinding {
+  type: 'obs'
+  target: 'inputVolume'
+  input?: string
 }
 
 /**
@@ -271,6 +300,7 @@ export type ControlBinding =
       type: 'mic'
       mode: 'gain'
     }
+  | ObsInputVolumeBinding
 
 /**
  * Pointer binding used by a `trackpad` control.
@@ -443,6 +473,12 @@ export interface MicPlanStep {
   action: 'toggleMute'
 }
 
+export interface ObsPlanStep {
+  kind: 'obs'
+  action: 'toggleMute'
+  input?: string
+}
+
 export type PlanStep =
   | KeyPlanStep
   | TextPlanStep
@@ -454,6 +490,7 @@ export type PlanStep =
   | CommandPlanStep
   | PagePlanStep
   | MicPlanStep
+  | ObsPlanStep
 
 export type KeyboardPlanStep = KeyPlanStep | TextPlanStep | DelayPlanStep | MediaPlanStep | MousePlanStep
 

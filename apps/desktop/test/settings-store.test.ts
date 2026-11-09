@@ -43,6 +43,75 @@ describe('SettingsStore tray preference', () => {
   })
 })
 
+describe('SettingsStore OBS settings', () => {
+  it('defaults OBS to disabled on localhost:4455 with no password', () => {
+    const settings = new SettingsStore(tempDir())
+    expect(settings.get().obsEnabled).toBe(false)
+    expect(settings.get().obsHost).toBe('127.0.0.1')
+    expect(settings.get().obsPort).toBe(4455)
+    expect(settings.get().obsPassword).toBe('')
+    expect(defaultSettings().obsEnabled).toBe(false)
+    expect(defaultSettings().obsHost).toBe('127.0.0.1')
+    expect(defaultSettings().obsPort).toBe(4455)
+  })
+
+  it('keeps old settings files valid and defaults missing OBS fields', () => {
+    const dir = tempDir()
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ port: 49004, discovery: false }))
+    const settings = new SettingsStore(dir)
+    expect(settings.get().port).toBe(49004)
+    expect(settings.get().obsEnabled).toBe(false)
+    expect(settings.get().obsHost).toBe('127.0.0.1')
+    expect(settings.get().obsPort).toBe(4455)
+    expect(settings.get().obsPassword).toBe('')
+  })
+
+  it('persists host, port and password and preserves spaces in the secret', () => {
+    const dir = tempDir()
+    const settings = new SettingsStore(dir)
+    settings.update({
+      obsEnabled: true,
+      obsHost: 'obs.local',
+      obsPort: 4460,
+      obsPassword: '  secret pass  ',
+    })
+    const reloaded = new SettingsStore(dir)
+    expect(reloaded.get().obsEnabled).toBe(true)
+    expect(reloaded.get().obsHost).toBe('obs.local')
+    expect(reloaded.get().obsPort).toBe(4460)
+    expect(reloaded.get().obsPassword).toBe('  secret pass  ')
+  })
+
+  it('accepts localhost, IPv4, bracketed IPv6 and hostnames; rejects unsafe values', () => {
+    const dir = tempDir()
+    const settings = new SettingsStore(dir)
+    for (const host of ['localhost', '192.168.1.20', '[::1]', 'obs-box.local']) {
+      settings.update({ obsHost: host })
+      expect(settings.get().obsHost).toBe(host)
+    }
+    for (const host of ['ws://evil', 'http://x', 'a/b', 'a b', '::1', '.bad', 'bad..host', '']) {
+      settings.update({ obsHost: host })
+      expect(settings.get().obsHost).toBe('127.0.0.1')
+    }
+  })
+
+  it('falls back on invalid ports and truncates an overlong password', () => {
+    const dir = tempDir()
+    const settings = new SettingsStore(dir)
+    for (const port of [0, 65536, 4455.5, -1, '4455']) {
+      settings.update({ obsPort: port as unknown as number })
+      expect(settings.get().obsPort).toBe(4455)
+    }
+    settings.update({ obsPort: 1 })
+    expect(settings.get().obsPort).toBe(1)
+    settings.update({ obsPort: 65535 })
+    expect(settings.get().obsPort).toBe(65535)
+
+    settings.update({ obsPassword: 'x'.repeat(300) })
+    expect(settings.get().obsPassword).toHaveLength(256)
+  })
+})
+
 describe('SettingsStore pointer control switch', () => {
   it('defaults allowPointerControl to true', () => {
     const settings = new SettingsStore(tempDir())

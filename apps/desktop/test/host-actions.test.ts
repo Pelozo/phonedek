@@ -265,3 +265,23 @@ describe('absolute volume', () => {
     await expect(other.setVolume(50)).rejects.toThrow(/not implemented on sunos/)
   })
 })
+
+describe('OBS input mute host action', () => {
+  it('forwards the optional input to the injected hook', async () => {
+    const seen: Array<string | undefined> = []
+    const host = createHostActions({
+      platform: 'linux',
+      toggleObsInputMute: async (input) => {
+        seen.push(input)
+      },
+    })
+    await host.toggleObsInputMute?.('Mic/Aux')
+    await host.toggleObsInputMute?.()
+    expect(seen).toEqual(['Mic/Aux', undefined])
+  })
+
+  it('omits the hook when OBS is not wired', () => {
+    const host = createHostActions({ platform: 'linux' })
+    expect(host.toggleObsInputMute).toBeUndefined()
+  })
+})

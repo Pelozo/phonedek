@@ -125,20 +125,21 @@ export class ControlInputRouter {
 
   private isValueControl(control: ControlSpec): boolean {
     if (control.binding.type === 'mic') return true
+    if (control.binding.type === 'obs') return true
     return control.binding.type === 'volume' && control.binding.mode === 'absolute'
   }
 
   private unsupportedReason(control: ControlSpec): string | null {
     if (this.isValueControl(control)) {
       if (control.emit !== 'value') {
-        return control.binding.type === 'mic'
-          ? 'Mic gain requires a value control.'
-          : 'Absolute volume requires a value control.'
+        if (control.binding.type === 'mic') return 'Mic gain requires a value control.'
+        if (control.binding.type === 'obs') return 'OBS input volume requires a value control.'
+        return 'Absolute volume requires a value control.'
       }
       if (!this.applyAbsolute) {
-        return control.binding.type === 'mic'
-          ? 'Microphone gain is not available on this desktop.'
-          : 'Absolute volume is not available on this desktop.'
+        if (control.binding.type === 'mic') return 'Microphone gain is not available on this desktop.'
+        if (control.binding.type === 'obs') return 'OBS input volume is not available on this desktop.'
+        return 'Absolute volume is not available on this desktop.'
       }
       return null
     }

@@ -142,6 +142,12 @@ export class ActionExecutor {
           case 'mic':
             await this.host.toggleInputMute()
             break
+          case 'obs':
+            if (!this.host.toggleObsInputMute) {
+              throw new Error('OBS is not available on this desktop.')
+            }
+            await this.host.toggleObsInputMute(step.input)
+            break
           default:
             if (KEYBOARD_KINDS.has(step.kind)) {
               // Win+Shift+S is the screenshot intent on Windows (Snipping Tool)

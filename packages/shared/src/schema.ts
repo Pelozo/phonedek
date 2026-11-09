@@ -138,6 +138,11 @@ const micSchema = z.object({
   type: z.literal('mic'),
   action: z.literal('toggleMute'),
 })
+const obsSchema = z.object({
+  type: z.literal('obs'),
+  action: z.literal('toggleMute'),
+  input: z.string().min(1).max(128).optional(),
+})
 
 export const MacroStepSchema = z.discriminatedUnion('type', [
   hotkeySchema,
@@ -166,6 +171,7 @@ export const ActionSchema = z.union([
   delaySchema,
   pageSchema,
   micSchema,
+  obsSchema,
 ])
 
 export const GridSchema = z.object({
@@ -211,6 +217,11 @@ export const ControlBindingSchema = z.union([
   z.object({
     type: z.literal('mic'),
     mode: z.literal('gain'),
+  }),
+  z.object({
+    type: z.literal('obs'),
+    target: z.literal('inputVolume'),
+    input: z.string().min(1).max(128).optional(),
   }),
 ])
 
@@ -261,6 +272,29 @@ const sliderOrDialControlSchema = z
         path: ['emit'],
         message: 'Mic gain requires emit "value"',
       })
+    }
+    if (control.binding.type === 'obs') {
+      if (control.emit !== 'value') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['emit'],
+          message: 'OBS input volume requires emit "value"',
+        })
+      }
+      if (control.min !== undefined && control.min !== 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['min'],
+          message: 'OBS input volume requires min 0 (or omit it)',
+        })
+      }
+      if (control.max !== undefined && (control.max < 1 || control.max > 2000)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['max'],
+          message: 'OBS input volume max must be between 1 and 2000',
+        })
+      }
     }
     if (control.min !== undefined && control.max !== undefined && control.min >= control.max) {
       ctx.addIssue({

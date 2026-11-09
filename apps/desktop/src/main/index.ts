@@ -25,15 +25,25 @@ import {
 } from './pointer-sender'
 import { createPairInfo } from './qr'
 import { DeckServer, type PressContext } from './server'
-import { SettingsStore } from './settings-store'
+import {
+  SettingsStore,
+  sanitizeObsHost,
+  sanitizeObsPort,
+  type AppSettings,
+} from './settings-store'
 import { UpdateService } from './updater'
 import { isRunningAppSigned, resolveUpdatePolicy } from './update-policy'
 import { createVolumeReader, HelperVolumeProbe, type VolumeReader } from './volume-source'
 import { createMicrophone, parseWindowsInputPayload, type Microphone } from './microphone-source'
+import { ObsClient } from './obs-client'
+import { ObsStateSource, obsControlPercent } from './obs-source'
 import { IPC } from '../shared/api'
 import type {
   AppState,
   AssetPickResult,
+  ObsInputsResult,
+  ObsSettingsInput,
+  ObsStatusView,
   OperationResult,
   PairView,
   PermissionStatus,
@@ -59,6 +69,8 @@ let inputRouter: ControlInputRouter | null = null
 let controlState: ControlStateService | null = null
 let volumeProbe: HelperVolumeProbe | null = null
 let microphone: Microphone | null = null
+let obsClient: ObsClient | null = null
+let obsSource: ObsStateSource | null = null
 let pointerSender: PointerSender | null = null
 let pointerRouter: PointerRouter | null = null
 /** A native import/destructive dialog is waiting for a decision. */
@@ -187,6 +199,10 @@ async function buildServerInfo(): Promise<ServerInfoView> {
       allowPointerControl: currentSettings.allowPointerControl,
       pairHost: currentSettings.pairHost,
       screenshotDirectory: currentSettings.screenshotDirectory,
+      obsEnabled: currentSettings.obsEnabled,
+      obsHost: currentSettings.obsHost,
+      obsPort: currentSettings.obsPort,
+      obsHasPassword: currentSettings.obsPassword.length > 0,
     },
     clients: server?.getClients() ?? [],
     error: serverError,
@@ -194,6 +210,12 @@ async function buildServerInfo(): Promise<ServerInfoView> {
     platform: process.platform,
     configPath: store.file,
     logPath: logger.logPath,
+    obsStatus:
+      obsClient?.status ?? {
+        state: 'disabled',
+        host: currentSettings.obsHost,
+        port: currentSettings.obsPort,
+      },
   }
 }
 
@@ -209,6 +231,10 @@ async function buildState(): Promise<AppState> {
       allowPointerControl: settings.get().allowPointerControl,
       pairHost: settings.get().pairHost,
       screenshotDirectory: settings.get().screenshotDirectory,
+      obsEnabled: settings.get().obsEnabled,
+      obsHost: settings.get().obsHost,
+      obsPort: settings.get().obsPort,
+      obsHasPassword: settings.get().obsPassword.length > 0,
     },
   }
 }
@@ -442,6 +468,18 @@ function registerIpc(): void {
         if (button.control.binding.type === 'mic') {
           return executor.executeInputGain(value * 100, `test ${button.label || 'control'}`)
         }
+        if (button.control.binding.type === 'obs') {
+          if (!obsSource) return { ok: false, error: 'OBS is not available on this desktop.' }
+          const ceiling = button.control.max ?? 200
+          const percent = obsControlPercent(value, ceiling)
+          try {
+            const input = await obsSource.setVolume(button.control.binding.input, percent)
+            await controlState?.noteObsWritten(input, percent)
+            return { ok: true }
+          } catch (error) {
+            return { ok: false, error: error instanceof Error ? error.message : String(error) }
+          }
+        }
         return executor.executeVolume(value * 100, `test ${button.label || 'control'}`)
       }
 
@@ -517,6 +555,119 @@ function registerIpc(): void {
       properties: ['openDirectory', 'createDirectory'],
     })
     return result.canceled ? null : (result.filePaths[0] ?? null)
+  })
+
+  ipcMain.handle(IPC.getObsStatus, async (): Promise<ObsStatusView> => {
+    if (obsClient) return obsClient.status
+    const current = settings.get()
+    return { state: 'disabled', host: current.obsHost, port: current.obsPort }
+  })
+
+  ipcMain.handle(
+    IPC.setObsSettings,
+    async (_event, input: unknown): Promise<OperationResult> => {
+      if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+        return { ok: false, error: 'Invalid OBS settings', state: await buildState() }
+      }
+      const value = input as ObsSettingsInput
+      const patch: Partial<AppSettings> = {}
+
+      if (value.enabled !== undefined) {
+        if (typeof value.enabled !== 'boolean') {
+          return { ok: false, error: 'OBS enable must be true or false', state: await buildState() }
+        }
+        patch.obsEnabled = value.enabled
+      }
+      if (value.host !== undefined) {
+        if (typeof value.host !== 'string') {
+          return { ok: false, error: 'OBS host must be text', state: await buildState() }
+        }
+        const clean = sanitizeObsHost(value.host)
+        if (clean !== value.host.trim()) {
+          return {
+            ok: false,
+            error: 'Enter localhost, an IP address or a hostname (no scheme or path).',
+            state: await buildState(),
+          }
+        }
+        patch.obsHost = clean
+      }
+      if (value.port !== undefined) {
+        const port = sanitizeObsPort(value.port)
+        if (port !== value.port) {
+          return { ok: false, error: 'OBS port must be between 1 and 65535', state: await buildState() }
+        }
+        patch.obsPort = port
+      }
+      if (value.clearPassword === true) {
+        patch.obsPassword = ''
+      } else if (value.password !== undefined) {
+        if (typeof value.password !== 'string') {
+          return { ok: false, error: 'OBS password must be text', state: await buildState() }
+        }
+        if (value.password.length > 256) {
+          return { ok: false, error: 'OBS password is too long', state: await buildState() }
+        }
+        if (value.password.length > 0) patch.obsPassword = value.password
+      }
+
+      const updated = settings.update(patch)
+      obsClient?.configure({
+        host: updated.obsHost,
+        port: updated.obsPort,
+        password: updated.obsPassword,
+        enabled: updated.obsEnabled,
+      })
+      if (updated.obsEnabled) obsClient?.start()
+      await pushServerInfo()
+      return { ok: true, state: await buildState() }
+    },
+  )
+
+  ipcMain.handle(IPC.listObsInputs, async (): Promise<ObsInputsResult> => {
+    if (!obsSource) return { ok: false, error: 'OBS is not available on this desktop.' }
+    try {
+      return { ok: true, inputs: await obsSource.listInputs(true) }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle(
+    IPC.testObsInputVolume,
+    async (_event, input: unknown, percent: unknown): Promise<PressResult> => {
+      if (input !== undefined && typeof input !== 'string') {
+        return { ok: false, error: 'OBS input name must be text' }
+      }
+      if (typeof percent !== 'number' || !Number.isFinite(percent) || percent < 0 || percent > 2000) {
+        return { ok: false, error: 'OBS volume must be between 0 and 2000%' }
+      }
+      if (!obsSource) return { ok: false, error: 'OBS is not available on this desktop.' }
+      try {
+        const resolved = await obsSource.setVolume(
+          typeof input === 'string' ? input : undefined,
+          percent,
+        )
+        await controlState?.noteObsWritten(resolved, percent)
+        return { ok: true }
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    },
+  )
+
+  ipcMain.handle(IPC.testObsMute, async (_event, input: unknown): Promise<PressResult> => {
+    if (input !== undefined && typeof input !== 'string') {
+      return { ok: false, error: 'OBS input name must be text' }
+    }
+    if (!obsSource) return { ok: false, error: 'OBS is not available on this desktop.' }
+    try {
+      const result = await obsSource.toggleMute(typeof input === 'string' ? input : undefined)
+      await controlState?.noteObsChanged(result.input)
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
   })
 
   ipcMain.handle(
@@ -795,6 +946,35 @@ async function bootstrap(): Promise<void> {
         }
       : undefined
   microphone = createMicrophone(process.platform, windowsMic ? { windows: windowsMic } : {})
+  obsClient = new ObsClient({
+    host: settings.get().obsHost,
+    port: settings.get().obsPort,
+    password: settings.get().obsPassword,
+    enabled: settings.get().obsEnabled,
+    logger,
+  })
+  obsSource = new ObsStateSource(obsClient, { logger })
+  obsSource.onChange((input) => {
+    void controlState?.noteObsChanged(input)
+  })
+  obsClient.onStatus((status) => {
+    if (status.state === 'connected') {
+      logger.info(
+        `OBS identified at ${status.host}:${status.port}` +
+          `${status.obsVersion ? ` (OBS ${status.obsVersion})` : ''}`,
+      )
+    } else if (status.lastError && status.state !== 'reconnecting') {
+      logger.warn(`OBS ${status.state}: ${status.lastError}`)
+    }
+    void pushServerInfo()
+  })
+  obsClient.configure({
+    host: settings.get().obsHost,
+    port: settings.get().obsPort,
+    password: settings.get().obsPassword,
+    enabled: settings.get().obsEnabled,
+  })
+
   const host = createHostActions({
     platform: process.platform,
     logger,
@@ -821,6 +1001,11 @@ async function bootstrap(): Promise<void> {
           },
         }
       : {}),
+    toggleObsInputMute: async (input?: string) => {
+      if (!obsSource) throw new Error('OBS is not available on this desktop.')
+      const result = await obsSource.toggleMute(input)
+      await controlState?.noteObsChanged(result.input)
+    },
   })
   executor = new ActionExecutor(keySender, host, logger, {
     onScreenshot: (path) => {
@@ -847,20 +1032,25 @@ async function bootstrap(): Promise<void> {
           : null)
       : createVolumeReader(process.platform)
   controlState =
-    volumeReader || microphone
+    volumeReader || microphone || settings.get().obsEnabled
       ? new ControlStateService({
           ...(volumeReader ? { reader: volumeReader } : {}),
           ...(microphone ? { micReader: microphone } : {}),
+          ...(obsSource ? { obsReader: obsSource } : {}),
           logger,
         })
       : null
   if (controlState) {
-    const sources = [volumeReader ? 'volume' : null, microphone ? 'microphone' : null]
+    const sources = [
+      volumeReader ? 'volume' : null,
+      microphone ? 'microphone' : null,
+      obsSource ? 'OBS' : null,
+    ]
       .filter(Boolean)
       .join(' + ')
     logger.info(`Live control state enabled on ${process.platform} (${sources})`)
   } else {
-    logger.info('Live control state disabled: no system volume or microphone reader on this host')
+    logger.info('Live control state disabled: no system volume, microphone or OBS reader on this host')
   }
 
   const router = new ControlInputRouter({
@@ -868,6 +1058,19 @@ async function bootstrap(): Promise<void> {
     applyAbsolute: async (control, value, label) => {
       if (control.binding.type === 'mic') {
         return executor.executeInputGain(value * 100, label)
+      }
+      if (control.binding.type === 'obs') {
+        if (!obsSource) return { ok: false, error: 'OBS is not available on this desktop.' }
+        const max = 'max' in control && typeof control.max === 'number' ? control.max : 200
+        const percent = obsControlPercent(value, max)
+        try {
+          const input = await obsSource.setVolume(control.binding.input, percent)
+          await controlState?.noteObsWritten(input, percent)
+          logger.info(`Set OBS input "${input}" to ${Math.round(percent)}% for "${label}"`)
+          return { ok: true }
+        } catch (error) {
+          return { ok: false, error: error instanceof Error ? error.message : String(error) }
+        }
       }
       const result = await executor.executeVolume(value * 100, label)
       if (result.ok) await controlState?.noteVolumeWritten(value * 100)
@@ -907,6 +1110,7 @@ async function bootstrap(): Promise<void> {
     pointerSupported: pointerRouter !== null,
     controlState: controlState ?? undefined,
     controlStateSupported: controlState !== null,
+    obsSupported: () => obsClient?.connected === true,
     onPointer: async (client, message, context) => {
       if (!pointerRouter) {
         return {
@@ -1107,6 +1311,8 @@ if (!gotLock) {
       try {
         inputRouter?.dispose()
         controlState?.dispose()
+        obsSource?.dispose()
+        obsClient?.dispose()
         volumeProbe?.dispose()
         pointerRouter?.dispose()
         pointerSender?.dispose()

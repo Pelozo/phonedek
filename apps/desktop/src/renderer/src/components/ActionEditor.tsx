@@ -29,6 +29,7 @@ const ACTION_ICONS: Record<ExecutableAction['type'], IconName> = {
   delay: 'clock',
   page: 'layers',
   mic: 'microphone',
+  obs: 'microphone',
 }
 
 const ACTION_TITLES: Record<ExecutableAction['type'], string> = {
@@ -42,6 +43,7 @@ const ACTION_TITLES: Record<ExecutableAction['type'], string> = {
   delay: 'Delay',
   page: 'Change page',
   mic: 'Mic mute',
+  obs: 'OBS mute',
 }
 
 function argsToString(args: string[] | undefined): string {

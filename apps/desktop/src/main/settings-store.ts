@@ -17,11 +17,53 @@ export interface AppSettings {
   pairHost: string
   /** macOS full-screen capture folder. Empty = OS Desktop. */
   screenshotDirectory: string
+  /** Control OBS through its WebSocket server. */
+  obsEnabled: boolean
+  /** OBS WebSocket host. Defaults to 127.0.0.1. */
+  obsHost: string
+  /** OBS WebSocket port. Defaults to 4455. */
+  obsPort: number
+  /** OBS WebSocket password. Never sent to the phone or renderer. */
+  obsPassword: string
 }
 
 /** Four-digit pairing PIN (the QR/link is the low-friction path). */
 export function createToken(): string {
   return randomInt(0, 10_000).toString().padStart(4, '0')
+}
+
+export const DEFAULT_OBS_HOST = '127.0.0.1'
+export const DEFAULT_OBS_PORT = 4455
+
+/**
+ * Accept localhost, IPv4, hostnames and a bracketed IPv6 literal. Reject
+ * schemes, paths, whitespace and anything that could alter the WebSocket URL.
+ */
+export function sanitizeObsHost(value: unknown): string {
+  if (typeof value !== 'string') return DEFAULT_OBS_HOST
+  const host = value.trim()
+  if (!host || host.length > 253) return DEFAULT_OBS_HOST
+  if (host.includes('://') || /[/\\?#@\s]/.test(host)) return DEFAULT_OBS_HOST
+  const ipv6 = /^\[([0-9a-fA-F:.]+)\]$/.exec(host)
+  if (ipv6) {
+    const inner = ipv6[1]!
+    return inner.includes(':') ? host : DEFAULT_OBS_HOST
+  }
+  if (host.includes(':')) return DEFAULT_OBS_HOST
+  if (!/^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(host)) return DEFAULT_OBS_HOST
+  if (host.includes('..') || host.startsWith('.') || host.endsWith('.')) return DEFAULT_OBS_HOST
+  return host
+}
+
+export function sanitizeObsPort(value: unknown): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 65535
+    ? value
+    : DEFAULT_OBS_PORT
+}
+
+export function sanitizeObsPassword(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  return value.slice(0, 256)
 }
 
 export function defaultSettings(): AppSettings {
@@ -34,6 +76,10 @@ export function defaultSettings(): AppSettings {
     allowPointerControl: true,
     pairHost: '',
     screenshotDirectory: '',
+    obsEnabled: false,
+    obsHost: DEFAULT_OBS_HOST,
+    obsPort: DEFAULT_OBS_PORT,
+    obsPassword: '',
   }
 }
 
@@ -74,6 +120,11 @@ function sanitize(input: Partial<AppSettings> | null | undefined): AppSettings {
         : defaults.allowPointerControl,
     pairHost,
     screenshotDirectory,
+    obsEnabled:
+      typeof input.obsEnabled === 'boolean' ? input.obsEnabled : defaults.obsEnabled,
+    obsHost: sanitizeObsHost(input.obsHost),
+    obsPort: sanitizeObsPort(input.obsPort),
+    obsPassword: sanitizeObsPassword(input.obsPassword),
   }
 }
 

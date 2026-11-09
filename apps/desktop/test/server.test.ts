@@ -59,6 +59,7 @@ interface HarnessOptions {
   pointerSupported?: boolean
   controlState?: ControlStateHub
   controlStateSupported?: boolean
+  obsSupported?: () => boolean
 }
 
 async function harness(
@@ -97,6 +98,7 @@ async function harness(
     pointerSupported: options.pointerSupported,
     controlState: options.controlState,
     controlStateSupported: options.controlStateSupported,
+    obsSupported: options.obsSupported,
     importBackup: options.importBackup,
   })
   const port = await server.start()
@@ -1015,6 +1017,72 @@ describe('DeckServer control state', () => {
     )
     expect(limited.type).toBe('error')
     expect(fake.subscriptions).toHaveLength(2)
+
+    ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
+  it('advertises obs-v1 only while OBS is identified', async () => {
+    let connected = false
+    const h = await harness({ ok: true }, { obsSupported: () => connected })
+
+    const info = await fetch(`http://127.0.0.1:${h.port}/api/info`)
+    const body = (await info.json()) as { capabilities?: string[] }
+    expect(body.capabilities).not.toContain('obs-v1')
+
+    const first = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    const firstHello = await waitFor(() => first.messages.find((message) => message.type === 'hello'))
+    expect(firstHello.capabilities).not.toContain('obs-v1')
+    first.ws.close()
+
+    connected = true
+    const second = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    const secondHello = await waitFor(() => second.messages.find((message) => message.type === 'hello'))
+    expect(secondHello.capabilities).toContain('obs-v1')
+    second.ws.close()
+
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
+  it('keeps control-state-v1 and resolves OBS controls while OBS is down', async () => {
+    const fake = fakeHub()
+    const h = await harness(
+      { ok: true },
+      { controlState: fake.hub, controlStateSupported: true, obsSupported: () => false },
+    )
+    attachControl(h, 'btn-vol-down', {
+      kind: 'slider',
+      emit: 'value',
+      binding: { type: 'obs', target: 'inputVolume', input: 'Mic/Aux' },
+      min: 0,
+      max: 200,
+      step: 1,
+      initial: 100,
+      unit: '%',
+    })
+
+    const info = await fetch(`http://127.0.0.1:${h.port}/api/info`)
+    const body = (await info.json()) as { capabilities?: string[] }
+    expect(body.capabilities).toContain('control-state-v1')
+    expect(body.capabilities).not.toContain('obs-v1')
+
+    const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    const hello = await waitFor(() => messages.find((message) => message.type === 'hello'))
+    expect(hello.capabilities).toContain('control-state-v1')
+    expect(hello.capabilities).not.toContain('obs-v1')
+    await sendHello(ws, ['control-state-v1'])
+
+    ws.send(JSON.stringify(watch(h, ['btn-vol-down'])))
+    const call = await waitFor(() => fake.subscriptions[0])
+    expect(call.subscription.controls).toEqual([
+      {
+        id: 'btn-vol-down',
+        label: 'Volume down',
+        source: 'obs',
+        input: 'Mic/Aux',
+        max: 200,
+      },
+    ])
 
     ws.close()
     await waitFor(() => h.server.getClients().length === 0)

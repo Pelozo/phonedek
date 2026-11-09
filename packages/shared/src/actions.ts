@@ -112,6 +112,13 @@ export function actionsToPlan(actions: readonly ExecutableAction[], options: Pla
       case 'mic':
         plan.push({ kind: 'mic', action: action.action })
         break
+      case 'obs':
+        plan.push({
+          kind: 'obs',
+          action: action.action,
+          ...(action.input ? { input: action.input } : {}),
+        })
+        break
     }
   }
   return plan
@@ -145,6 +152,7 @@ export function controlToActions(control: ControlSpec, delta: number): Action[] 
   if (control.kind === 'trackpad') return []
   if (!Number.isFinite(delta) || delta === 0) return []
   if (control.binding.type === 'mic') return []
+  if (control.binding.type === 'obs') return []
   if (control.binding.type === 'volume' && control.binding.mode === 'absolute') return []
   const magnitude = Math.ceil(Math.abs(delta))
 
@@ -447,5 +455,7 @@ export function describeAction(action: ExecutableAction, platform?: string): str
           : 'Previous page'
     case 'mic':
       return 'Toggle microphone mute'
+    case 'obs':
+      return action.input ? `Mute OBS "${action.input}"` : 'Mute OBS input'
   }
 }

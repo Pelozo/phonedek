@@ -8,6 +8,7 @@ import { WebSocket, WebSocketServer } from 'ws'
 import {
   BRIGHTNESS_CAPABILITY,
   CONTROL_STATE_CAPABILITY,
+  OBS_CAPABILITY,
   POINTER_CAPABILITY,
   PROTOCOL_VERSION,
   parseClientMessage,
@@ -48,17 +49,24 @@ export const SERVER_CAPABILITIES = [
   BRIGHTNESS_CAPABILITY,
   POINTER_CAPABILITY,
   CONTROL_STATE_CAPABILITY,
+  OBS_CAPABILITY,
 ] as const
 
 /**
  * Capabilities for a specific host. Wayland/unsupported platforms must not
- * advertise `pointer-v1`, and a host with no volume reader must not advertise
- * `control-state-v1`, so the desktop computes this at startup.
+ * advertise `pointer-v1`, a host with no volume/mic/OBS reader must not
+ * advertise `control-state-v1`, and `obs-v1` is dynamic: it is advertised only
+ * while the OBS client is identified.
  */
-export function serverCapabilities(pointerSupported: boolean, stateSupported = false): string[] {
+export function serverCapabilities(
+  pointerSupported: boolean,
+  stateSupported = false,
+  obsSupported = false,
+): string[] {
   return SERVER_CAPABILITIES.filter((capability) => {
     if (capability === POINTER_CAPABILITY) return pointerSupported
     if (capability === CONTROL_STATE_CAPABILITY) return stateSupported
+    if (capability === OBS_CAPABILITY) return obsSupported
     return true
   })
 }
@@ -145,6 +153,8 @@ export interface DeckServerOptions {
   controlState?: ControlStateHub
   /** Advertise `control-state-v1`; true only when a reader was built. */
   controlStateSupported?: boolean
+  /** Dynamic: advertise `obs-v1` only while the OBS client is identified. */
+  obsSupported?: () => boolean
   /** Called when a phone disconnects, so held pointer buttons can be released. */
   onClientClosed?: (client: ConnectedClient) => void
   /** Called only after an uploaded backup validates; show native approval here. */
@@ -390,6 +400,7 @@ export class DeckServer {
     return serverCapabilities(
       this.options.pointerSupported !== false,
       this.options.controlStateSupported === true,
+      this.options.obsSupported?.() === true,
     )
   }
 

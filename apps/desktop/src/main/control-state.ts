@@ -7,18 +7,23 @@ import type {
 import type { Logger } from './logger'
 import type { VolumeReader, VolumeReading } from './volume-source'
 import type { MicReader, MicReading } from './microphone-source'
+import type { ObsInputReading, ObsStateReader } from './obs-source'
 
 /** Minimum allowed watch poll interval, matching the shared protocol schema. */
 export const MIN_WATCH_INTERVAL_MS = 500
 export const DEFAULT_WATCH_INTERVAL_MS = 1000
 const WRITE_GRACE_MS = 1500
 
-export type ControlStateSource = 'volume' | 'mic'
+export type ControlStateSource = 'volume' | 'mic' | 'obs'
 
 export interface StateControl {
   id: string
   label: string
   source: ControlStateSource
+  /** OBS input name; omitted = the desktop's first-audio-input fallback. */
+  input?: string
+  /** Display maximum for OBS controls; defaults to 100 for volume/mic. */
+  max?: number
 }
 
 export interface AbsoluteVolumeControl {
@@ -45,6 +50,18 @@ export function isMicGainControl(button: DeckButton): boolean {
     control.kind !== 'trackpad' &&
     control.binding.type === 'mic' &&
     control.binding.mode === 'gain' &&
+    control.emit === 'value'
+  )
+}
+
+/** A value-bearing slider/dial that reads and writes one OBS input. */
+export function isObsVolumeControl(button: DeckButton): boolean {
+  const control = button.control
+  return (
+    control !== undefined &&
+    control.kind !== 'trackpad' &&
+    control.binding.type === 'obs' &&
+    control.binding.target === 'inputVolume' &&
     control.emit === 'value'
   )
 }
@@ -83,14 +100,27 @@ export function resolveStateControls(
   const requested = requestedIds ? new Set(requestedIds) : null
   const controls: StateControl[] = []
   for (const button of page.buttons) {
+    const obs = isObsVolumeControl(button) ? button.control : null
     const source: ControlStateSource | null = isAbsoluteVolumeControl(button)
       ? 'volume'
       : isMicGainControl(button)
         ? 'mic'
-        : null
+        : obs
+          ? 'obs'
+          : null
     if (!source) continue
     if (requested !== null && !requested.has(button.id)) continue
-    controls.push({ id: button.id, label: button.label, source })
+    if (source === 'obs' && obs && obs.kind !== 'trackpad' && obs.binding.type === 'obs') {
+      controls.push({
+        id: button.id,
+        label: button.label,
+        source,
+        ...(obs.binding.input ? { input: obs.binding.input } : {}),
+        max: obs.max ?? 200,
+      })
+    } else {
+      controls.push({ id: button.id, label: button.label, source })
+    }
     if (controls.length >= 32) break
   }
   return controls
@@ -110,6 +140,7 @@ export interface ControlStateSubscription {
 export interface ControlStateServiceOptions {
   reader?: VolumeReader
   micReader?: MicReader | null
+  obsReader?: ObsStateReader | null
   logger?: Logger
   now?: () => number
   defaultIntervalMs?: number
@@ -129,7 +160,7 @@ function clampInterval(intervalMs: number | undefined, fallback: number): number
 }
 
 function stateSignature(entry: ControlStateEntry): string {
-  if (!entry.available) return '0'
+  if (!entry.available) return `0|${entry.detail ?? ''}`
   return `1|${entry.value?.toFixed(4) ?? ''}|${entry.muted === undefined ? '' : entry.muted ? '1' : '0'}`
 }
 
@@ -137,28 +168,44 @@ function controlKey(profileId: string, pageId: string, controlId: string): strin
   return `${profileId}\u0000${pageId}\u0000${controlId}`
 }
 
+function obsUnavailableDetail(error: string): string {
+  if (/switch/i.test(error)) return 'SWITCHING'
+  if (/not found|missing|no inputs?|not an audio input/i.test(error)) return 'NO INPUT'
+  if (/not connected|not available|not identified|disabled|connection|timed out|closed/i.test(error)) {
+    return 'NO OBS'
+  }
+  return error.slice(0, 60)
+}
+
 function readingEntry(
   controlId: string,
   source: ControlStateSource,
-  reading: VolumeReading | MicReading | null,
+  reading: VolumeReading | MicReading | ObsInputReading | null,
   error: string | null,
+  max?: number,
 ): ControlStateEntry {
   if (!reading || error) {
     return {
       controlId,
       revision: 0,
       available: false,
-      detail: error ? error.slice(0, 60) : 'Unavailable',
+      detail: error
+        ? source === 'obs'
+          ? obsUnavailableDetail(error)
+          : error.slice(0, 60)
+        : 'Unavailable',
     }
   }
-  const level = Math.max(0, Math.min(100, Math.round(reading.level)))
+  const level = Math.max(0, reading.level)
+  const ceiling = max !== undefined && Number.isFinite(max) && max > 0 ? max : 100
+  const value = Math.max(0, Math.min(1, level / ceiling))
   const muted = reading.muted
   return {
     controlId,
     revision: 0,
-    value: level / 100,
+    value,
     available: true,
-    detail: source === 'mic' && muted ? 'MUTED' : `${level}%`,
+    detail: muted ? 'MUTED' : `${Math.round(level)}%`,
     ...(muted === undefined ? {} : { muted }),
   }
 }
@@ -175,6 +222,7 @@ function readingEntry(
 export class ControlStateService {
   private readonly reader?: VolumeReader
   private readonly micReader?: MicReader | null
+  private readonly obsReader?: ObsStateReader | null
   private readonly logger?: Logger
   private readonly now: () => number
   private readonly defaultIntervalMs: number
@@ -185,6 +233,8 @@ export class ControlStateService {
   private readonly revisions = new Map<string, number>()
   /** Source per profile/page/control, learned from the last subscription. */
   private readonly sources = new Map<string, ControlStateSource>()
+  /** Input/max metadata per profile/page/control, learned from the subscription. */
+  private readonly controlMeta = new Map<string, StateControl>()
   private timer: NodeJS.Timeout | null = null
   private chain: Promise<void> = Promise.resolve()
   private suppressUntil = 0
@@ -193,6 +243,7 @@ export class ControlStateService {
   constructor(options: ControlStateServiceOptions) {
     this.reader = options.reader
     this.micReader = options.micReader
+    this.obsReader = options.obsReader
     this.logger = options.logger
     this.now = options.now ?? Date.now
     this.defaultIntervalMs = clampInterval(options.defaultIntervalMs, DEFAULT_WATCH_INTERVAL_MS)
@@ -209,17 +260,17 @@ export class ControlStateService {
     const requested = subscription.controls
       ? subscription.controls
       : subscription.controlIds.map((id) => ({ id, label: '', source: 'volume' as const }))
-    const bySource = new Map<string, ControlStateSource>()
-    for (const control of requested) bySource.set(control.id, control.source)
+    const byId = new Map<string, StateControl>()
+    for (const control of requested) byId.set(control.id, control)
 
     const controlIds = [...new Set(subscription.controlIds.length > 0
       ? subscription.controlIds
       : requested.map((control) => control.id))].slice(0, 32)
     for (const controlId of controlIds) {
-      this.sources.set(
-        controlKey(subscription.profileId, subscription.pageId, controlId),
-        bySource.get(controlId) ?? 'volume',
-      )
+      const key = controlKey(subscription.profileId, subscription.pageId, controlId)
+      const control = byId.get(controlId)
+      this.sources.set(key, control?.source ?? 'volume')
+      if (control) this.controlMeta.set(key, control)
     }
 
     const sub: Subscription = {
@@ -297,6 +348,35 @@ export class ControlStateService {
     })
   }
 
+  /**
+   * Push an OBS input volume just written by the phone. `level` is OBS percent
+   * (100 = unity). Mirrors the mic/volume write path.
+   */
+  noteObsWritten(input: string | undefined, level: number, muted?: boolean): Promise<void> {
+    if (this.disposed || !Number.isFinite(level)) return Promise.resolve()
+    const reading: ObsInputReading = {
+      level: Math.max(0, Math.min(2000, level)),
+      muted: muted ?? false,
+    }
+
+    return this.enqueue(async () => {
+      this.obsReader?.invalidate(input)
+      this.obsReader?.setKnown(input, reading)
+      this.suppressUntil = Math.max(this.suppressUntil, this.now() + this.writeGraceMs)
+      await this.refresh(undefined, true)
+    })
+  }
+
+  /** OBS event-driven refresh: send changed entries immediately. */
+  noteObsChanged(input?: string): Promise<void> {
+    if (this.disposed) return Promise.resolve()
+    void input
+    return this.enqueue(async () => {
+      this.suppressUntil = Math.max(this.suppressUntil, this.now() + this.writeGraceMs)
+      await this.refresh(undefined, false, true)
+    })
+  }
+
   /** Test/manual hook: evaluate and send changed state immediately. */
   pollNow(): Promise<void> {
     if (this.disposed) return Promise.resolve()
@@ -311,6 +391,7 @@ export class ControlStateService {
     this.entries.clear()
     this.revisions.clear()
     this.sources.clear()
+    this.controlMeta.clear()
   }
 
   private enqueue(task: () => Promise<void>): Promise<void> {
@@ -323,7 +404,7 @@ export class ControlStateService {
     })
   }
 
-  private async refresh(immediate?: Subscription, forceAll = false): Promise<void> {
+  private async refresh(immediate?: Subscription, forceAll = false, forceChanged = false): Promise<void> {
     if (this.disposed) return
 
     const watched = this.watchedControls()
@@ -351,6 +432,33 @@ export class ControlStateService {
       }
     }
 
+    const obsControls = watched.filter((control) => control.source === 'obs')
+    if (obsControls.length > 0) {
+      const groups = new Map<string, typeof obsControls>()
+      for (const control of obsControls) {
+        const key = control.input ?? ''
+        const group = groups.get(key)
+        if (group) group.push(control)
+        else groups.set(key, [control])
+      }
+      for (const [input, controls] of groups) {
+        let reading: ObsInputReading | null = null
+        let error: string | null = null
+        if (!this.obsReader) {
+          error = 'OBS state is not available on this desktop.'
+        } else {
+          try {
+            reading = await this.obsReader.read(input || undefined)
+          } catch (caught) {
+            error = caught instanceof Error ? caught.message : String(caught)
+          }
+        }
+        for (const control of controls) {
+          this.updateEntry(control.key, control.controlId, 'obs', reading, error, control.max)
+        }
+      }
+    }
+
     const now = this.now()
     for (const sub of [...this.subscriptions.values()]) {
       if (immediate === sub) {
@@ -364,7 +472,7 @@ export class ControlStateService {
         continue
       }
       if (sub.controlIds.length === 0) continue
-      if (sub.lastPolledAt !== null && now - sub.lastPolledAt < sub.intervalMs) continue
+      if (!forceChanged && sub.lastPolledAt !== null && now - sub.lastPolledAt < sub.intervalMs) continue
       sub.lastPolledAt = now
 
       const changed = this.entriesFor(sub).filter(
@@ -380,16 +488,24 @@ export class ControlStateService {
     key: string
     controlId: string
     source: ControlStateSource
+    input?: string
+    max?: number
   }> {
-    const controls = new Map<string, { key: string; controlId: string; source: ControlStateSource }>()
+    const controls = new Map<
+      string,
+      { key: string; controlId: string; source: ControlStateSource; input?: string; max?: number }
+    >()
     for (const sub of this.subscriptions.values()) {
       for (const controlId of sub.controlIds) {
         const key = controlKey(sub.profileId, sub.pageId, controlId)
         if (controls.has(key)) continue
+        const meta = this.controlMeta.get(key)
         controls.set(key, {
           key,
           controlId,
-          source: this.sources.get(key) ?? 'volume',
+          source: meta?.source ?? this.sources.get(key) ?? 'volume',
+          ...(meta?.input ? { input: meta.input } : {}),
+          ...(meta?.max !== undefined ? { max: meta.max } : {}),
         })
       }
     }
@@ -409,11 +525,12 @@ export class ControlStateService {
     key: string,
     controlId: string,
     source: ControlStateSource,
-    reading: VolumeReading | MicReading | null,
+    reading: VolumeReading | MicReading | ObsInputReading | null,
     error: string | null,
+    max?: number,
   ): void {
     const existing = this.entries.get(key)
-    const candidate = readingEntry(controlId, source, reading, error)
+    const candidate = readingEntry(controlId, source, reading, error, max)
     if (existing && stateSignature(existing) === stateSignature(candidate)) return
 
     const revision = (existing?.revision ?? this.revisions.get(key) ?? 0) + 1
