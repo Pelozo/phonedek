@@ -8,10 +8,12 @@ function initialPercent(control: SliderOrDialControlSpec): number {
   return Math.max(0, Math.min(1, (initial - min) / (max - min)))
 }
 
-function badgeFor(control: SliderOrDialControlSpec): string {
+/** Short badge shared by the deck and inspector previews. */
+export function controlBadge(control: SliderOrDialControlSpec): string {
   if (control.binding.type === 'volume') {
     return control.binding.mode === 'absolute' ? 'VOL · ABS' : 'VOL · REL'
   }
+  if (control.binding.type === 'mic') return 'MIC · GAIN'
   return 'SCROLL'
 }
 
@@ -53,7 +55,7 @@ export function ControlPreview({
     <div
       className={`control-preview ${control.kind === 'slider' ? `slider ${axis}` : 'dial'}${className ? ` ${className}` : ''}`}
     >
-      <span className="control-badge">{badgeFor(control)}</span>
+      <span className="control-badge">{controlBadge(control)}</span>
       {control.kind === 'slider' ? (
         <div className="control-slider" aria-hidden="true">
           <span className="control-track" />

@@ -4,6 +4,8 @@ import type {
   ActionPack,
   ActionPreset,
   DeckButton,
+  ExecutableAction,
+  MicAction,
   PointerBinding,
   SliderOrDialControlSpec,
   TrackpadControlSpec,
@@ -43,6 +45,10 @@ import { ColorField, NumberField, Toggle, useConfirm } from './Primitives'
 import { useHostPlatform } from '../lib/platform'
 
 const DEFAULT_MACRO_STEP: MacroStep = { type: 'hotkey', keys: ['CTRL', 'C'], holdMs: 35 }
+
+/** Mic actions are valid in configs but not yet part of the legacy Action union. */
+const MIC_TOGGLE_ACTION: MicAction = { type: 'mic', action: 'toggleMute' }
+const asLegacyAction = (action: ExecutableAction): Action => action as unknown as Action
 
 function defaultAction(type: Action['type'], platform: string): Action {
   switch (type) {
@@ -129,12 +135,13 @@ export function Inspector({
   const buttonDefaultBackground = profile.theme.buttonBackground
   const primaryKey = platform === 'darwin' ? '⌘' : 'Ctrl'
 
-  const testActions = async (actions: Action[], label: string): Promise<void> => {
+  const testActions = async (actions: readonly ExecutableAction[], label: string): Promise<void> => {
     if (!actions.length) {
       onToast('This button has no actions yet', 'info')
       return
     }
-    const result = await window.phonedek.testActions(actions, label)
+    // The preload API predates MicAction; the config schema and main process accept it.
+    const result = await window.phonedek.testActions(actions as unknown as Action[], label)
     onToast(result.ok ? `Executed “${label}” on this PC` : (result.error ?? 'Action failed'), result.ok ? 'success' : 'error')
   }
 
@@ -364,11 +371,23 @@ export function Inspector({
     })
   }
 
-  const setControlBinding = (type: 'volume' | 'scroll'): void => {
+  const setControlBinding = (type: 'volume' | 'scroll' | 'mic'): void => {
     if (!button.control || button.control.kind === 'trackpad') return
     if (button.control.binding.type === type) return
     if (type === 'scroll') {
       updateControl({ emit: 'delta', binding: { type: 'scroll', axis: 'vertical' } })
+      return
+    }
+    if (type === 'mic') {
+      updateControl({
+        emit: 'value',
+        binding: { type: 'mic', mode: 'gain' },
+        min: 0,
+        max: 100,
+        step: 1,
+        initial: 50,
+        unit: '%',
+      })
       return
     }
     updateControl(
@@ -486,6 +505,10 @@ export function Inspector({
 
   const testControl = async (direction: -1 | 1): Promise<void> => {
     if (!control) return
+    if (control.binding.type === 'mic') {
+      await testActions([MIC_TOGGLE_ACTION], 'Toggle mic mute')
+      return
+    }
     if (controlIsAbsolute) {
       const percent = direction < 0 ? 45 : 55
       type ControlTestResult = Awaited<ReturnType<typeof window.phonedek.testControlInput>>
@@ -533,8 +556,10 @@ export function Inspector({
     )
   }
 
-  const updateAction = (index: number, action: Action): void => {
-    update({ actions: button.actions.map((item, current) => (current === index ? action : item)) })
+  const updateAction = (index: number, action: ExecutableAction): void => {
+    update({
+      actions: button.actions.map((item, current) => (current === index ? asLegacyAction(action) : item)),
+    })
   }
   const deleteAction = (index: number): void => {
     update({ actions: button.actions.filter((_, current) => current !== index) })
@@ -965,7 +990,9 @@ export function Inspector({
                 {control.kind === 'slider' ? 'SLIDER' : 'DIAL'} ·{' '}
                 {control.binding.type === 'volume'
                   ? `VOL · ${control.binding.mode === 'absolute' ? 'ABS' : 'REL'}`
-                  : 'SCROLL'}
+                  : control.binding.type === 'mic'
+                    ? 'MIC · GAIN'
+                    : 'SCROLL'}
               </span>
             </div>
 
@@ -979,25 +1006,41 @@ export function Inspector({
             </div>
 
             <div className="row gap">
-              <button
-                type="button"
-                className="button secondary small"
-                title={controlIsAbsolute ? 'Set the PC volume to 45%' : 'Send one step down'}
-                onClick={() => void testControl(-1)}
-              >
-                Test −
-              </button>
-              <button
-                type="button"
-                className="button secondary small"
-                title={controlIsAbsolute ? 'Set the PC volume to 55%' : 'Send one step up'}
-                onClick={() => void testControl(1)}
-              >
-                Test +
-              </button>
-              <span className="hint">
-                {controlIsAbsolute ? 'Sets 45% / 55% on this PC' : 'Applies one step on this PC'}
-              </span>
+              {control.binding.type === 'mic' ? (
+                <>
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    title="Toggle the default capture device on this PC"
+                    onClick={() => void testControl(1)}
+                  >
+                    Test mute
+                  </button>
+                  <span className="hint">Toggles the default capture device on this PC</span>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    title={controlIsAbsolute ? 'Set the PC volume to 45%' : 'Send one step down'}
+                    onClick={() => void testControl(-1)}
+                  >
+                    Test −
+                  </button>
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    title={controlIsAbsolute ? 'Set the PC volume to 55%' : 'Send one step up'}
+                    onClick={() => void testControl(1)}
+                  >
+                    Test +
+                  </button>
+                  <span className="hint">
+                    {controlIsAbsolute ? 'Sets 45% / 55% on this PC' : 'Applies one step on this PC'}
+                  </span>
+                </>
+              )}
             </div>
 
             <div className="two-col">
@@ -1017,13 +1060,18 @@ export function Inspector({
                 <span>Binding</span>
                 <select
                   value={control.binding.type}
-                  onChange={(event) => setControlBinding(event.target.value as 'volume' | 'scroll')}
+                  onChange={(event) => setControlBinding(event.target.value as 'volume' | 'scroll' | 'mic')}
                 >
                   <option value="volume">Volume</option>
+                  <option value="mic">Mic</option>
                   <option value="scroll">Scroll</option>
                 </select>
               </label>
             </div>
+
+            {control.binding.type === 'mic' && (
+              <p className="hint">Default capture device · tap the tile label to mute</p>
+            )}
 
             {control.binding.type === 'volume' && (
               <>
@@ -1161,9 +1209,11 @@ export function Inspector({
             </div>
 
             <p className="hint">
-              {control.binding.type === 'volume' && control.binding.mode === 'absolute'
-                ? 'Editor preview only. The phone sends an absolute value; tap actions stay as the fallback.'
-                : 'Editor preview only. The phone renders this control and sends relative deltas; tap actions stay as the fallback.'}
+              {control.binding.type === 'mic'
+                ? 'Editor preview only. Drag on the phone to set mic gain; tap the label or mic glyph to mute. The mic action below stays as the fallback.'
+                : control.binding.type === 'volume' && control.binding.mode === 'absolute'
+                  ? 'Editor preview only. The phone sends an absolute value; tap actions stay as the fallback.'
+                  : 'Editor preview only. The phone renders this control and sends relative deltas; tap actions stay as the fallback.'}
             </p>
 
             <button type="button" className="button danger ghost full" onClick={() => void removeControl()}>
@@ -1218,7 +1268,9 @@ export function Inspector({
                 {button.control
                   ? button.control.kind === 'trackpad'
                     ? 'No tap action needed. Tapping this tile on the phone opens the full-screen pointer pad.'
-                    : 'No tap action needed. Drag this control on the phone to send volume or scroll steps; use Test − / Test + above to verify it on this PC.'
+                    : button.control.binding.type === 'mic'
+                      ? 'No tap action needed. Drag this control on the phone to set mic gain; use Test mute above to verify the mic on this PC.'
+                      : 'No tap action needed. Drag this control on the phone to send volume or scroll steps; use Test − / Test + above to verify it on this PC.'
                   : 'No actions yet. This button will do nothing when pressed.'}
               </p>
             </div>

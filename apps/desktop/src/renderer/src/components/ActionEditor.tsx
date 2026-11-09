@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from 'react'
 import { describeAction, formatCombo } from '@phonedek/shared'
-import type { Action, DeckPage, MacroAction, MacroStep, MediaKey } from '@phonedek/shared'
+import type { DeckPage, ExecutableAction, MacroAction, MacroStep, MediaKey } from '@phonedek/shared'
 import { Icon, type IconName } from './Icons'
 import { NumberField } from './Primitives'
 import { Keycaps, ShortcutDialog } from './ShortcutDialog'
@@ -18,7 +18,7 @@ const MEDIA_KEYS: Array<{ value: MediaKey; label: string }> = [
   { value: 'mute', label: 'Mute' },
 ]
 
-const ACTION_ICONS: Record<Action['type'], IconName> = {
+const ACTION_ICONS: Record<ExecutableAction['type'], IconName> = {
   hotkey: 'keyboard',
   text: 'text',
   macro: 'bolt',
@@ -28,9 +28,10 @@ const ACTION_ICONS: Record<Action['type'], IconName> = {
   media: 'music',
   delay: 'clock',
   page: 'layers',
+  mic: 'microphone',
 }
 
-const ACTION_TITLES: Record<Action['type'], string> = {
+const ACTION_TITLES: Record<ExecutableAction['type'], string> = {
   hotkey: 'Shortcut',
   text: 'Type text',
   macro: 'Macro',
@@ -40,6 +41,7 @@ const ACTION_TITLES: Record<Action['type'], string> = {
   media: 'Media key',
   delay: 'Delay',
   page: 'Change page',
+  mic: 'Mic mute',
 }
 
 function argsToString(args: string[] | undefined): string {
@@ -118,15 +120,15 @@ export function ActionEditor({
   onMove,
   onTest,
 }: {
-  action: Action
+  action: ExecutableAction
   index: number
   total: number
   pages: DeckPage[]
   server: ServerInfoView | null
-  onUpdate: (action: Action) => void
+  onUpdate: (action: ExecutableAction) => void
   onDelete: () => void
   onMove: (direction: -1 | 1) => void
-  onTest: (action: Action) => void
+  onTest: (action: ExecutableAction) => void
 }) {
   const [shortcutOpen, setShortcutOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -358,6 +360,13 @@ export function ActionEditor({
             suffix="ms"
             onChange={(ms) => onUpdate({ ...action, ms })}
           />
+        )}
+
+        {action.type === 'mic' && (
+          <p className="hint">
+            Toggles mute on the default capture device. Use the control&apos;s Test mute button or Run all
+            actions to verify it on this PC.
+          </p>
         )}
 
         {action.type === 'page' && (

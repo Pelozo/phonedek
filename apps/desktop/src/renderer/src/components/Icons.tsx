@@ -26,6 +26,7 @@ export type IconName =
   | 'app'
   | 'terminal'
   | 'music'
+  | 'microphone'
   | 'refresh'
   | 'monitor'
   | 'save'
@@ -73,6 +74,7 @@ const paths: Record<IconName, string> = {
   app: 'M4 4h16v16H4zM8 8h8v8H8z',
   terminal: 'm5 7 5 5-5 5M12 17h7',
   music: 'M9 18V5l11-2v13M9 18a3 3 0 1 1-3-3M20 16a3 3 0 1 1-3-3',
+  microphone: 'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8',
   refresh: 'M20 11a8 8 0 1 0-2 5M20 4v7h-7',
   monitor: 'M3 4h18v12H3zM8 20h8M12 16v4',
   save: 'M4 4h13l3 3v13H4zM8 4v6h8V4M8 20v-6h8v6',
