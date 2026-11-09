@@ -369,6 +369,7 @@ function AppContent() {
             emit: 'delta',
             binding: {
               type: 'pointer',
+              mode: 'inline',
               sensitivity: 1,
               naturalScroll: true,
               tapToClick: true,
@@ -543,7 +544,7 @@ function AppContent() {
                   label: 'Trackpad',
                   section: 'Pointer',
                   icon: 'trackpad',
-                  description: '3 × 2 · full-screen cursor pad',
+                  description: '3 × 2 · inline cursor pad (full screen optional)',
                   onClick: () => addNewControl('trackpad'),
                 },
               ]}

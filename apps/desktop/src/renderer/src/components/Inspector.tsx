@@ -803,7 +803,25 @@ export function Inspector({
               />
             </div>
 
-            <p className="hint">Tap this tile on the phone to open the full-screen cursor pad.</p>
+            <label className="field">
+              <span>Mode</span>
+              <select
+                value={trackpad.binding.mode ?? 'inline'}
+                onChange={(event) =>
+                  updatePointerBinding({
+                    mode: event.target.value as 'inline' | 'fullscreen',
+                  })
+                }
+              >
+                <option value="inline">Inline on the deck tile</option>
+                <option value="fullscreen">Full-screen pad</option>
+              </select>
+            </label>
+            <p className="hint">
+              {(trackpad.binding.mode ?? 'inline') === 'inline'
+                ? 'The tile is the pad: drag it alongside the other buttons.'
+                : 'The tile is a launcher for the large full-screen pad.'}
+            </p>
 
             <NumberField
               label="Sensitivity"
