@@ -94,6 +94,96 @@ export const ControlStateMessageSchema = z.object({
   states: z.array(ControlStateEntrySchema).max(32),
 })
 
+export const KeyboardMessageSchema = z
+  .object({
+    type: z.literal('keyboard'),
+    seq: z.number().int().min(0),
+    phase: z.enum(['start', 'text', 'key', 'release', 'end', 'cancel']),
+    profileId: z.string().min(1).max(64).optional(),
+    pageId: z.string().min(1).max(64).optional(),
+    controlId: z.string().min(1).max(128).optional(),
+    text: z.string().min(1).max(4096).optional(),
+    keys: z.array(z.string().min(1).max(24)).min(1).max(8).optional(),
+    repeat: z.number().int().min(1).max(100).optional(),
+  })
+  .superRefine((message, ctx) => {
+    const hasIds =
+      message.profileId !== undefined ||
+      message.pageId !== undefined ||
+      message.controlId !== undefined
+
+    if (message.phase === 'start') {
+      for (const key of ['profileId', 'pageId', 'controlId'] as const) {
+        if (message[key] === undefined) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [key],
+            message: `start requires ${key}`,
+          })
+        }
+      }
+      if (message.text !== undefined || message.keys !== undefined || message.repeat !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'start must not carry text, keys or repeat',
+        })
+      }
+      return
+    }
+
+    if (hasIds) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'ids are only allowed on start',
+      })
+    }
+
+    if (message.phase === 'text') {
+      if (message.text === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['text'],
+          message: 'text phase requires text',
+        })
+      }
+      if (message.keys !== undefined || message.repeat !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'text phase must not carry keys or repeat',
+        })
+      }
+      return
+    }
+
+    if (message.phase === 'key') {
+      if (message.keys === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['keys'],
+          message: 'key phase requires keys',
+        })
+      }
+      if (message.text !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'key phase must not carry text',
+        })
+      }
+      return
+    }
+
+    if (
+      message.text !== undefined ||
+      message.keys !== undefined ||
+      message.repeat !== undefined
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${message.phase} must not carry text, keys or repeat`,
+      })
+    }
+  })
+
 export const ClientMessageSchema = z.union([
   z.object({
     type: z.literal('hello'),
@@ -120,6 +210,7 @@ export const ClientMessageSchema = z.union([
   }),
   PointerMessageSchema,
   WatchMessageSchema,
+  KeyboardMessageSchema,
   z.object({ type: z.literal('ping'), t: z.number().finite() }),
 ])
 
@@ -147,4 +238,8 @@ export function isPointerMessage(message: ClientMessage): message is Extract<Cli
 
 export function isWatchMessage(message: ClientMessage): message is Extract<ClientMessage, { type: 'watch' }> {
   return message.type === 'watch'
+}
+
+export function isKeyboardMessage(message: ClientMessage): message is Extract<ClientMessage, { type: 'keyboard' }> {
+  return message.type === 'keyboard'
 }

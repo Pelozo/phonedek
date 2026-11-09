@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   ControlStateMessageSchema,
   isInputMessage,
+  isKeyboardMessage,
   isPointerMessage,
   isPressMessage,
   isWatchMessage,
@@ -243,6 +244,88 @@ describe('pointer protocol', () => {
         pageId: 'g',
         states: [{ controlId: 'btn-vol', revision: 1 }],
       }).success,
+    ).toBe(false)
+  })
+
+  it('accepts keyboard start/text/key/release/end/cancel messages', () => {
+    const start = parseClientMessage({
+      type: 'keyboard',
+      seq: 1,
+      phase: 'start',
+      profileId: 'p',
+      pageId: 'g',
+      controlId: 'kbd',
+    })
+    expect(start.ok).toBe(true)
+    if (start.ok) expect(isKeyboardMessage(start.message)).toBe(true)
+
+    for (const message of [
+      { type: 'keyboard', seq: 2, phase: 'text', text: 'Hello\n' },
+      { type: 'keyboard', seq: 3, phase: 'key', keys: ['CTRL', 'C'] },
+      { type: 'keyboard', seq: 4, phase: 'key', keys: ['BACKSPACE'], repeat: 8 },
+      { type: 'keyboard', seq: 5, phase: 'release' },
+      { type: 'keyboard', seq: 6, phase: 'end' },
+      { type: 'keyboard', seq: 7, phase: 'cancel' },
+    ]) {
+      expect(parseClientMessage(message).ok, JSON.stringify(message)).toBe(true)
+    }
+  })
+
+  it('rejects malformed keyboard messages', () => {
+    expect(parseClientMessage({ type: 'keyboard', seq: 1, phase: 'start' }).ok).toBe(false)
+    expect(
+      parseClientMessage({
+        type: 'keyboard',
+        seq: 2,
+        phase: 'text',
+        text: 'x',
+        profileId: 'p',
+      }).ok,
+    ).toBe(false)
+    expect(parseClientMessage({ type: 'keyboard', seq: 3, phase: 'text' }).ok).toBe(false)
+    expect(
+      parseClientMessage({
+        type: 'keyboard',
+        seq: 4,
+        phase: 'key',
+        keys: ['CTRL'],
+        text: 'x',
+      }).ok,
+    ).toBe(false)
+    expect(parseClientMessage({ type: 'keyboard', seq: 5, phase: 'key' }).ok).toBe(false)
+    expect(
+      parseClientMessage({ type: 'keyboard', seq: 6, phase: 'key', keys: [] }).ok,
+    ).toBe(false)
+    const tooMany = Array.from({ length: 9 }, () => 'A')
+    expect(
+      parseClientMessage({ type: 'keyboard', seq: 7, phase: 'key', keys: tooMany }).ok,
+    ).toBe(false)
+    for (const repeat of [0, 101]) {
+      expect(
+        parseClientMessage({
+          type: 'keyboard',
+          seq: 8,
+          phase: 'key',
+          keys: ['A'],
+          repeat,
+        }).ok,
+      ).toBe(false)
+    }
+    expect(
+      parseClientMessage({
+        type: 'keyboard',
+        seq: 9,
+        phase: 'text',
+        text: 'x'.repeat(4097),
+      }).ok,
+    ).toBe(false)
+    expect(
+      parseClientMessage({
+        type: 'keyboard',
+        seq: 10,
+        phase: 'end',
+        profileId: 'p',
+      }).ok,
     ).toBe(false)
   })
 

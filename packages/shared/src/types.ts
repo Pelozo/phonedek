@@ -17,6 +17,9 @@ export const POINTER_CAPABILITY = 'pointer-v1' as const
 /** Desktop capability for live control state (volume readback and friends). */
 export const CONTROL_STATE_CAPABILITY = 'control-state-v1' as const
 
+/** Desktop capability for phone keyboard text/key injection. */
+export const KEYBOARD_CAPABILITY = 'keyboard-v1' as const
+
 export const DEFAULT_HTTP_PORT = 47654
 export const DISCOVERY_PORT = 47655
 export const DISCOVERY_MAGIC = 'PHONEDECK'
@@ -477,6 +480,56 @@ export interface WatchMessage {
   intervalMs?: number
 }
 
+/** Keyboard text/chord entry from the phone. */
+export type KeyboardPhase = 'start' | 'text' | 'key' | 'release' | 'end' | 'cancel'
+
+export interface KeyboardStartMessage {
+  type: 'keyboard'
+  seq: number
+  phase: 'start'
+  profileId: string
+  pageId: string
+  controlId: string
+}
+
+export interface KeyboardTextMessage {
+  type: 'keyboard'
+  seq: number
+  phase: 'text'
+  /** UTF-16 text, at most 4096 characters per message. */
+  text: string
+}
+
+export interface KeyboardKeyMessage {
+  type: 'keyboard'
+  seq: number
+  phase: 'key'
+  /** Chord, e.g. ["CTRL", "C"] or ["BACKSPACE"]; max 8 keys. */
+  keys: string[]
+  /** Repeat the chord 1..100 times. */
+  repeat?: number
+}
+
+export interface KeyboardSimpleMessage {
+  type: 'keyboard'
+  seq: number
+  /** Release latched keys/modifiers, finish, or abort. */
+  phase: 'release' | 'end' | 'cancel'
+}
+
+export type KeyboardMessage =
+  | KeyboardStartMessage
+  | KeyboardTextMessage
+  | KeyboardKeyMessage
+  | KeyboardSimpleMessage
+
+/** Sent for rejected messages and once on end/cancel; text/key frames are not acked. */
+export interface KeyboardResult {
+  seq: number
+  ok: boolean
+  error?: string
+}
+
 export type ClientMessage =
   | {
       type: 'hello'
@@ -489,6 +542,7 @@ export type ClientMessage =
   | InputMessage
   | PointerMessage
   | WatchMessage
+  | KeyboardMessage
   | { type: 'ping'; t: number }
 
 /* ------------------------------------------------------------------ */
@@ -598,6 +652,7 @@ export type ServerMessage =
   | ({ type: 'pointerResult' } & PointerResult)
   | BrightnessMessage
   | ControlStateMessage
+  | ({ type: 'keyboardResult' } & KeyboardResult)
   | { type: 'navigate'; direction: 'next' | 'prev' | 'goto'; pageId?: string }
   | { type: 'error'; code: string; message: string }
   | { type: 'pong'; t: number }
