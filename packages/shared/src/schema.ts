@@ -208,6 +208,7 @@ export const ControlBindingSchema = z.union([
 /** Pointer bindings are only valid on `trackpad` controls. */
 export const PointerBindingSchema = z.object({
   type: z.literal('pointer'),
+  mode: z.enum(['inline', 'fullscreen']).optional(),
   sensitivity: z.number().finite().min(0.25).max(3).optional(),
   naturalScroll: z.boolean().optional(),
   tapToClick: z.boolean().optional(),

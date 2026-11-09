@@ -36,12 +36,20 @@ describe('trackpad control schema', () => {
       emit: 'delta',
       binding: {
         type: 'pointer',
+        mode: 'fullscreen',
         sensitivity: 1.75,
         naturalScroll: false,
         tapToClick: false,
         dragLock: false,
       },
       haptics: false,
+    }
+    expect(validateConfig(config).ok).toBe(true)
+
+    target.control = {
+      kind: 'trackpad',
+      emit: 'delta',
+      binding: { type: 'pointer', mode: 'inline' },
     }
     expect(validateConfig(config).ok).toBe(true)
 
@@ -69,6 +77,16 @@ describe('trackpad control schema', () => {
       }
       expect(validateConfig(config).ok, `sensitivity ${sensitivity}`).toBe(false)
     }
+  })
+
+  it('rejects an unknown trackpad mode', () => {
+    const { config, button: target } = soloButtonConfig()
+    target.control = {
+      kind: 'trackpad',
+      emit: 'delta',
+      binding: { type: 'pointer', mode: 'sheet' },
+    } as unknown as ControlSpec
+    expect(validateConfig(config).ok).toBe(false)
   })
 
   it('rejects a pointer binding on sliders and dials', () => {

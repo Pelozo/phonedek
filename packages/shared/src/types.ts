@@ -256,6 +256,12 @@ export type ControlBinding =
  */
 export interface PointerBinding {
   type: 'pointer'
+  /**
+   * How the phone exposes the pad. `inline` turns the deck tile itself into
+   * the pad (default); `fullscreen` makes the tile a launcher for the
+   * full-screen pad.
+   */
+  mode?: 'inline' | 'fullscreen'
   /** Cursor gain multiplier, 0.25..3, default 1. */
   sensitivity?: number
   /** Two-finger scroll follows finger movement (default true). */
