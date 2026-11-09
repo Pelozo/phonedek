@@ -386,7 +386,9 @@ private fun InlineTrackpad(
         modifier = modifier
             .padding(3.dp)
             .clip(wellShape)
-            .background(InkDeep)
+            // Let the button's custom background show through; just enough
+            // scrim keeps the grid/labels legible on light backgrounds.
+            .background(Color.Black.copy(alpha = 0.12f))
             .border(1.dp, HairlineStrong, wellShape),
     ) {
         if (!trackpad.capable) {
