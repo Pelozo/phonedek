@@ -56,6 +56,46 @@ export function serverCapabilities(pointerSupported: boolean): string[] {
   )
 }
 
+interface ControlNeeds {
+  pointer: boolean
+  input: boolean
+}
+
+function controlNeeds(config: DeckConfig): ControlNeeds {
+  let pointer = false
+  let input = false
+  for (const profile of config.profiles) {
+    for (const page of profile.pages) {
+      for (const button of page.buttons) {
+        if (!button.control) continue
+        if (button.control.kind === 'trackpad') pointer = true
+        else input = true
+      }
+    }
+  }
+  return { pointer, input }
+}
+
+/**
+ * Friendly mismatch notice for an old phone app. The phone cannot discover
+ * capabilities it does not know about (an old app silently drops trackpad and
+ * control tiles), so the desktop tells it once per connection/config.
+ */
+export function outdatedClientMessage(
+  config: DeckConfig,
+  capabilities: readonly string[],
+  serverSupportsPointer: boolean,
+): string | null {
+  const needs = controlNeeds(config)
+  if (needs.pointer && serverSupportsPointer && !capabilities.includes(POINTER_CAPABILITY)) {
+    return 'This deck uses the Trackpad. Update the PhoneDeck app on your phone to use it.'
+  }
+  if (needs.input && !capabilities.includes('input-v1')) {
+    return 'This deck uses continuous controls. Update the PhoneDeck app on your phone to use them.'
+  }
+  return null
+}
+
 export interface PressContext {
   profile: DeckProfile
   page: DeckPage
@@ -104,6 +144,8 @@ interface ClientRecord {
   inputTimes: number[]
   brightnessTimes: number[]
   pointerTimes: number[]
+  /** Last APP_OUTDATED message sent to this client, to avoid spamming. */
+  outdatedNotice: string | null
 }
 
 interface AuthResult {
@@ -441,6 +483,7 @@ export class DeckServer {
   broadcastConfig(): void {
     const message: ServerMessage = { type: 'config', config: this.options.getConfig() }
     this.broadcast(message)
+    for (const record of this.clients.values()) this.maybeNotifyOutdated(record)
   }
 
   getClients(): ConnectedClient[] {
@@ -519,6 +562,7 @@ export class DeckServer {
       inputTimes: [],
       brightnessTimes: [],
       pointerTimes: [],
+      outdatedNotice: null,
     }
     this.clients.set(id, record)
     this.options.logger?.info(`Phone connected from ${info.address}`)
@@ -579,6 +623,7 @@ export class DeckServer {
       case 'hello':
         record.info.device = { ...message.device }
         record.info.capabilities = message.capabilities ? [...message.capabilities] : []
+        this.maybeNotifyOutdated(record)
         this.notifyClients()
         break
       case 'ping':
@@ -1154,6 +1199,25 @@ export class DeckServer {
 
   private notifyClients(): void {
     this.options.onClientsChanged?.(this.getClients())
+  }
+
+  /**
+   * Tell a connected phone once when its app is too old for the current deck.
+   * Repeat only if the required feature changes. Old apps show `error`
+   * messages as a normal notice, so no new message type is needed.
+   */
+  private maybeNotifyOutdated(record: ClientRecord): void {
+    if (record.info.capabilities === undefined) return
+    const message = outdatedClientMessage(
+      this.options.getConfig(),
+      record.info.capabilities,
+      this.capabilities.includes(POINTER_CAPABILITY),
+    )
+    if (message === record.outdatedNotice) return
+    record.outdatedNotice = message
+    if (!message) return
+    this.send(record.ws, { type: 'error', code: 'APP_OUTDATED', message })
+    this.options.logger?.info(`Phone app outdated for ${record.info.address}: ${message}`)
   }
 
   private checkHeartbeats(): void {

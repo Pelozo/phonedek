@@ -703,6 +703,89 @@ describe('DeckServer pointer input', () => {
     await waitFor(() => h.server.getClients().length === 0)
   })
 
+  it('notifies an old phone app when the deck needs the trackpad', async () => {
+    const h = await harness()
+    attachControl(h, 'btn-vol-down', trackpad)
+    const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await waitFor(() => messages.find((message) => message.type === 'hello'))
+
+    const hello: ClientMessage = {
+      type: 'hello',
+      protocol: 1,
+      device: { name: 'Old phone', model: 'test', appVersion: '0.2.3' },
+      capabilities: ['input-v1'],
+    }
+    ws.send(JSON.stringify(hello))
+    const notice = await waitFor(() => {
+      const found = messages.find(
+        (message) => message.type === 'error' && message.code === 'APP_OUTDATED',
+      )
+      return found && found.type === 'error' ? found : undefined
+    })
+    expect(notice.message).toContain('Trackpad')
+
+    // Re-sending hello does not spam the same notice.
+    ws.send(JSON.stringify(hello))
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(
+      messages.filter((message) => message.type === 'error' && message.code === 'APP_OUTDATED'),
+    ).toHaveLength(1)
+
+    ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
+  it('does not notify a phone that supports the deck controls', async () => {
+    const h = await harness()
+    attachControl(h, 'btn-vol-down', trackpad)
+    const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await waitFor(() => messages.find((message) => message.type === 'hello'))
+
+    ws.send(
+      JSON.stringify({
+        type: 'hello',
+        protocol: 1,
+        device: { name: 'Current phone', model: 'test', appVersion: '0.2.4' },
+        capabilities: ['input-v1', 'pointer-v1'],
+      } satisfies ClientMessage),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(
+      messages.filter((message) => message.type === 'error' && message.code === 'APP_OUTDATED'),
+    ).toHaveLength(0)
+
+    ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
+  it('notifies when a trackpad is added while an old phone is connected', async () => {
+    const h = await harness()
+    const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await waitFor(() => messages.find((message) => message.type === 'hello'))
+
+    ws.send(
+      JSON.stringify({
+        type: 'hello',
+        protocol: 1,
+        device: { name: 'Old phone', model: 'test', appVersion: '0.2.3' },
+        capabilities: ['input-v1'],
+      } satisfies ClientMessage),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(
+      messages.filter((message) => message.type === 'error' && message.code === 'APP_OUTDATED'),
+    ).toHaveLength(0)
+
+    attachControl(h, 'btn-vol-down', trackpad)
+    h.server.broadcastConfig()
+    await waitFor(() =>
+      messages.find((message) => message.type === 'error' && message.code === 'APP_OUTDATED'),
+    )
+
+    ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
   it('rejects a start that is not a trackpad control', async () => {
     const h = await harness()
     const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
