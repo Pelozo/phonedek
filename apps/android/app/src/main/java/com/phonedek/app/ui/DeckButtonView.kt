@@ -50,7 +50,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.phonedek.app.BuildConfig
 import com.phonedek.app.data.ControlStateDto
 import com.phonedek.app.data.DeckButton
 import com.phonedek.app.data.MediaIconDto
@@ -380,8 +379,6 @@ private fun InlineTrackpad(
     val wellShape = RoundedCornerShape(6.dp)
     val sublabel = button.sublabel?.trim()?.takeIf { it.isNotEmpty() }
         ?: "DRAG · TAP"
-    // Debug-only diagnostic: confirms whether a drag produced pointer movement.
-    var debugMove by remember { mutableStateOf("") }
 
     Box(
         modifier = modifier
@@ -434,18 +431,6 @@ private fun InlineTrackpad(
                 onStart = { trackpad.arm(button) },
                 onInput = trackpad.input,
                 onEnd = trackpad.end,
-                onFrame = { frame ->
-                    if (frame.dx != 0f || frame.dy != 0f) {
-                        debugMove = String.format(
-                            java.util.Locale.US,
-                            "M %+.2f %+.2f",
-                            frame.dx,
-                            frame.dy,
-                        )
-                    } else if (frame.scrollX != 0f || frame.scrollY != 0f) {
-                        debugMove = "SCROLL"
-                    }
-                },
                 modifier = Modifier.fillMaxSize(),
             ) {
                 PadGrid()
@@ -473,16 +458,6 @@ private fun InlineTrackpad(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    if (BuildConfig.DEBUG && debugMove.isNotEmpty()) {
-                        Text(
-                            text = debugMove,
-                            color = Accent.copy(alpha = 0.85f),
-                            fontFamily = ConsoleMono,
-                            fontSize = 6.sp,
-                            letterSpacing = 0.4.sp,
-                            maxLines = 1,
-                        )
-                    }
                 }
             }
             ExpandAffordance(
