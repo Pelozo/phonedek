@@ -124,6 +124,7 @@ class DeckConnection(
     private var port = 0
     private var token = ""
     private var attempt = 0
+    private var pointerMoveLogs = 0
     private var reconnectJob: Job? = null
     private var pingJob: Job? = null
 
@@ -235,6 +236,29 @@ class DeckConnection(
             scrollY = scrollY,
             buttons = buttons,
         )
+        // Keep the diagnostic stream small: the first few moves prove the
+        // gesture reached the classifier; every start/end stays visible.
+        when {
+            phase == "start" -> {
+                pointerMoveLogs = 0
+                Diag.d("WS -> pointer start control=${controlId.orEmpty()} seq=$seq")
+            }
+
+            phase == "move" && pointerMoveLogs < 3 -> {
+                pointerMoveLogs += 1
+                Diag.d(
+                    "WS -> pointer move #$pointerMoveLogs dx=${dx ?: 0f} " +
+                        "dy=${dy ?: 0f} scroll=${scrollX ?: 0f},${scrollY ?: 0f}",
+                )
+            }
+
+            phase != "move" -> {
+                Diag.d(
+                    "WS -> pointer $phase seq=$seq dx=${dx ?: 0f} dy=${dy ?: 0f} " +
+                        "buttons=${buttons.size}",
+                )
+            }
+        }
         return socket.send(payload.toString())
     }
 
