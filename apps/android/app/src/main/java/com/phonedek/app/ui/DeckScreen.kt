@@ -121,7 +121,7 @@ fun DeckScreen(
     val theme = profile?.theme ?: ProfileTheme()
     val trackpad = TrackpadActions(
         capable = state.pointerCapable,
-        arm = viewModel::armPointer,
+        arm = { button -> viewModel.armPointer(button, publishOptions = false) },
         input = viewModel::onPointerInput,
         end = viewModel::endInlinePointer,
     )

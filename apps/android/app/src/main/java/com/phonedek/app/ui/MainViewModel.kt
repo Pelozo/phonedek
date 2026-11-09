@@ -824,7 +824,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * inline tile (at touch-down) and the full-screen pad (on open) call this;
      * the press itself is intentionally never sent.
      */
-    fun armPointer(button: DeckButton): Boolean {
+    fun armPointer(button: DeckButton, publishOptions: Boolean = true): Boolean {
         val snapshot = _state.value
         if (!snapshot.pointerCapable) {
             notePointerUnsupported()
@@ -848,20 +848,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         pointerStartSent = false
         pointerFlushJob?.cancel()
         pointerFlushJob = null
-        _state.update {
-            it.copy(
-                pointerPadOptions = PointerPadOptions(
-                    controlId = button.id,
-                    label = button.label,
-                    sensitivity = binding?.sensitivity
-                        ?.takeIf { value -> value.isFinite() }
-                        ?.coerceIn(0.25f, 3f)
-                        ?: 1f,
-                    naturalScroll = binding?.naturalScroll ?: true,
-                    tapToClick = binding?.tapToClick ?: true,
-                    dragLock = binding?.dragLock ?: true,
-                ),
-            )
+        // The inline tile owns its own options; publishing them during a live
+        // gesture would recompose the deck/pager mid-touch. Only the overlay
+        // needs the published copy.
+        if (publishOptions) {
+            _state.update {
+                it.copy(
+                    pointerPadOptions = PointerPadOptions(
+                        controlId = button.id,
+                        label = button.label,
+                        sensitivity = binding?.sensitivity
+                            ?.takeIf { value -> value.isFinite() }
+                            ?.coerceIn(0.25f, 3f)
+                            ?: 1f,
+                        naturalScroll = binding?.naturalScroll ?: true,
+                        tapToClick = binding?.tapToClick ?: true,
+                        dragLock = binding?.dragLock ?: true,
+                    ),
+                )
+            }
         }
         return true
     }

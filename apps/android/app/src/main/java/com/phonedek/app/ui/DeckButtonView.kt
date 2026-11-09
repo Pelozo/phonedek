@@ -189,7 +189,6 @@ fun DeckButtonView(
                     textColor = textColor,
                     contentRotation = contentRotation,
                     trackpad = trackpad,
-                    onControlInteracting = onControlInteracting,
                     onExpand = onPress,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -361,7 +360,6 @@ private fun InlineTrackpad(
     textColor: Color,
     contentRotation: Float,
     trackpad: TrackpadActions,
-    onControlInteracting: (Boolean) -> Unit,
     onExpand: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -436,7 +434,6 @@ private fun InlineTrackpad(
                 onStart = { trackpad.arm(button) },
                 onInput = trackpad.input,
                 onEnd = trackpad.end,
-                onInteractingChange = onControlInteracting,
                 onFrame = { frame ->
                     if (frame.dx != 0f || frame.dy != 0f) {
                         debugMove = String.format(
