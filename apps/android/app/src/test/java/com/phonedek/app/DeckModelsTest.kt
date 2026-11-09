@@ -333,6 +333,145 @@ class DeckModelsTest {
     }
 
     @Test
+    fun parsesObsInputVolumeControl() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [{
+                    "id": "obs",
+                    "slot": 0,
+                    "label": "Mic/Aux",
+                    "control": {
+                      "kind": "slider",
+                      "axis": "horizontal",
+                      "emit": "value",
+                      "binding": {
+                        "type": "obs",
+                        "target": "inputVolume",
+                        "input": "Mic/Aux"
+                      },
+                      "min": 0,
+                      "max": 200,
+                      "step": 1,
+                      "initial": 100,
+                      "unit": "%",
+                      "haptics": true
+                    },
+                    "actions": [
+                      { "type": "obs", "action": "toggleMute", "input": "Mic/Aux" }
+                    ]
+                  }]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val button = DeckJson.parse(raw)!!.profiles.single().pages.single()
+            .buttons.single()
+        val control = button.control!!
+        assertEquals("slider", control.kind)
+        assertEquals("value", control.emit)
+        assertEquals("obs", control.binding.type)
+        assertEquals("inputVolume", control.binding.target)
+        assertEquals("Mic/Aux", control.binding.input)
+        assertEquals(0f, control.min!!, 0.001f)
+        assertEquals(200f, control.max!!, 0.001f)
+        assertEquals(1f, control.step!!, 0.001f)
+        assertEquals(100f, control.initial!!, 0.001f)
+        assertEquals("%", control.unit)
+        assertEquals("obs", button.actions.single().type)
+        assertEquals("toggleMute", button.actions.single().action)
+    }
+
+    @Test
+    fun obsDefaultsToUnityAndFullRangeWhenFieldsAreMissing() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [{
+                    "id": "obs",
+                    "slot": 0,
+                    "control": {
+                      "kind": "dial",
+                      "emit": "value",
+                      "binding": { "type": "obs", "target": "inputVolume" }
+                    }
+                  }]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val control = DeckJson.parse(raw)!!.profiles.single().pages.single()
+            .buttons.single().control!!
+        assertEquals("dial", control.kind)
+        assertEquals(0f, control.min!!, 0.001f)
+        assertEquals(200f, control.max!!, 0.001f)
+        assertEquals(1f, control.step!!, 0.001f)
+        assertEquals(100f, control.initial!!, 0.001f)
+        assertEquals("%", control.unit)
+        assertNull(control.binding.input)
+    }
+
+    @Test
+    fun obsRequiresInputVolumeTargetValueEmitAndNoMode() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [
+                    {
+                      "id": "bad-target",
+                      "slot": 0,
+                      "control": {
+                        "kind": "slider",
+                        "emit": "value",
+                        "binding": { "type": "obs", "target": "inputMute" }
+                      }
+                    },
+                    {
+                      "id": "bad-mode",
+                      "slot": 1,
+                      "control": {
+                        "kind": "slider",
+                        "emit": "value",
+                        "binding": {
+                          "type": "obs",
+                          "target": "inputVolume",
+                          "mode": "relative"
+                        }
+                      }
+                    },
+                    {
+                      "id": "bad-emit",
+                      "slot": 2,
+                      "control": {
+                        "kind": "slider",
+                        "emit": "delta",
+                        "binding": { "type": "obs", "target": "inputVolume" }
+                      }
+                    }
+                  ]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val buttons = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons
+        assertNull(buttons.first { it.id == "bad-target" }.control)
+        assertNull(buttons.first { it.id == "bad-mode" }.control)
+        assertNull(buttons.first { it.id == "bad-emit" }.control)
+    }
+
+    @Test
     fun unsupportedControlFallsBackToATapTile() {
         val raw = """
             {

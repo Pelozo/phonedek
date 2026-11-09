@@ -89,10 +89,11 @@ fun DeckControlView(
     val absolute = control.emit == "value"
     val isVolume = control.binding.type == "volume"
     val isMic = control.binding.type == "mic"
+    val isObs = control.binding.type == "obs"
     val scrollControl = control.binding.type == "scroll"
     val volumeStepPercent = control.binding.stepPercent?.coerceIn(1, 25) ?: 2
     val sliderWireScale = if (isVolume) 100f / volumeStepPercent else 100f
-    val displayUnit = control.unit ?: if (isVolume || isMic) "%" else ""
+    val displayUnit = control.unit ?: if (isVolume || isMic || isObs) "%" else ""
     val contentRotation = LocalButtonContentRotation.current
     val haptics = LocalHapticFeedback.current
     val density = LocalDensity.current
@@ -198,14 +199,16 @@ fun DeckControlView(
         stateDetail = stateDetail,
         interacting = interacting,
     )
-    val muted = statePresent && stateAvailable && stateMuted && !interacting
+    val muted = statePresent && stateAvailable &&
+        (stateMuted || stateDetail?.trim() == ControlStateStore.MUTED) &&
+        !interacting
     val stateBadge = if (stateCapable && stateAvailable && externalValue != null) {
         "LIVE"
     } else {
         "LOCAL"
     }
-    // An unavailable mic still knows the desktop supports live state; showing
-    // LOCAL beside NO INPUT would be misleading.
+    // An unavailable mic/OBS input still knows the desktop supports live state;
+    // showing LOCAL beside NO INPUT/NO OBS would be misleading.
     val showStateBadge = !statePresent && (tileHeightPx == 0 ||
         with(density) { tileHeightPx.toDp() } >= 48.dp)
 

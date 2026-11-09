@@ -253,7 +253,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 message: String?,
             ) {
                 if (!ok) {
-                    emit(error?.takeIf { it.isNotBlank() } ?: "The desktop could not run that action.")
+                    val failure = error?.takeIf { it.isNotBlank() }
+                        ?: "The desktop could not run that action."
+                    // OBS being closed or an input disappearing is reflected in
+                    // the tile's live state (NO OBS / NO INPUT). Do not raise a
+                    // deck-level toast for it; a mute tap fails quietly.
+                    if (isObsButton(buttonId)) {
+                        Diag.w("OBS action rejected button=$buttonId error=\"$failure\"")
+                    } else {
+                        emit(failure)
+                    }
                 } else {
                     // Success messages are optional; ordinary presses stay quiet.
                     message?.trim()?.takeIf { it.isNotEmpty() }?.let(::emit)
@@ -267,10 +276,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 error: String?,
             ) {
                 if (!ok) {
-                    emit(
-                        error?.takeIf { it.isNotBlank() }
-                            ?: "The desktop could not run that control.",
-                    )
+                    val failure = error?.takeIf { it.isNotBlank() }
+                        ?: "The desktop could not run that control."
+                    if (isObsControl(controlId)) {
+                        Diag.w("OBS input rejected control=$controlId error=\"$failure\"")
+                    } else {
+                        emit(failure)
+                    }
                 }
             }
 
@@ -1151,7 +1163,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             it.id == snapshot.activeProfileId
         } ?: return
         val page = profile.pages.firstOrNull { it.id == snapshot.activePageId } ?: return
-        val ids = ControlStateStore.absoluteVolumeControlIds(page)
+        val ids = ControlStateStore.statefulControlIds(page)
         val key = "${profile.id}|${page.id}|${ids.joinToString(",")}"
         if (key == lastWatchKey) return
         val sent = connection.sendWatch(
@@ -1403,6 +1415,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (profile.pages.none { it.id == pageId }) return
         setActivePage(profileId, pageId)
     }
+
+    private fun activeButton(buttonId: String): DeckButton? {
+        val snapshot = _state.value
+        val profile = snapshot.config?.profiles?.firstOrNull {
+            it.id == snapshot.activeProfileId
+        } ?: return null
+        val page = profile.pages.firstOrNull { it.id == snapshot.activePageId } ?: return null
+        return page.buttons.firstOrNull { it.id == buttonId }
+    }
+
+    private fun isObsControl(controlId: String): Boolean =
+        ControlStateStore.isObsValueControl(activeButton(controlId)?.control)
+
+    private fun isObsButton(buttonId: String): Boolean =
+        activeButton(buttonId)?.let { ControlStateStore.hasObsAction(it.actions) } == true
 
     fun onButtonPressed(button: DeckButton) {
         val snapshot = _state.value

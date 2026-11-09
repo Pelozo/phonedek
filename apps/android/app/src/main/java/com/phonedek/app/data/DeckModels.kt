@@ -118,6 +118,11 @@ data class ControlBindingDto(
     val stepPercent: Int? = null,
     val axis: String? = null,
     val invert: Boolean? = null,
+    // OBS input volume binding (`type == "obs"`, `target == "inputVolume"`).
+    // The name is scene-collection scoped; omitted means the desktop falls
+    // back to its first audio-like input.
+    val target: String? = null,
+    val input: String? = null,
     // Trackpad/pointer binding settings. The desktop applies sensitivity; the
     // phone only mirrors the flags for its local gesture classifier.
     val sensitivity: Float? = null,
@@ -474,6 +479,23 @@ private fun ControlBindingDto.normalized(): ControlBindingDto? {
             null
         }
 
+        // OBS input volume is always an absolute value binding. The target is
+        // fixed by the contract; an unknown target or a volume/mic-style mode
+        // is not an OBS binding and must not drive the tile.
+        "obs" -> {
+            val obsTarget = target?.trim()?.lowercase()
+            val obsMode = mode?.trim()?.lowercase()
+            if (obsTarget != "inputvolume" || !obsMode.isNullOrEmpty()) {
+                null
+            } else {
+                ControlBindingDto(
+                    type = "obs",
+                    target = "inputVolume",
+                    input = input?.trim()?.take(128)?.takeIf { it.isNotEmpty() },
+                )
+            }
+        }
+
         "pointer" -> ControlBindingDto(
             type = "pointer",
             mode = if (mode?.trim()?.lowercase() == "fullscreen") "fullscreen" else "inline",
@@ -518,13 +540,20 @@ private fun ControlDto.normalized(): ControlDto? {
         safeBinding.type == "volume" -> controlEmit == "delta"
         safeBinding.type == "scroll" -> controlEmit == "delta"
         safeBinding.type == "mic" -> controlEmit == "value"
+        safeBinding.type == "obs" -> controlEmit == "value"
         else -> false
     }
     if (!emitMatchesBinding) return null
 
-    val safeMin = min?.takeIf { it.isFinite() } ?: 0f
-    var safeMax = max?.takeIf { it.isFinite() } ?: 100f
-    if (safeMax <= safeMin) safeMax = safeMin + 100f
+    val isObs = safeBinding.type == "obs"
+    // OBS uses a 0..200 % range (100 % = 0 dB) and starts at unity instead of
+    // the midpoint used by the generic slider. Accept an explicit max so a
+    // future 0..2000 control still renders, but never a nonzero minimum: the
+    // desktop maps the normalized value directly to inputVolumeMul.
+    val defaultMax = if (isObs) 200f else 100f
+    val safeMin = if (isObs) 0f else (min?.takeIf { it.isFinite() } ?: 0f)
+    var safeMax = max?.takeIf { it.isFinite() } ?: defaultMax
+    if (safeMax <= safeMin) safeMax = safeMin + defaultMax
     val safeStep = step?.takeIf { it.isFinite() && it > 0f }
         ?: when {
             safeBinding.type == "volume" && safeBinding.mode == "relative" ->
@@ -532,11 +561,20 @@ private fun ControlDto.normalized(): ControlDto? {
 
             else -> 1f
         }
-    val safeInitial = (initial?.takeIf { it.isFinite() } ?: ((safeMin + safeMax) / 2f))
+    val defaultInitial = if (isObs) 100f else (safeMin + safeMax) / 2f
+    val safeInitial = (initial?.takeIf { it.isFinite() } ?: defaultInitial)
         .coerceIn(safeMin, safeMax)
     val safeAxis = if (axis?.trim()?.lowercase() == "vertical") "vertical" else "horizontal"
     val safeUnit = (unit?.trim()?.takeIf { it.isNotEmpty() }?.take(16))
-        ?: if (safeBinding.type == "volume" || safeBinding.type == "mic") "%" else null
+        ?: if (
+            safeBinding.type == "volume" ||
+            safeBinding.type == "mic" ||
+            safeBinding.type == "obs"
+        ) {
+            "%"
+        } else {
+            null
+        }
 
     return copy(
         kind = controlKind,

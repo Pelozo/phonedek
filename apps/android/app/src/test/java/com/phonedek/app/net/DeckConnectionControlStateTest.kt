@@ -100,6 +100,76 @@ class DeckConnectionControlStateTest {
     }
 
     @Test
+    fun parsesObsVolumeMuteAndUnavailableStates() {
+        val message = DeckJson.parseControlState(
+            """
+                {
+                  "type": "controlState",
+                  "profileId": "p1",
+                  "pageId": "pg1",
+                  "states": [
+                    {
+                      "controlId": "obs-live",
+                      "revision": 11,
+                      "value": 0.75,
+                      "muted": false,
+                      "available": true,
+                      "detail": "150%"
+                    },
+                    {
+                      "controlId": "obs-muted",
+                      "revision": 12,
+                      "value": 1.0,
+                      "muted": true,
+                      "available": true,
+                      "detail": "MUTED"
+                    },
+                    {
+                      "controlId": "obs-closed",
+                      "revision": 13,
+                      "available": false,
+                      "detail": "NO OBS"
+                    },
+                    {
+                      "controlId": "obs-missing",
+                      "revision": 14,
+                      "available": false,
+                      "detail": "NO INPUT"
+                    },
+                    {
+                      "controlId": "obs-switching",
+                      "revision": 15,
+                      "available": false,
+                      "detail": "SWITCHING"
+                    }
+                  ]
+                }
+            """.trimIndent(),
+        )
+
+        assertNotNull(message)
+        val states = message!!.states.associateBy { it.controlId }
+        assertEquals(5, states.size)
+
+        val live = states.getValue("obs-live")
+        assertEquals(0.75f, live.value!!, 0.0001f)
+        assertFalse(live.muted!!)
+        assertTrue(live.available)
+        assertEquals("150%", live.detail)
+
+        val muted = states.getValue("obs-muted")
+        assertTrue(muted.muted!!)
+        assertEquals("MUTED", muted.detail)
+
+        assertFalse(states.getValue("obs-closed").available)
+        assertEquals("NO OBS", states.getValue("obs-closed").detail)
+        assertFalse(states.getValue("obs-missing").available)
+        assertEquals("NO INPUT", states.getValue("obs-missing").detail)
+        assertFalse(states.getValue("obs-switching").available)
+        assertEquals("SWITCHING", states.getValue("obs-switching").detail)
+    }
+
+    @Test
     fun malformedEntriesAreDroppedWithoutLosingTheBatch() {
         val message = DeckJson.parseControlState(
             """

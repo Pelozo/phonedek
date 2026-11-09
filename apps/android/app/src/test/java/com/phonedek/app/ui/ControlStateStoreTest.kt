@@ -1,11 +1,13 @@
 package com.phonedek.app.ui
 
+import com.phonedek.app.data.ActionDto
 import com.phonedek.app.data.ControlBindingDto
 import com.phonedek.app.data.ControlDto
 import com.phonedek.app.data.ControlStateEntryDto
 import com.phonedek.app.data.DeckButton
 import com.phonedek.app.data.DeckPage
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -52,25 +54,145 @@ class ControlStateStoreTest {
     }
 
     @Test
-    fun onlyAbsoluteVolumeAndMicGainControlsAreWatchable() {
+    fun onlyAbsoluteVolumeMicGainAndObsControlsAreWatchable() {
         val page = DeckPage(
             id = "pg1",
             buttons = listOf(
                 button("abs-slider"),
                 button("abs-wheel", kind = "dial"),
                 button("mic", type = "mic", mode = "gain"),
+                button("obs", type = "obs", mode = null, target = "inputVolume"),
                 button("relative", mode = "relative", emit = "delta"),
                 button("scroll", type = "scroll", mode = null, emit = "delta"),
                 button("pad", kind = "trackpad", type = "pointer", mode = null, emit = "delta"),
                 button("bad-mic-mode", type = "mic", mode = "relative"),
+                button("bad-obs-target", type = "obs", mode = null, target = "inputMute"),
+                button(
+                    "obs-delta",
+                    type = "obs",
+                    mode = null,
+                    target = "inputVolume",
+                    emit = "delta",
+                ),
                 button("plain", control = null),
                 button("", control = null),
             ),
         )
 
         assertEquals(
-            listOf("abs-slider", "abs-wheel", "mic"),
-            ControlStateStore.absoluteVolumeControlIds(page),
+            listOf("abs-slider", "abs-wheel", "mic", "obs"),
+            ControlStateStore.statefulControlIds(page),
+        )
+    }
+
+    @Test
+    fun detectsObsValueControlsAndObsActions() {
+        val obs = ControlDto(
+            kind = "slider",
+            emit = "value",
+            binding = ControlBindingDto(type = "obs", target = "inputVolume"),
+        )
+        assertTrue(ControlStateStore.isObsValueControl(obs))
+        assertFalse(ControlStateStore.isObsValueControl(obs.copy(emit = "delta")))
+        assertFalse(
+            ControlStateStore.isObsValueControl(
+                obs.copy(binding = obs.binding.copy(target = "inputMute")),
+            ),
+        )
+        assertFalse(ControlStateStore.isObsValueControl(null))
+
+        assertTrue(
+            ControlStateStore.hasObsAction(
+                listOf(ActionDto(type = "obs", action = "toggleMute")),
+            ),
+        )
+        assertFalse(
+            ControlStateStore.hasObsAction(
+                listOf(ActionDto(type = "mic", action = "toggleMute")),
+            ),
+        )
+    }
+
+    @Test
+    fun obsDisplayTextUsesDesktopDetailStrings() {
+        assertEquals(
+            "150%",
+            ControlStateStore.displayText(
+                localText = "100%",
+                statePresent = true,
+                stateAvailable = true,
+                stateMuted = false,
+                stateDetail = "150%",
+                interacting = false,
+            ),
+        )
+        assertEquals(
+            ControlStateStore.MUTED,
+            ControlStateStore.displayText(
+                localText = "100%",
+                statePresent = true,
+                stateAvailable = true,
+                stateMuted = true,
+                stateDetail = "MUTED",
+                interacting = false,
+            ),
+        )
+        // Older/desktop-only state may carry MUTED as detail without the flag.
+        assertEquals(
+            ControlStateStore.MUTED,
+            ControlStateStore.displayText(
+                localText = "100%",
+                statePresent = true,
+                stateAvailable = true,
+                stateMuted = false,
+                stateDetail = "MUTED",
+                interacting = false,
+            ),
+        )
+        assertEquals(
+            ControlStateStore.NO_OBS,
+            ControlStateStore.displayText(
+                localText = "100%",
+                statePresent = true,
+                stateAvailable = false,
+                stateMuted = false,
+                stateDetail = "NO OBS",
+                interacting = false,
+            ),
+        )
+        assertEquals(
+            ControlStateStore.NO_INPUT,
+            ControlStateStore.displayText(
+                localText = "100%",
+                statePresent = true,
+                stateAvailable = false,
+                stateMuted = false,
+                stateDetail = "NO INPUT",
+                interacting = false,
+            ),
+        )
+        assertEquals(
+            ControlStateStore.SWITCHING,
+            ControlStateStore.displayText(
+                localText = "100%",
+                statePresent = true,
+                stateAvailable = false,
+                stateMuted = false,
+                stateDetail = "SWITCHING",
+                interacting = false,
+            ),
+        )
+        // Dragging keeps the local readout even while OBS is unavailable.
+        assertEquals(
+            "175%",
+            ControlStateStore.displayText(
+                localText = "175%",
+                statePresent = true,
+                stateAvailable = false,
+                stateMuted = false,
+                stateDetail = "NO OBS",
+                interacting = true,
+            ),
         )
     }
 
@@ -157,6 +279,17 @@ class ControlStateStoreTest {
             ControlStateStore.valueFromNormalized(2f, 0f, 1f, 0.1f),
             0.0001f,
         )
+        // OBS uses a 0..200 % range; 100 % is unity, not the midpoint.
+        assertEquals(
+            150f,
+            ControlStateStore.valueFromNormalized(0.75f, 0f, 200f, 1f),
+            0.0001f,
+        )
+        assertEquals(
+            100f,
+            ControlStateStore.valueFromNormalized(0.5f, 0f, 200f, 1f),
+            0.0001f,
+        )
     }
 
     @Test
@@ -167,11 +300,16 @@ class ControlStateStoreTest {
             0.0001f,
         )
         assertEquals(
+            200f,
+            ControlStateStore.snapControlValue(280f, 0f, 200f, 1f),
+            0.0001f,
+        )
+        assertEquals(
             13.4f,
             ControlStateStore.snapControlValue(13.4f, 0f, 100f, 0f),
             0.0001f,
         )
-        assertTrue(ControlStateStore.absoluteVolumeControlIds(DeckPage()).isEmpty())
+        assertTrue(ControlStateStore.statefulControlIds(DeckPage()).isEmpty())
     }
 
     private fun state(
@@ -193,11 +331,12 @@ class ControlStateStoreTest {
         kind: String = "slider",
         type: String = "volume",
         mode: String? = "absolute",
+        target: String? = null,
         emit: String = "value",
         control: ControlDto? = ControlDto(
             kind = kind,
             emit = emit,
-            binding = ControlBindingDto(type = type, mode = mode),
+            binding = ControlBindingDto(type = type, mode = mode, target = target),
         ),
     ) = DeckButton(id = id, control = control)
 }

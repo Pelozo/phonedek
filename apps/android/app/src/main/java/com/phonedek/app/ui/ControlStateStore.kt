@@ -1,5 +1,7 @@
 package com.phonedek.app.ui
 
+import com.phonedek.app.data.ActionDto
+import com.phonedek.app.data.ControlDto
 import com.phonedek.app.data.ControlStateDto
 import com.phonedek.app.data.DeckPage
 import kotlin.math.roundToInt
@@ -11,12 +13,16 @@ import kotlin.math.roundToInt
  */
 object ControlStateStore {
     const val NO_INPUT = "NO INPUT"
+    const val NO_OBS = "NO OBS"
     const val MUTED = "MUTED"
+    const val SWITCHING = "SWITCHING"
+
+    private val unavailableDetails = setOf(NO_INPUT, NO_OBS, SWITCHING)
 
     /**
      * Text shown in a control header. The local value stays usable while the
-     * desktop reports that no capture device exists, and a muted mic is always
-     * explicit even if the desktop omits its detail string.
+     * desktop reports that no capture/OBS source exists, and a muted source is
+     * always explicit even if the desktop omits its detail string.
      */
     fun displayText(
         localText: String,
@@ -27,16 +33,34 @@ object ControlStateStore {
         interacting: Boolean,
     ): String {
         if (interacting || !statePresent) return localText
+        val detail = stateDetail?.trim()?.takeIf { it.isNotEmpty() }
+        // OBS distinguishes a missing input from a closed socket and a scene
+        // collection switch. Preserve those exact strings instead of folding
+        // every unavailable source into NO INPUT.
+        if (detail != null && detail in unavailableDetails) return detail
+        if (stateMuted || detail == MUTED) return MUTED
         if (!stateAvailable) return NO_INPUT
-        if (stateMuted) return MUTED
-        return stateDetail?.trim()?.takeIf { it.isNotEmpty() } ?: localText
+        return detail ?: localText
     }
 
+    /** True for an OBS input-volume value control (slider or dial). */
+    fun isObsValueControl(control: ControlDto?): Boolean =
+        control != null &&
+            control.kind != "trackpad" &&
+            control.emit == "value" &&
+            control.binding.type == "obs" &&
+            control.binding.target == "inputVolume"
+
+    /** True when a button carries an OBS action (e.g. tap-to-mute). */
+    fun hasObsAction(actions: List<ActionDto>): Boolean =
+        actions.any { it.type.trim().lowercase() == "obs" }
+
     /**
-     * Controls with a desktop live-state producer: absolute output volume and
-     * microphone gain. Relative volume, scroll and trackpads stay open-loop.
+     * Controls with a desktop live-state producer: absolute output volume,
+     * microphone gain and OBS input volume. Relative volume, scroll and
+     * trackpads stay open-loop.
      */
-    fun absoluteVolumeControlIds(page: DeckPage): List<String> =
+    fun statefulControlIds(page: DeckPage): List<String> =
         page.buttons
             .asSequence()
             .filter { button ->
@@ -47,6 +71,7 @@ object ControlStateStore {
                 when (control.binding.type) {
                     "volume" -> control.binding.mode == "absolute"
                     "mic" -> control.binding.mode == "gain"
+                    "obs" -> control.binding.target == "inputVolume"
                     else -> false
                 }
             }
