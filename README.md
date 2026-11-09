@@ -39,6 +39,8 @@ No cloud, no account, no vendor lock-in: the phone talks directly to your PC ove
 - **Per-page grids** — 1×1 to 10×10 cells per page, with optional profile defaults; buttons snap to slots; drag to rearrange or swap. Change one page without touching the rest.
 - **Buttons** — label, sublabel, 175 searchable emoji icons or your own, plus animated GIF/video media icons; solid/gradient/image/video backgrounds, dark overlay, custom text color, per-button radius.
 - **Backgrounds** — curated gradients, color presets, or import PNG/JPG/WEBP/GIF/BMP (up to 25 MB) and MP4/WEBM/M4V/MOV video (up to 100 MB). Animated GIFs and videos play in the editor and on the phone.
+- **Continuous controls** — absolute/relative volume sliders, volume wheels and scroll wheels, plus a trackpad tile (inline on the deck or a full-screen pad). Tiles honour spans and row spans.
+- **Component clipboard** — `Ctrl/Cmd+C/X/V` copy, cut and paste a button or control, and **Move to…** sends it to any page or profile, keeping its settings and finding a free slot.
 - **Live preview** — the editor canvas is the same grid the phone renders, including slots and overflow warnings.
 - **Backups** — export/import a ZIP containing the config and every image/video asset; legacy JSON configs still import.
 - **Instant sync** — every saved change is pushed to connected phones over WebSocket.
@@ -47,7 +49,7 @@ No cloud, no account, no vendor lock-in: the phone talks directly to your PC ove
 
 - **Shortcuts** — Ctrl+C, Cmd+Shift+3, Alt+Tab, media keys, F-keys, punctuation… labels and presets follow the host OS, so macOS shows Cmd/Option and Windows shows Win/Alt.
 - **Preset packs** — Chrome, OBS Studio, VS Code, System and Media shortcuts, filterable and platform-aware.
-- **Full-screen screenshots** — the Screenshot button uses the Snipping Tool on Windows and a silent full-screen PNG on macOS, saved to the Desktop with a completion notification.
+- **Full-screen screenshots** — the Screenshot button captures the whole desktop directly to a PNG on Windows and macOS (no Snipping Tool), saved to the configured folder with a completion notification. Buttons imported from a macOS profile work on Windows too.
 - **Macros** — record chords, typing and pauses with pause/resume/undo; choose whether pauses and text grouping are captured; repeat a macro 1–50× with a gap; edit/reorder/duplicate steps; mouse click, double-click, hold, release, move and scroll; launch/URL/command steps; keys can press, hold or release. Macro actions stay collapsed as one summary until you expand them.
 - **Type text** — full Unicode text typed into the active window.
 - **Launch applications** — pick an `.exe`, `.lnk`, `.bat` or `.cmd`, with arguments.
@@ -64,6 +66,9 @@ No cloud, no account, no vendor lock-in: the phone talks directly to your PC ove
 - **4-digit PIN auth** — every HTTP/WebSocket request needs the pairing PIN; generate a new PIN to revoke all phones. Wrong PINs are rate-limited.
 - **Offline cache** — the phone keeps the last config and can render while the PC is asleep/offline.
 - **Auto-reconnect** with backoff, heartbeat, and a clear connection status.
+- **Live volume state** — absolute volume controls show the PC's actual level and follow external changes. Old desktops fall back to `LOCAL`.
+- **Pointer safety** — Settings → Input has an **Allow pointer control** master switch; it releases held buttons and suspends cursor/click injection. Native approval dialogs suspend it automatically.
+- **Trackpad** — one-finger move, tap/right-click, two-finger scroll and long-press drag-lock, with sensitivity, natural scroll and drag-lock options. Windows/macOS use relative injection; Linux needs X11 (Wayland is unsupported).
 
 ## Quick start (Windows)
 
