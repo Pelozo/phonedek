@@ -282,4 +282,61 @@ describe('ControlInputRouter', () => {
     expect(calls).toHaveLength(0)
     router.dispose()
   })
+
+  it('applies mic gain values with latest-wins coalescing', async () => {
+    vi.useFakeTimers()
+    const applied: Array<{ value: number; type: string }> = []
+    const router = new ControlInputRouter({
+      execute: async () => ({ ok: true }),
+      applyAbsolute: async (control, value) => {
+        applied.push({ value, type: control.binding.type })
+        return { ok: true }
+      },
+      flushMs: 50,
+    })
+    const mic: ControlSpec = {
+      kind: 'slider',
+      emit: 'value',
+      binding: { type: 'mic', mode: 'gain' },
+      min: 0,
+      max: 100,
+      step: 1,
+      initial: 50,
+      unit: '%',
+    }
+
+    await router.handle(message('move', undefined, 'btn-mic', 0.2), target(mic, 'Microphone'))
+    await router.handle(message('move', undefined, 'btn-mic', 0.8), target(mic, 'Microphone'))
+    expect(applied).toEqual([])
+    await vi.advanceTimersByTimeAsync(50)
+    expect(applied).toEqual([{ value: 0.8, type: 'mic' }])
+
+    await expect(
+      router.handle(message('end', undefined, 'btn-mic'), target(mic, 'Microphone')),
+    ).resolves.toEqual({ ok: true })
+    expect(applied).toEqual([{ value: 0.8, type: 'mic' }])
+    router.dispose()
+  })
+
+  it('rejects malformed mic controls and a missing mic backend', async () => {
+    const router = new ControlInputRouter({ execute: async () => ({ ok: true }) })
+    const deltaMic: ControlSpec = {
+      kind: 'slider',
+      emit: 'delta',
+      binding: { type: 'mic', mode: 'gain' },
+    }
+    let result = await router.handle(message('move', 0.5, 'btn-mic'), target(deltaMic, 'Mic'))
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/Mic gain requires a value control/)
+
+    const valueMic: ControlSpec = {
+      kind: 'slider',
+      emit: 'value',
+      binding: { type: 'mic', mode: 'gain' },
+    }
+    result = await router.handle(message('move', undefined, 'btn-mic', 0.5), target(valueMic, 'Mic'))
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/Microphone gain is not available/)
+    router.dispose()
+  })
 })

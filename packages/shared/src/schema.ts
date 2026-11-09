@@ -134,6 +134,10 @@ const pageSchema = z.object({
   direction: z.enum(['next', 'prev', 'goto']),
   pageId: id.optional(),
 })
+const micSchema = z.object({
+  type: z.literal('mic'),
+  action: z.literal('toggleMute'),
+})
 
 export const MacroStepSchema = z.discriminatedUnion('type', [
   hotkeySchema,
@@ -161,6 +165,7 @@ export const ActionSchema = z.union([
   mediaSchema,
   delaySchema,
   pageSchema,
+  micSchema,
 ])
 
 export const GridSchema = z.object({
@@ -202,6 +207,10 @@ export const ControlBindingSchema = z.union([
     type: z.literal('scroll'),
     axis: z.enum(['vertical', 'horizontal']),
     invert: z.boolean().optional(),
+  }),
+  z.object({
+    type: z.literal('mic'),
+    mode: z.literal('gain'),
   }),
 ])
 
@@ -245,6 +254,13 @@ const sliderOrDialControlSchema = z
               : 'Relative volume requires emit "delta"',
         })
       }
+    }
+    if (control.binding.type === 'mic' && control.emit !== 'value') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['emit'],
+        message: 'Mic gain requires emit "value"',
+      })
     }
     if (control.min !== undefined && control.max !== undefined && control.min >= control.max) {
       ctx.addIssue({

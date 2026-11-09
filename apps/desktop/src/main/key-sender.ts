@@ -7,6 +7,10 @@ export interface KeySender {
   send(step: KeyboardPlanStep): Promise<void>
   /** Set absolute output volume (0..100) on hosts that support it. */
   setVolume?(level: number): Promise<void>
+  /** Set default capture-device gain (0..100) on hosts that support it. */
+  setInputGain?(level: number): Promise<void>
+  /** Set the default capture-device mute flag. */
+  setInputMute?(muted: boolean): Promise<void>
   /** Whether the helper can inject input right now (macOS TCC check). */
   probeAccessibility?(): Promise<boolean>
   /** Restart a helper that cached a permission denial. */
@@ -78,6 +82,15 @@ export class HelperKeySender implements KeySender {
   async setVolume(level: number): Promise<void> {
     const clamped = Math.max(0, Math.min(100, Math.round(level)))
     await this.sendRaw({ kind: 'set-volume', level: clamped })
+  }
+
+  async setInputGain(level: number): Promise<void> {
+    const clamped = Math.max(0, Math.min(100, Math.round(level)))
+    await this.sendRaw({ kind: 'set-input-gain', level: clamped })
+  }
+
+  async setInputMute(muted: boolean): Promise<void> {
+    await this.sendRaw({ kind: 'set-input-mute', muted })
   }
 
   /**

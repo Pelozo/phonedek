@@ -290,6 +290,11 @@ export class HelperVolumeProbe {
     return parseWindowsVolumePayload(payload)
   }
 
+  /** Raw `get-input` payload; the microphone controller parses it. */
+  readInput(): Promise<{ value?: unknown; muted?: unknown }> {
+    return this.sendStep({ kind: 'get-input' })
+  }
+
   dispose(): void {
     this.disposed = true
     this.kill()

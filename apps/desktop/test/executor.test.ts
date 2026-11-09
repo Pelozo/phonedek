@@ -41,6 +41,12 @@ function fakeHost(log: string[], screenshotPaths: string[] = [SCREENSHOT_PATH]):
     async setVolume(level) {
       log.push(`volume:${level}`)
     },
+    async setInputGain(level) {
+      log.push(`input-gain:${level}`)
+    },
+    async toggleInputMute() {
+      log.push('input-mute')
+    },
   }
 }
 
@@ -235,6 +241,41 @@ describe('ActionExecutor', () => {
     await first
     await volume
     expect(log).toEqual(['start:A', 'end:A', 'volume:30'])
+  })
+
+  it('routes mic actions and gain through the host queue', async () => {
+    const log: string[] = []
+    const executor = new ActionExecutor(fakeKeys(log), fakeHost(log))
+
+    await expect(
+      executor.execute([{ type: 'mic', action: 'toggleMute' }], 'mic'),
+    ).resolves.toEqual({ ok: true })
+    await expect(executor.executeInputGain(42.6, 'mic gain')).resolves.toEqual({ ok: true })
+    await expect(executor.executeInputMute('mic mute')).resolves.toEqual({ ok: true })
+    expect(log).toEqual(['input-mute', 'input-gain:43', 'input-mute'])
+
+    await expect(executor.executeInputGain(Number.NaN, 'bad')).resolves.toEqual({
+      ok: false,
+      error: 'Microphone gain must be a finite number',
+    })
+  })
+
+  it('returns a useful mic error and keeps the queue alive', async () => {
+    const log: string[] = []
+    const host: HostActions = {
+      ...fakeHost(log),
+      async setInputGain() {
+        throw new Error('Could not set microphone gain with pactl')
+      },
+    }
+    const executor = new ActionExecutor(fakeKeys(log), host)
+    await expect(executor.executeInputGain(40, 'mic')).resolves.toEqual({
+      ok: false,
+      error: 'Could not set microphone gain with pactl',
+    })
+    await expect(executor.execute([{ type: 'hotkey', keys: ['WIN', 'D'] }], 'good')).resolves.toEqual({
+      ok: true,
+    })
   })
 
   it('serializes overlapping presses', async () => {

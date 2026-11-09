@@ -208,6 +208,12 @@ export interface PageAction {
   pageId?: string
 }
 
+/** Toggle mute on the default capture device. No value/setGain in the MVP. */
+export interface MicAction {
+  type: 'mic'
+  action: 'toggleMute'
+}
+
 /** A button executes its actions in order. */
 export type Action =
   | HotkeyAction
@@ -219,6 +225,13 @@ export type Action =
   | MediaAction
   | DelayAction
   | PageAction
+
+/**
+ * Everything the host can execute. Mic actions are accepted by ActionSchema and
+ * the plan builder but deliberately stay out of `Action` so older renderers do
+ * not have to handle a new action type.
+ */
+export type ExecutableAction = Action | MicAction
 
 /** Footprint of a button measured in grid cells. */
 export interface CellSpan {
@@ -252,6 +265,11 @@ export type ControlBinding =
       axis: 'vertical' | 'horizontal'
       /** Reverse the wheel direction. */
       invert?: boolean
+    }
+  | {
+      /** Default capture device gain (MVP: gain only, no device picker). */
+      type: 'mic'
+      mode: 'gain'
     }
 
 /**
@@ -420,6 +438,11 @@ export interface PagePlanStep {
   pageId?: string
 }
 
+export interface MicPlanStep {
+  kind: 'mic'
+  action: 'toggleMute'
+}
+
 export type PlanStep =
   | KeyPlanStep
   | TextPlanStep
@@ -430,6 +453,7 @@ export type PlanStep =
   | UrlPlanStep
   | CommandPlanStep
   | PagePlanStep
+  | MicPlanStep
 
 export type KeyboardPlanStep = KeyPlanStep | TextPlanStep | DelayPlanStep | MediaPlanStep | MousePlanStep
 

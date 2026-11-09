@@ -31,7 +31,7 @@ import type {
   WatchMessage,
 } from '@phonedek/shared'
 import type { AssetStore } from './assets'
-import { resolveAbsoluteVolumeControls, type ControlStateSubscription } from './control-state'
+import { resolveStateControls, type ControlStateSubscription } from './control-state'
 import {
   previewBackup,
   readBackupFile,
@@ -696,13 +696,13 @@ export class DeckServer {
     record.watchTimes.push(now)
 
     // An explicit empty list drops the subscription; omitted means every
-    // absolute-volume control on the page.
+    // state-bearing control (absolute volume or microphone gain) on the page.
     if (message.controlIds !== undefined && message.controlIds.length === 0) {
       this.options.controlState.unsubscribe(record.info.id)
       return
     }
 
-    const controls = resolveAbsoluteVolumeControls(
+    const controls = resolveStateControls(
       this.options.getConfig(),
       message.profileId,
       message.pageId,
@@ -724,6 +724,7 @@ export class DeckServer {
         profileId: message.profileId,
         pageId: message.pageId,
         controlIds: controls.map((control) => control.id),
+        controls,
         intervalMs,
         send: (state) => this.send(record.ws, state),
       })

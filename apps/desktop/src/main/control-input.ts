@@ -92,7 +92,7 @@ export class ControlInputRouter {
         state.value = null
         return Promise.resolve({ ok: true })
       case 'move': {
-        if (this.isAbsolute(target.control)) {
+        if (this.isValueControl(target.control)) {
           const value = message.value
           if (value !== undefined && Number.isFinite(value)) {
             state.value = Math.max(0, Math.min(1, value))
@@ -123,14 +123,23 @@ export class ControlInputRouter {
     this.pending.clear()
   }
 
-  private isAbsolute(control: ControlSpec): boolean {
+  private isValueControl(control: ControlSpec): boolean {
+    if (control.binding.type === 'mic') return true
     return control.binding.type === 'volume' && control.binding.mode === 'absolute'
   }
 
   private unsupportedReason(control: ControlSpec): string | null {
-    if (this.isAbsolute(control)) {
-      if (control.emit !== 'value') return 'Absolute volume requires a value control.'
-      if (!this.applyAbsolute) return 'Absolute volume is not available on this desktop.'
+    if (this.isValueControl(control)) {
+      if (control.emit !== 'value') {
+        return control.binding.type === 'mic'
+          ? 'Mic gain requires a value control.'
+          : 'Absolute volume requires a value control.'
+      }
+      if (!this.applyAbsolute) {
+        return control.binding.type === 'mic'
+          ? 'Microphone gain is not available on this desktop.'
+          : 'Absolute volume is not available on this desktop.'
+      }
       return null
     }
     if (control.emit !== 'delta') {
@@ -167,7 +176,7 @@ export class ControlInputRouter {
       const value = state.value
       state.value = null
       const apply = this.applyAbsolute
-      if (!apply) return { ok: false, error: 'Absolute volume is not available on this desktop.' }
+      if (!apply) return { ok: false, error: 'Value controls are not available on this desktop.' }
       return this.runExecution(state, () => apply(state.control, value, state.label), force)
     }
 

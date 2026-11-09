@@ -1,6 +1,6 @@
 import { basename } from 'node:path'
 import { actionsToPlan, isScreenshotShortcut } from '@phonedek/shared'
-import type { Action, KeyboardPlanStep, PressResult } from '@phonedek/shared'
+import type { ExecutableAction, KeyboardPlanStep, PressResult } from '@phonedek/shared'
 import type { HostActions } from './host-actions'
 import type { KeySender } from './key-sender'
 import type { Logger } from './logger'
@@ -34,7 +34,7 @@ export class ActionExecutor {
     this.onScreenshot = options.onScreenshot
   }
 
-  execute(actions: readonly Action[], label = 'button'): Promise<PressResult> {
+  execute(actions: readonly ExecutableAction[], label = 'button'): Promise<PressResult> {
     const task = this.queue.then(() => this.run(actions, label))
     this.queue = task.then(
       () => undefined,
@@ -46,6 +46,26 @@ export class ActionExecutor {
   /** Set absolute system volume through the same serialized queue as presses. */
   executeVolume(level: number, label = 'volume'): Promise<PressResult> {
     const task = this.queue.then(() => this.runVolume(level, label))
+    this.queue = task.then(
+      () => undefined,
+      () => undefined,
+    )
+    return task
+  }
+
+  /** Set default microphone gain (0..100) through the serialized queue. */
+  executeInputGain(level: number, label = 'microphone'): Promise<PressResult> {
+    const task = this.queue.then(() => this.runInputGain(level, label))
+    this.queue = task.then(
+      () => undefined,
+      () => undefined,
+    )
+    return task
+  }
+
+  /** Toggle default microphone mute through the serialized queue. */
+  executeInputMute(label = 'microphone'): Promise<PressResult> {
+    const task = this.queue.then(() => this.runInputMute(label))
     this.queue = task.then(
       () => undefined,
       () => undefined,
@@ -67,7 +87,35 @@ export class ActionExecutor {
     }
   }
 
-  private async run(actions: readonly Action[], label: string): Promise<PressResult> {
+  private async runInputGain(level: number, label: string): Promise<PressResult> {
+    if (!Number.isFinite(level)) {
+      return { ok: false, error: 'Microphone gain must be a finite number' }
+    }
+    const value = Math.max(0, Math.min(100, Math.round(level)))
+    this.logger?.info(`Set microphone gain to ${value}% for "${label}"`)
+    try {
+      await this.host.setInputGain(value)
+      return { ok: true }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger?.error(`Microphone gain action for "${label}" failed: ${message}`)
+      return { ok: false, error: message }
+    }
+  }
+
+  private async runInputMute(label: string): Promise<PressResult> {
+    this.logger?.info(`Toggled microphone mute for "${label}"`)
+    try {
+      await this.host.toggleInputMute()
+      return { ok: true }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger?.error(`Microphone mute action for "${label}" failed: ${message}`)
+      return { ok: false, error: message }
+    }
+  }
+
+  private async run(actions: readonly ExecutableAction[], label: string): Promise<PressResult> {
     const plan = actionsToPlan(actions)
     if (plan.length === 0) {
       this.logger?.info(`Pressed "${label}" (no actions)`)
@@ -90,6 +138,9 @@ export class ActionExecutor {
             break
           case 'page':
             // Page navigation is handled on the phone; never execute it here.
+            break
+          case 'mic':
+            await this.host.toggleInputMute()
             break
           default:
             if (KEYBOARD_KINDS.has(step.kind)) {

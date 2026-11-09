@@ -29,6 +29,7 @@ import { SettingsStore } from './settings-store'
 import { UpdateService } from './updater'
 import { isRunningAppSigned, resolveUpdatePolicy } from './update-policy'
 import { createVolumeReader, HelperVolumeProbe, type VolumeReader } from './volume-source'
+import { createMicrophone, parseWindowsInputPayload, type Microphone } from './microphone-source'
 import { IPC } from '../shared/api'
 import type {
   AppState,
@@ -57,6 +58,7 @@ let executor: ActionExecutor
 let inputRouter: ControlInputRouter | null = null
 let controlState: ControlStateService | null = null
 let volumeProbe: HelperVolumeProbe | null = null
+let microphone: Microphone | null = null
 let pointerSender: PointerSender | null = null
 let pointerRouter: PointerRouter | null = null
 /** A native import/destructive dialog is waiting for a decision. */
@@ -437,6 +439,9 @@ function registerIpc(): void {
         if (button.control.emit !== 'value') {
           return { ok: false, error: 'This control does not use an absolute value' }
         }
+        if (button.control.binding.type === 'mic') {
+          return executor.executeInputGain(value * 100, `test ${button.label || 'control'}`)
+        }
         return executor.executeVolume(value * 100, `test ${button.label || 'control'}`)
       }
 
@@ -778,6 +783,18 @@ async function bootstrap(): Promise<void> {
   assets = new AssetStore(store.assetsDir, logger)
 
   keySender = createKeySender(helperPath(), process.platform, logger)
+  if (process.platform === 'win32') {
+    volumeProbe = new HelperVolumeProbe(helperPath(), logger)
+  }
+  const windowsMic =
+    process.platform === 'win32' && volumeProbe && keySender.setInputGain && keySender.setInputMute
+      ? {
+          read: async () => parseWindowsInputPayload(await volumeProbe!.readInput()),
+          setGain: async (level: number) => keySender.setInputGain!(level),
+          setMute: async (muted: boolean) => keySender.setInputMute!(muted),
+        }
+      : undefined
+  microphone = createMicrophone(process.platform, windowsMic ? { windows: windowsMic } : {})
   const host = createHostActions({
     platform: process.platform,
     logger,
@@ -789,6 +806,18 @@ async function bootstrap(): Promise<void> {
           setSystemVolume: async (level: number) => {
             if (!keySender.setVolume) throw new Error('The Windows keyboard helper does not support volume control.')
             await keySender.setVolume(level)
+          },
+        }
+      : {}),
+    ...(microphone
+      ? {
+          setSystemInputGain: async (level: number) => {
+            await microphone!.setGain(level)
+            await controlState?.noteMicWritten(level)
+          },
+          toggleSystemInputMute: async () => {
+            const reading = await microphone!.toggleMute()
+            await controlState?.noteMicWritten(reading.level, reading.muted)
           },
         }
       : {}),
@@ -813,21 +842,33 @@ async function bootstrap(): Promise<void> {
   })
   const volumeReader: VolumeReader | null =
     process.platform === 'win32'
-      ? (() => {
-          volumeProbe = new HelperVolumeProbe(helperPath(), logger)
-          return createVolumeReader('win32', { windowsRead: () => volumeProbe!.read() })
-        })()
+      ? (volumeProbe
+          ? createVolumeReader('win32', { windowsRead: () => volumeProbe!.read() })
+          : null)
       : createVolumeReader(process.platform)
-  controlState = volumeReader ? new ControlStateService({ reader: volumeReader, logger }) : null
+  controlState =
+    volumeReader || microphone
+      ? new ControlStateService({
+          ...(volumeReader ? { reader: volumeReader } : {}),
+          ...(microphone ? { micReader: microphone } : {}),
+          logger,
+        })
+      : null
   if (controlState) {
-    logger.info(`Live control state enabled on ${process.platform}`)
+    const sources = [volumeReader ? 'volume' : null, microphone ? 'microphone' : null]
+      .filter(Boolean)
+      .join(' + ')
+    logger.info(`Live control state enabled on ${process.platform} (${sources})`)
   } else {
-    logger.info('Live control state disabled: no system volume reader on this host')
+    logger.info('Live control state disabled: no system volume or microphone reader on this host')
   }
 
   const router = new ControlInputRouter({
     execute: (actions, label) => executor.execute(actions, label),
-    applyAbsolute: async (_control, value, label) => {
+    applyAbsolute: async (control, value, label) => {
+      if (control.binding.type === 'mic') {
+        return executor.executeInputGain(value * 100, label)
+      }
       const result = await executor.executeVolume(value * 100, label)
       if (result.ok) await controlState?.noteVolumeWritten(value * 100)
       return result

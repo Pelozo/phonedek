@@ -1,6 +1,7 @@
 import type {
   Action,
   ControlSpec,
+  ExecutableAction,
   KeyboardPlanStep,
   MacroStep,
   PagePlanStep,
@@ -68,7 +69,7 @@ function stepToPlan(step: MacroStep, options: PlanOptions): PlanStep {
  * Page actions are returned as units; the phone normally handles them locally,
  * while the desktop executor ignores them.
  */
-export function actionsToPlan(actions: readonly Action[], options: PlanOptions = {}): PlanStep[] {
+export function actionsToPlan(actions: readonly ExecutableAction[], options: PlanOptions = {}): PlanStep[] {
   const plan: PlanStep[] = []
   for (const action of actions) {
     switch (action.type) {
@@ -108,16 +109,19 @@ export function actionsToPlan(actions: readonly Action[], options: PlanOptions =
           ...(action.pageId ? { pageId: action.pageId } : {}),
         })
         break
+      case 'mic':
+        plan.push({ kind: 'mic', action: action.action })
+        break
     }
   }
   return plan
 }
 
-export function pageActions(actions: readonly Action[]): PagePlanStep[] {
+export function pageActions(actions: readonly ExecutableAction[]): PagePlanStep[] {
   return actionsToPlan(actions).filter((step): step is PagePlanStep => step.kind === 'page')
 }
 
-export function hasHostActions(actions: readonly Action[]): boolean {
+export function hasHostActions(actions: readonly ExecutableAction[]): boolean {
   return actionsToPlan(actions).some((step) => step.kind !== 'page')
 }
 
@@ -140,6 +144,7 @@ export function controlToActions(control: ControlSpec, delta: number): Action[] 
   // Pointer input travels over the `pointer` message; never synthesise actions.
   if (control.kind === 'trackpad') return []
   if (!Number.isFinite(delta) || delta === 0) return []
+  if (control.binding.type === 'mic') return []
   if (control.binding.type === 'volume' && control.binding.mode === 'absolute') return []
   const magnitude = Math.ceil(Math.abs(delta))
 
@@ -414,7 +419,7 @@ export function describeStep(step: MacroStep): string {
   }
 }
 
-export function describeAction(action: Action, platform?: string): string {
+export function describeAction(action: ExecutableAction, platform?: string): string {
   switch (action.type) {
     case 'hotkey':
       return formatCombo(action.keys, platform)
@@ -440,5 +445,7 @@ export function describeAction(action: Action, platform?: string): string {
         : action.direction === 'next'
           ? 'Next page'
           : 'Previous page'
+    case 'mic':
+      return 'Toggle microphone mute'
   }
 }

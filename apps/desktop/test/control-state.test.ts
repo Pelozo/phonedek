@@ -4,8 +4,11 @@ import { createDefaultConfig } from '@phonedek/shared'
 import {
   ControlStateService,
   isAbsoluteVolumeControl,
+  isMicGainControl,
   resolveAbsoluteVolumeControls,
+  resolveStateControls,
 } from '../src/main/control-state'
+import type { MicReader, MicReading } from '../src/main/microphone-source'
 import {
   CachedVolumeReader,
   parseMacVolumeOutput,
@@ -36,6 +39,29 @@ class FakeReader implements VolumeReader {
   setKnown(reading: VolumeReading): void {
     this.level = Math.round(reading.level)
     this.muted = reading.muted
+  }
+}
+
+class FakeMicReader implements MicReader {
+  level = 55
+  muted = false
+  failure: Error | null = null
+  reads = 0
+  invalidations = 0
+
+  async read(): Promise<MicReading> {
+    this.reads += 1
+    if (this.failure) throw this.failure
+    return { level: this.level, muted: this.muted }
+  }
+
+  invalidate(): void {
+    this.invalidations += 1
+  }
+
+  setKnown(reading: MicReading): void {
+    this.level = Math.round(reading.level)
+    this.muted = reading.muted ?? false
   }
 }
 
@@ -362,3 +388,183 @@ describe('ControlStateService', () => {
     })
   })
 })
+
+describe('microphone control state', () => {
+  function micFixture(): {
+    config: DeckConfig
+    profileId: string
+    pageId: string
+    micId: string
+    volumeId: string
+  } {
+    const config = createDefaultConfig()
+    const profile = config.profiles[0]!
+    const page = profile.pages[0]!
+    const volume = page.buttons.find((item) => item.id === 'btn-vol-down')!
+    volume.control = {
+      kind: 'slider',
+      emit: 'value',
+      binding: { type: 'volume', mode: 'absolute' },
+    }
+    const mic = page.buttons.find((item) => item.id === 'btn-mute')!
+    mic.control = {
+      kind: 'slider',
+      emit: 'value',
+      binding: { type: 'mic', mode: 'gain' },
+      min: 0,
+      max: 100,
+      step: 1,
+      initial: 50,
+      unit: '%',
+    }
+    return {
+      config,
+      profileId: profile.id,
+      pageId: page.id,
+      micId: mic.id,
+      volumeId: volume.id,
+    }
+  }
+
+  it('selects mic gain controls alongside absolute volume', () => {
+    const { config, profileId, pageId, micId, volumeId } = micFixture()
+    const page = config.profiles[0]!.pages[0]!
+    const pad = page.buttons.find((item) => item.id === 'btn-copy')!
+    pad.control = { kind: 'trackpad', emit: 'delta', binding: { type: 'pointer' } }
+
+    expect(isMicGainControl(page.buttons.find((item) => item.id === micId)!)).toBe(true)
+    expect(isMicGainControl(page.buttons.find((item) => item.id === volumeId)!)).toBe(false)
+    expect(resolveStateControls(config, profileId, pageId)).toEqual([
+      { id: volumeId, label: 'Volume down', source: 'volume' },
+      { id: micId, label: 'Mute', source: 'mic' },
+    ])
+    expect(resolveStateControls(config, profileId, pageId, [micId, 'nope'])).toEqual([
+      { id: micId, label: 'Mute', source: 'mic' },
+    ])
+    expect(resolveAbsoluteVolumeControls(config, profileId, pageId)).toEqual([
+      { id: volumeId, label: 'Volume down' },
+    ])
+  })
+
+  it('emits volume and mic entries from one batched snapshot', async () => {
+    const { profileId, pageId, micId, volumeId } = micFixture()
+    const volume = new FakeReader()
+    const mic = new FakeMicReader()
+    const messages: ControlStateMessage[] = []
+    const state = serviceWithMic(volume, mic)
+
+    await state.subscribe('client-1', {
+      profileId,
+      pageId,
+      controlIds: [volumeId, micId],
+      controls: [
+        { id: volumeId, label: '', source: 'volume' },
+        { id: micId, label: '', source: 'mic' },
+      ],
+      intervalMs: 1000,
+      send: (message) => messages.push(message),
+    })
+
+    expect(volume.reads).toBe(1)
+    expect(mic.reads).toBe(1)
+    expect(messages).toHaveLength(1)
+    expect(messages[0]!.states).toEqual([
+      { controlId: volumeId, revision: 1, value: 0.42, available: true, detail: '42%' },
+      { controlId: micId, revision: 1, value: 0.55, muted: false, available: true, detail: '55%' },
+    ])
+  })
+
+  it('shows MUTED and keeps the raw gain in value', async () => {
+    const { profileId, pageId, micId } = micFixture()
+    const volume = new FakeReader()
+    const mic = new FakeMicReader()
+    mic.level = 40
+    mic.muted = true
+    const messages: ControlStateMessage[] = []
+    const state = serviceWithMic(volume, mic)
+
+    await state.subscribe('client-1', {
+      profileId,
+      pageId,
+      controlIds: [micId],
+      controls: [{ id: micId, label: '', source: 'mic' }],
+      intervalMs: 1000,
+      send: (message) => messages.push(message),
+    })
+
+    expect(volume.reads).toBe(0)
+    expect(messages[0]!.states[0]).toMatchObject({
+      controlId: micId,
+      value: 0.4,
+      muted: true,
+      available: true,
+      detail: 'MUTED',
+    })
+  })
+
+  it('marks mic state unavailable when no capture reader exists', async () => {
+    const { profileId, pageId, micId } = micFixture()
+    const messages: ControlStateMessage[] = []
+    const state = service(new FakeReader())
+
+    await state.subscribe('client-1', {
+      profileId,
+      pageId,
+      controlIds: [micId],
+      controls: [{ id: micId, label: '', source: 'mic' }],
+      intervalMs: 1000,
+      send: (message) => messages.push(message),
+    })
+
+    expect(messages[0]!.states[0]).toMatchObject({
+      controlId: micId,
+      available: false,
+      detail: 'Microphone state is not available on this desktop.',
+    })
+  })
+
+  it('invalidates the mic cache and pushes a fresh snapshot after writes', async () => {
+    const { profileId, pageId, micId } = micFixture()
+    const volume = new FakeReader()
+    const mic = new FakeMicReader()
+    const messages: ControlStateMessage[] = []
+    const state = serviceWithMic(volume, mic)
+
+    await state.subscribe('client-1', {
+      profileId,
+      pageId,
+      controlIds: [micId],
+      controls: [{ id: micId, label: '', source: 'mic' }],
+      intervalMs: 1000,
+      send: (message) => messages.push(message),
+    })
+
+    await state.noteMicWritten(70, false)
+    expect(mic.invalidations).toBe(1)
+    expect(messages.at(-1)!.states[0]).toMatchObject({
+      controlId: micId,
+      value: 0.7,
+      muted: false,
+      available: true,
+      detail: '70%',
+    })
+
+    mic.level = 0
+    mic.muted = true
+    await state.noteMicChanged()
+    expect(mic.invalidations).toBe(2)
+    expect(messages.at(-1)!.states[0]).toMatchObject({
+      controlId: micId,
+      value: 0,
+      muted: true,
+      available: true,
+      detail: 'MUTED',
+    })
+  })
+})
+
+function serviceWithMic(reader: VolumeReader, micReader: MicReader): ControlStateService {
+  const created = new ControlStateService({ reader, micReader })
+  services.push(created)
+  return created
+}

@@ -1,8 +1,19 @@
 import { spawn } from 'node:child_process'
-import { accessSync, constants, existsSync, mkdirSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, statSync, accessSync, constants } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Logger } from './logger'
+import {
+  LINUX_INPUT_COMMAND,
+  MAC_INPUT_COMMAND,
+  linuxInputGainArgs,
+  linuxInputMuteArgs,
+  linuxInputMuteReadArgs,
+  macInputGainArgs,
+  macInputReadArgs,
+  parseMacInputOutput,
+  parsePactlSourceMuteOutput,
+} from './microphone-source'
 
 export interface HostActions {
   launch(path: string, args: string[]): Promise<void>
@@ -12,6 +23,10 @@ export interface HostActions {
   screenshot(): Promise<string>
   /** Set system output volume, 0..100. */
   setVolume(level: number): Promise<void>
+  /** Set default capture-device gain, 0..100. */
+  setInputGain(level: number): Promise<void>
+  /** Toggle mute on the default capture device. */
+  toggleInputMute(): Promise<void>
 }
 
 export interface HostActionOptions {
@@ -26,6 +41,10 @@ export interface HostActionOptions {
   getScreenshotDirectory?: () => string
   /** Test seam for absolute volume; receives 0..100. */
   setSystemVolume?: (level: number) => Promise<void>
+  /** Test seam / shared controller for microphone gain; receives 0..100. */
+  setSystemInputGain?: (level: number) => Promise<void>
+  /** Test seam / shared controller for microphone mute toggling. */
+  toggleSystemInputMute?: () => Promise<void>
   /** Overrides the user's home directory (used by tests to avoid touching ~/Desktop). */
   homeDir?: string
   logger?: Logger
@@ -183,6 +202,33 @@ function runToCompletion(command: string, args: readonly string[]): Promise<void
   })
 }
 
+/** Run a short-lived command and return stdout (used by macOS input-mute emulation). */
+function runCapture(command: string, args: readonly string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let stdout = ''
+    let stderr = ''
+    const child = spawn(command, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    })
+    child.stdout?.setEncoding('utf8')
+    child.stdout?.on('data', (chunk: string) => {
+      stdout = (stdout + chunk).slice(-4000)
+    })
+    child.stderr?.setEncoding('utf8')
+    child.stderr?.on('data', (chunk: string) => {
+      stderr = (stderr + chunk).slice(-2000)
+    })
+    child.once('error', (error) => {
+      reject(new Error(`Could not start ${command}: ${error.message}`))
+    })
+    child.once('exit', (code) => {
+      if (code === 0) resolve(stdout)
+      else reject(new Error(`${command} exited with ${code ?? 'unknown'}${stderr.trim() ? `: ${stderr.trim()}` : ''}`))
+    })
+  })
+}
+
 function looksLikeShellItem(path: string): boolean {
   if (/\.(lnk|url)$/i.test(path)) return true
   try {
@@ -214,6 +260,11 @@ export function createHostActions(options: HostActionOptions = {}): HostActions 
     if (configured) return configured
     return join(options.homeDir ?? homedir(), 'Desktop')
   }
+
+  // macOS has no system input mute. If no shared microphone controller was
+  // injected, emulate it here: remember the last gain, set it to 0, restore it.
+  let macInputMuted = false
+  let macSavedInputGain = 50
 
   return {
     async launch(path, args) {
@@ -290,6 +341,65 @@ export function createHostActions(options: HostActionOptions = {}): HostActions 
         throw new Error(`Absolute volume is not implemented on ${platform}.`)
       }
       logger?.info(`Set system volume to ${value}%`)
+    },
+
+    async setInputGain(level) {
+      const value = clampVolumeLevel(level)
+      if (options.setSystemInputGain) {
+        await options.setSystemInputGain(value)
+      } else if (platform === 'darwin') {
+        await runToCompletion(MAC_INPUT_COMMAND, macInputGainArgs(value))
+        macInputMuted = false
+      } else if (platform === 'linux') {
+        try {
+          await runToCompletion(LINUX_INPUT_COMMAND, linuxInputGainArgs(value))
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          throw new Error(
+            `Could not set microphone gain with pactl. Install PulseAudio/PipeWire and ensure "pactl" is on PATH. ${message}`,
+          )
+        }
+      } else if (platform === 'win32') {
+        throw new Error('Microphone gain is not available on Windows without the keyboard helper.')
+      } else {
+        throw new Error(`Microphone gain is not implemented on ${platform}.`)
+      }
+      logger?.info(`Set microphone gain to ${value}%`)
+    },
+
+    async toggleInputMute() {
+      if (options.toggleSystemInputMute) {
+        await options.toggleSystemInputMute()
+      } else if (platform === 'darwin') {
+        if (macInputMuted) {
+          await runToCompletion(MAC_INPUT_COMMAND, macInputGainArgs(macSavedInputGain))
+          macInputMuted = false
+        } else {
+          const current = parseMacInputOutput(
+            await runCapture(MAC_INPUT_COMMAND, macInputReadArgs()),
+          )
+          if (current > 0) macSavedInputGain = current
+          await runToCompletion(MAC_INPUT_COMMAND, macInputGainArgs(0))
+          macInputMuted = true
+        }
+      } else if (platform === 'linux') {
+        try {
+          const current = parsePactlSourceMuteOutput(
+            await runCapture(LINUX_INPUT_COMMAND, linuxInputMuteReadArgs()),
+          )
+          await runToCompletion(LINUX_INPUT_COMMAND, linuxInputMuteArgs(!current))
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          throw new Error(
+            `Could not toggle microphone mute with pactl. Install PulseAudio/PipeWire and ensure "pactl" is on PATH. ${message}`,
+          )
+        }
+      } else if (platform === 'win32') {
+        throw new Error('Microphone mute is not available on Windows without the keyboard helper.')
+      } else {
+        throw new Error(`Microphone mute is not implemented on ${platform}.`)
+      }
+      logger?.info('Toggled microphone mute')
     },
 
     async screenshot() {

@@ -176,6 +176,12 @@ internal interface IAudioEndpointVolume {
     [PreserveSig] int SetMasterVolumeLevelScalar(float level, ref Guid eventContext);
     [PreserveSig] int GetMasterVolumeLevel(out float levelDb);
     [PreserveSig] int GetMasterVolumeLevelScalar(out float level);
+    [PreserveSig] int SetChannelVolumeLevel(uint channel, float levelDb, ref Guid eventContext);
+    [PreserveSig] int SetChannelVolumeLevelScalar(uint channel, float level, ref Guid eventContext);
+    [PreserveSig] int GetChannelVolumeLevel(uint channel, out float levelDb);
+    [PreserveSig] int GetChannelVolumeLevelScalar(uint channel, out float level);
+    [PreserveSig] int SetMute([MarshalAs(UnmanagedType.Bool)] bool mute, ref Guid eventContext);
+    [PreserveSig] int GetMute([MarshalAs(UnmanagedType.Bool)] out bool mute);
 }
 
 public static class PhoneDeckVolume {
@@ -214,6 +220,80 @@ public static class PhoneDeckVolume {
         if (Marshal.IsComObject(device)) Marshal.ReleaseComObject(device);
         if (Marshal.IsComObject(enumerator)) Marshal.ReleaseComObject(enumerator);
         return Math.Max(0f, Math.Min(1f, level));
+    }
+}
+
+// Default capture endpoint (microphone). The scalar range is 0..1, not dB.
+public static class PhoneDeckCapture {
+    private static IAudioEndpointVolume OpenCapture(out IMMDevice device, out IMMDeviceEnumerator enumerator) {
+        enumerator = (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject();
+        int hr = enumerator.GetDefaultAudioEndpoint(1, 1, out device); // eCapture, eMultimedia
+        if (hr != 0) {
+            if (Marshal.IsComObject(enumerator)) Marshal.ReleaseComObject(enumerator);
+            Marshal.ThrowExceptionForHR(hr);
+        }
+        Guid iid = typeof(IAudioEndpointVolume).GUID;
+        object obj;
+        hr = device.Activate(ref iid, 1, IntPtr.Zero, out obj); // CLSCTX_INPROC_SERVER
+        if (hr != 0) {
+            if (Marshal.IsComObject(device)) Marshal.ReleaseComObject(device);
+            if (Marshal.IsComObject(enumerator)) Marshal.ReleaseComObject(enumerator);
+            Marshal.ThrowExceptionForHR(hr);
+        }
+        return (IAudioEndpointVolume)obj;
+    }
+
+    private static void Close(IAudioEndpointVolume volume, IMMDevice device, IMMDeviceEnumerator enumerator) {
+        if (Marshal.IsComObject(volume)) Marshal.ReleaseComObject(volume);
+        if (Marshal.IsComObject(device)) Marshal.ReleaseComObject(device);
+        if (Marshal.IsComObject(enumerator)) Marshal.ReleaseComObject(enumerator);
+    }
+
+    public static void SetGain(float scalar) {
+        IMMDevice device;
+        IMMDeviceEnumerator enumerator;
+        var volume = OpenCapture(out device, out enumerator);
+        try {
+            Guid context = Guid.Empty;
+            int hr = volume.SetMasterVolumeLevelScalar(Math.Max(0f, Math.Min(1f, scalar)), ref context);
+            if (hr != 0) Marshal.ThrowExceptionForHR(hr);
+        } finally {
+            Close(volume, device, enumerator);
+        }
+    }
+
+    public static void Get(out float level, out bool muted) {
+        IMMDevice device;
+        IMMDeviceEnumerator enumerator;
+        var volume = OpenCapture(out device, out enumerator);
+        try {
+            int hr = volume.GetMasterVolumeLevelScalar(out level);
+            if (hr != 0) Marshal.ThrowExceptionForHR(hr);
+            hr = volume.GetMute(out muted);
+            if (hr != 0) Marshal.ThrowExceptionForHR(hr);
+            level = Math.Max(0f, Math.Min(1f, level));
+        } finally {
+            Close(volume, device, enumerator);
+        }
+    }
+
+    public static void SetMute(bool muted) {
+        IMMDevice device;
+        IMMDeviceEnumerator enumerator;
+        var volume = OpenCapture(out device, out enumerator);
+        try {
+            Guid context = Guid.Empty;
+            int hr = volume.SetMute(muted, ref context);
+            if (hr != 0) Marshal.ThrowExceptionForHR(hr);
+        } finally {
+            Close(volume, device, enumerator);
+        }
+    }
+
+    public static void ToggleMute(out float level, out bool muted) {
+        Get(out level, out muted);
+        SetMute(!muted);
+        muted = !muted;
     }
 }
 '@
@@ -399,10 +479,37 @@ function Get-SystemVolume {
     return @{ value = [double][PhoneDeckVolume]::GetScalar() }
 }
 
+function Set-InputGain([int]$Level) {
+    $clamped = [Math]::Max(0, [Math]::Min(100, $Level))
+    [PhoneDeckCapture]::SetGain([single]($clamped / 100.0))
+}
+
+function Get-InputState {
+    $level = [single]0
+    $muted = $false
+    [PhoneDeckCapture]::Get([ref]$level, [ref]$muted)
+    return @{ value = [double]$level; muted = [bool]$muted }
+}
+
+function Set-InputMute([bool]$Muted) {
+    [PhoneDeckCapture]::SetMute($Muted)
+}
+
+function Toggle-InputMute {
+    $level = [single]0
+    $muted = $false
+    [PhoneDeckCapture]::ToggleMute([ref]$level, [ref]$muted)
+    return @{ value = [double]$level; muted = [bool]$muted }
+}
+
 function Invoke-Step($Step) {
     switch ($Step.kind) {
         'set-volume' { Set-SystemVolume ([int]$Step.level) }
         'get-volume' { return Get-SystemVolume }
+        'set-input-gain' { Set-InputGain ([int]$Step.level) }
+        'get-input' { return Get-InputState }
+        'set-input-mute' { Set-InputMute ([bool]$Step.muted) }
+        'toggle-input-mute' { return Toggle-InputMute }
         'keys' { Send-Chord $Step.keys ([int]$Step.holdMs) ([string]$Step.action) }
         'text' { Send-Text ([string]$Step.text) ([int]$Step.perCharMs) }
         'delay' { Start-Sleep -Milliseconds ([Math]::Max(0, [Math]::Min(60000, [int]$Step.ms))) }
