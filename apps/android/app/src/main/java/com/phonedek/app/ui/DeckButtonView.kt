@@ -199,6 +199,8 @@ fun DeckButtonView(
                 textColor = textColor,
                 externalValue = controlState?.value,
                 stateAvailable = controlState?.available == true,
+                statePresent = controlState != null && control.binding.type == "mic",
+                stateMuted = controlState?.muted == true,
                 stateDetail = controlState?.detail,
                 stateRevision = controlState?.revision ?: -1,
                 stateCapable = stateCapable,

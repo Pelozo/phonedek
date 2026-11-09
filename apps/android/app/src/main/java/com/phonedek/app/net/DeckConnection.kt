@@ -168,13 +168,12 @@ class DeckConnection(
             Diag.w("sendPress dropped: connected=$connected active=$active socket=${socket != null}")
             return false
         }
-        val payload = buildJsonObject {
-            put("type", "press")
-            put("requestId", requestId)
-            put("profileId", profileId)
-            put("pageId", pageId)
-            put("buttonId", buttonId)
-        }
+        val payload = buildPressPayload(
+            requestId = requestId,
+            profileId = profileId,
+            pageId = pageId,
+            buttonId = buttonId,
+        )
         return socket.send(payload.toString())
     }
 
@@ -525,6 +524,19 @@ internal data class PressResultPayload(
     val error: String?,
     val message: String?,
 )
+
+internal fun buildPressPayload(
+    requestId: String,
+    profileId: String,
+    pageId: String,
+    buttonId: String,
+): JsonObject = buildJsonObject {
+    put("type", "press")
+    put("requestId", requestId)
+    put("profileId", profileId)
+    put("pageId", pageId)
+    put("buttonId", buttonId)
+}
 
 internal fun buildInputPayload(
     requestId: String,

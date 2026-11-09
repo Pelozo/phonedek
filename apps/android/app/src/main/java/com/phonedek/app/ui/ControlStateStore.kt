@@ -10,19 +10,45 @@ import kotlin.math.roundToInt
  * revisioned batch is merged.
  */
 object ControlStateStore {
+    const val NO_INPUT = "NO INPUT"
+    const val MUTED = "MUTED"
+
     /**
-     * Absolute volume is the only subscribable producer in the MVP. Relative
-     * volume and scroll stay open-loop, and a trackpad is never a value.
+     * Text shown in a control header. The local value stays usable while the
+     * desktop reports that no capture device exists, and a muted mic is always
+     * explicit even if the desktop omits its detail string.
+     */
+    fun displayText(
+        localText: String,
+        statePresent: Boolean,
+        stateAvailable: Boolean,
+        stateMuted: Boolean,
+        stateDetail: String?,
+        interacting: Boolean,
+    ): String {
+        if (interacting || !statePresent) return localText
+        if (!stateAvailable) return NO_INPUT
+        if (stateMuted) return MUTED
+        return stateDetail?.trim()?.takeIf { it.isNotEmpty() } ?: localText
+    }
+
+    /**
+     * Controls with a desktop live-state producer: absolute output volume and
+     * microphone gain. Relative volume, scroll and trackpads stay open-loop.
      */
     fun absoluteVolumeControlIds(page: DeckPage): List<String> =
         page.buttons
             .asSequence()
             .filter { button ->
                 val control = button.control ?: return@filter false
-                control.kind != "trackpad" &&
-                    control.emit == "value" &&
-                    control.binding.type == "volume" &&
-                    control.binding.mode == "absolute"
+                if (control.kind == "trackpad" || control.emit != "value") {
+                    return@filter false
+                }
+                when (control.binding.type) {
+                    "volume" -> control.binding.mode == "absolute"
+                    "mic" -> control.binding.mode == "gain"
+                    else -> false
+                }
             }
             .map { it.id }
             .filter { it.isNotBlank() }

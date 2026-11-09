@@ -175,6 +175,9 @@ data class ActionDto(
     val type: String = "",
     val direction: String? = null,
     val pageId: String? = null,
+    // Kept for the desktop-resolved mic (and future) actions; presses carry
+    // only ids, so this is informational on the phone.
+    val action: String? = null,
 )
 
 @Serializable
@@ -465,6 +468,12 @@ private fun ControlBindingDto.normalized(): ControlBindingDto? {
             invert = invert ?: false,
         )
 
+        "mic" -> if (mode?.trim()?.lowercase() == "gain") {
+            ControlBindingDto(type = "mic", mode = "gain")
+        } else {
+            null
+        }
+
         "pointer" -> ControlBindingDto(
             type = "pointer",
             mode = if (mode?.trim()?.lowercase() == "fullscreen") "fullscreen" else "inline",
@@ -508,6 +517,7 @@ private fun ControlDto.normalized(): ControlDto? {
 
         safeBinding.type == "volume" -> controlEmit == "delta"
         safeBinding.type == "scroll" -> controlEmit == "delta"
+        safeBinding.type == "mic" -> controlEmit == "value"
         else -> false
     }
     if (!emitMatchesBinding) return null
@@ -526,7 +536,7 @@ private fun ControlDto.normalized(): ControlDto? {
         .coerceIn(safeMin, safeMax)
     val safeAxis = if (axis?.trim()?.lowercase() == "vertical") "vertical" else "horizontal"
     val safeUnit = (unit?.trim()?.takeIf { it.isNotEmpty() }?.take(16))
-        ?: if (safeBinding.type == "volume") "%" else null
+        ?: if (safeBinding.type == "volume" || safeBinding.type == "mic") "%" else null
 
     return copy(
         kind = controlKind,

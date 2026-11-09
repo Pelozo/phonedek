@@ -27,6 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -75,6 +76,8 @@ fun DeckControlView(
     modifier: Modifier = Modifier,
     externalValue: Float? = null,
     stateAvailable: Boolean = false,
+    statePresent: Boolean = false,
+    stateMuted: Boolean = false,
     stateDetail: String? = null,
     stateRevision: Int = -1,
     stateCapable: Boolean = false,
@@ -85,10 +88,11 @@ fun DeckControlView(
     val range = (maxValue - minValue).takeIf { it > 0f } ?: 1f
     val absolute = control.emit == "value"
     val isVolume = control.binding.type == "volume"
+    val isMic = control.binding.type == "mic"
     val scrollControl = control.binding.type == "scroll"
     val volumeStepPercent = control.binding.stepPercent?.coerceIn(1, 25) ?: 2
     val sliderWireScale = if (isVolume) 100f / volumeStepPercent else 100f
-    val displayUnit = control.unit ?: if (isVolume) "%" else ""
+    val displayUnit = control.unit ?: if (isVolume || isMic) "%" else ""
     val contentRotation = LocalButtonContentRotation.current
     val haptics = LocalHapticFeedback.current
     val density = LocalDensity.current
@@ -186,18 +190,24 @@ fun DeckControlView(
     }
 
     val valueText = "${value.roundToInt()}$displayUnit"
-    val displayText = if (stateAvailable && !interacting) {
-        stateDetail?.trim()?.takeIf { it.isNotEmpty() } ?: valueText
-    } else {
-        valueText
-    }
+    val displayText = ControlStateStore.displayText(
+        localText = valueText,
+        statePresent = statePresent,
+        stateAvailable = stateAvailable,
+        stateMuted = stateMuted,
+        stateDetail = stateDetail,
+        interacting = interacting,
+    )
+    val muted = statePresent && stateAvailable && stateMuted && !interacting
     val stateBadge = if (stateCapable && stateAvailable && externalValue != null) {
         "LIVE"
     } else {
         "LOCAL"
     }
-    val showStateBadge = tileHeightPx == 0 ||
-        with(density) { tileHeightPx.toDp() } >= 48.dp
+    // An unavailable mic still knows the desktop supports live state; showing
+    // LOCAL beside NO INPUT would be misleading.
+    val showStateBadge = !statePresent && (tileHeightPx == 0 ||
+        with(density) { tileHeightPx.toDp() } >= 48.dp)
 
     Column(
         modifier = modifier
@@ -260,6 +270,7 @@ fun DeckControlView(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
+                .alpha(if (muted) 0.45f else 1f)
                 // Consume the gesture in the Initial pass so the tile click and
                 // horizontal pager cannot steal it before the control updates.
                 .pointerInput(

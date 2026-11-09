@@ -193,6 +193,118 @@ class DeckModelsTest {
     }
 
     @Test
+    fun parsesMicGainControlWithDefaults() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [{
+                    "id": "mic",
+                    "slot": 0,
+                    "label": "Mic",
+                    "control": {
+                      "kind": "slider",
+                      "emit": "value",
+                      "binding": { "type": "mic", "mode": "gain" },
+                      "min": 0,
+                      "max": 100,
+                      "step": 1,
+                      "initial": 50,
+                      "unit": "%"
+                    },
+                    "actions": [{ "type": "mic", "action": "toggleMute" }]
+                  }]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val button = DeckJson.parse(raw)!!.profiles.single().pages.single()
+            .buttons.single()
+        val control = button.control!!
+        assertEquals("slider", control.kind)
+        assertEquals("value", control.emit)
+        assertEquals("mic", control.binding.type)
+        assertEquals("gain", control.binding.mode)
+        assertEquals(0f, control.min!!, 0.001f)
+        assertEquals(100f, control.max!!, 0.001f)
+        assertEquals(1f, control.step!!, 0.001f)
+        assertEquals(50f, control.initial!!, 0.001f)
+        assertEquals("%", control.unit)
+        assertEquals("mic", button.actions.single().type)
+        assertEquals("toggleMute", button.actions.single().action)
+    }
+
+    @Test
+    fun micDefaultsPercentWhenUnitIsMissing() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [{
+                    "id": "mic",
+                    "slot": 0,
+                    "control": {
+                      "kind": "dial",
+                      "emit": "value",
+                      "binding": { "type": "mic", "mode": "gain" }
+                    }
+                  }]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val control = DeckJson.parse(raw)!!.profiles.single().pages.single()
+            .buttons.single().control!!
+        assertEquals("dial", control.kind)
+        assertEquals("%", control.unit)
+        assertEquals(50f, control.initial!!, 0.001f)
+    }
+
+    @Test
+    fun micRequiresValueEmitAndGainMode() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [
+                    {
+                      "id": "delta",
+                      "slot": 0,
+                      "control": {
+                        "kind": "slider",
+                        "emit": "delta",
+                        "binding": { "type": "mic", "mode": "gain" }
+                      }
+                    },
+                    {
+                      "id": "bad-mode",
+                      "slot": 1,
+                      "control": {
+                        "kind": "slider",
+                        "emit": "value",
+                        "binding": { "type": "mic", "mode": "relative" }
+                      }
+                    }
+                  ]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val buttons = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons
+        assertNull(buttons.first { it.id == "delta" }.control)
+        assertNull(buttons.first { it.id == "bad-mode" }.control)
+    }
+
+    @Test
     fun absoluteVolumeRequiresValueEmit() {
         val raw = """
             {

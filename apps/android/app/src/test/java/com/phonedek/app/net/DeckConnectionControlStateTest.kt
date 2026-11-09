@@ -57,6 +57,49 @@ class DeckConnectionControlStateTest {
     }
 
     @Test
+    fun parsesMicMuteAndNoInputStates() {
+        val message = DeckJson.parseControlState(
+            """
+                {
+                  "type": "controlState",
+                  "profileId": "p1",
+                  "pageId": "pg1",
+                  "states": [
+                    {
+                      "controlId": "btn-mic",
+                      "revision": 7,
+                      "value": 0.35,
+                      "muted": true,
+                      "available": true,
+                      "detail": "MUTED"
+                    },
+                    {
+                      "controlId": "btn-mic2",
+                      "revision": 8,
+                      "available": false,
+                      "detail": "Unavailable"
+                    }
+                  ]
+                }
+            """.trimIndent(),
+        )
+
+        assertNotNull(message)
+        val mutedMic = message!!.states.first()
+        assertEquals("btn-mic", mutedMic.controlId)
+        assertTrue(mutedMic.muted!!)
+        assertTrue(mutedMic.available)
+        assertEquals(0.35f, mutedMic.value!!, 0.0001f)
+        assertEquals("MUTED", mutedMic.detail)
+
+        val unavailable = message.states.last()
+        assertEquals("btn-mic2", unavailable.controlId)
+        assertNull(unavailable.muted)
+        assertFalse(unavailable.available)
+        assertNull(unavailable.value)
+    }
+
+    @Test
     fun malformedEntriesAreDroppedWithoutLosingTheBatch() {
         val message = DeckJson.parseControlState(
             """

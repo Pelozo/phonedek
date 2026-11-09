@@ -52,23 +52,86 @@ class ControlStateStoreTest {
     }
 
     @Test
-    fun onlyAbsoluteVolumeControlsAreWatchable() {
+    fun onlyAbsoluteVolumeAndMicGainControlsAreWatchable() {
         val page = DeckPage(
             id = "pg1",
             buttons = listOf(
                 button("abs-slider"),
                 button("abs-wheel", kind = "dial"),
+                button("mic", type = "mic", mode = "gain"),
                 button("relative", mode = "relative", emit = "delta"),
                 button("scroll", type = "scroll", mode = null, emit = "delta"),
                 button("pad", kind = "trackpad", type = "pointer", mode = null, emit = "delta"),
+                button("bad-mic-mode", type = "mic", mode = "relative"),
                 button("plain", control = null),
                 button("", control = null),
             ),
         )
 
         assertEquals(
-            listOf("abs-slider", "abs-wheel"),
+            listOf("abs-slider", "abs-wheel", "mic"),
             ControlStateStore.absoluteVolumeControlIds(page),
+        )
+    }
+
+    @Test
+    fun micDisplayTextShowsDesktopDetailMuteAndUnavailable() {
+        assertEquals(
+            "42%",
+            ControlStateStore.displayText(
+                localText = "50%",
+                statePresent = true,
+                stateAvailable = true,
+                stateMuted = false,
+                stateDetail = "42%",
+                interacting = false,
+            ),
+        )
+        assertEquals(
+            ControlStateStore.MUTED,
+            ControlStateStore.displayText(
+                localText = "50%",
+                statePresent = true,
+                stateAvailable = true,
+                stateMuted = true,
+                stateDetail = null,
+                interacting = false,
+            ),
+        )
+        assertEquals(
+            ControlStateStore.NO_INPUT,
+            ControlStateStore.displayText(
+                localText = "50%",
+                statePresent = true,
+                stateAvailable = false,
+                stateMuted = false,
+                stateDetail = "Unavailable",
+                interacting = false,
+            ),
+        )
+        // The local value remains authoritative while dragging and when there
+        // is no state entry at all (old desktop or non-mic control).
+        assertEquals(
+            "73%",
+            ControlStateStore.displayText(
+                localText = "73%",
+                statePresent = true,
+                stateAvailable = true,
+                stateMuted = true,
+                stateDetail = "MUTED",
+                interacting = true,
+            ),
+        )
+        assertEquals(
+            "73%",
+            ControlStateStore.displayText(
+                localText = "73%",
+                statePresent = false,
+                stateAvailable = false,
+                stateMuted = false,
+                stateDetail = null,
+                interacting = false,
+            ),
         )
     }
 
