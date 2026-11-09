@@ -10,13 +10,14 @@ import {
   pageCapacity,
   pageGrid,
 } from '@phonedek/shared'
-import type { Action, ControlSpec, DeckButton, DeckConfig, MicAction } from '@phonedek/shared'
-import type { AppState, ServerInfoView, UpdateStatus, PermissionStatus } from '../../shared/api'
+import type { Action, ControlSpec, DeckButton, DeckConfig, MicAction, ObsAction } from '@phonedek/shared'
+import type { AppState, ObsInputView, ServerInfoView, UpdateStatus, PermissionStatus } from '../../shared/api'
 import { isUpdateNoticeVisible, updateIndicatorLabel } from '../../shared/update-status'
 import { DeckCanvas } from './components/DeckCanvas'
 import { DeckMark, Icon } from './components/Icons'
 import { Inspector } from './components/Inspector'
 import { PopMenu } from './components/Menu'
+import { ObsInputDialog } from './components/ObsInputDialog'
 import { PairDialog } from './components/PairDialog'
 import { PermissionBanner } from './components/PermissionBanner'
 import { ConfirmProvider } from './components/Primitives'
@@ -54,6 +55,7 @@ function AppContent() {
   const [toast, setToast] = useState<ToastState | null>(null)
   const [pairOpen, setPairOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [obsPickerOpen, setObsPickerOpen] = useState(false)
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
   const [permission, setPermission] = useState<PermissionStatus | null>(null)
   const [permissionBusy, setPermissionBusy] = useState(false)
@@ -422,7 +424,10 @@ function AppContent() {
     }
   }
 
-  const addNewControl = (kind: 'volume' | 'scroll' | 'volume-wheel' | 'mic' | 'trackpad'): void => {
+  const addNewControl = (
+    kind: 'volume' | 'scroll' | 'volume-wheel' | 'mic' | 'trackpad' | 'obs',
+    obsInput?: string,
+  ): void => {
     if (!config || !profile || !page) return
     const grid = pageGrid(profile, page)
     const spanCandidates: Array<{ columns: number; rows: number }> =
@@ -433,7 +438,7 @@ function AppContent() {
             { columns: 1, rows: 1 },
           ]
         : [
-            kind === 'volume' || kind === 'mic'
+            kind === 'volume' || kind === 'mic' || kind === 'obs'
               ? { columns: 3, rows: 1 }
               : { columns: 2, rows: 1 },
             { columns: 1, rows: 1 },
@@ -526,24 +531,59 @@ function AppContent() {
                 unit: '%',
                 haptics: true,
               }
-            : volumeControl(kind === 'volume' ? 'slider' : 'dial')
+            : kind === 'obs'
+              ? {
+                  kind: 'slider',
+                  axis: 'horizontal',
+                  emit: 'value',
+                  binding: {
+                    type: 'obs' as const,
+                    target: 'inputVolume' as const,
+                    ...(obsInput ? { input: obsInput } : {}),
+                  },
+                  min: 0,
+                  max: 200,
+                  step: 1,
+                  initial: 100,
+                  unit: '%',
+                  haptics: true,
+                }
+              : volumeControl(kind === 'volume' ? 'slider' : 'dial')
     const label =
       kind === 'volume' || kind === 'volume-wheel'
         ? 'Volume'
         : kind === 'mic'
           ? 'Mic'
-          : kind === 'scroll'
-            ? 'Scroll'
-            : 'Trackpad'
+          : kind === 'obs'
+            ? obsInput?.trim() || 'OBS input'
+            : kind === 'scroll'
+              ? 'Scroll'
+              : 'Trackpad'
     // `DeckButton.actions` is still typed as the legacy `Action` union while the
     // config schema accepts `MicAction`; keep the cast local to this builder.
     const micAction: MicAction = { type: 'mic', action: 'toggleMute' }
+    const obsAction: ObsAction = {
+      type: 'obs',
+      action: 'toggleMute',
+      ...(obsInput ? { input: obsInput } : {}),
+    }
     const button: DeckButton = {
       ...createEmptyButton(slot, label),
-      icon: kind === 'scroll' || kind === 'trackpad' ? '🖱️' : kind === 'mic' ? '🎙️' : '🔊',
+      icon:
+        kind === 'scroll' || kind === 'trackpad'
+          ? '🖱️'
+          : kind === 'mic'
+            ? '🎙️'
+            : kind === 'obs'
+              ? '🎚️'
+              : '🔊',
       span,
       control,
-      ...(kind === 'mic' ? { actions: [micAction as unknown as Action] } : {}),
+      ...(kind === 'mic'
+        ? { actions: [micAction as unknown as Action] }
+        : kind === 'obs'
+          ? { actions: [obsAction] }
+          : {}),
     }
     try {
       const next = addButton(config, profile.id, page.id, button)
@@ -556,9 +596,11 @@ function AppContent() {
             ? 'Volume wheel'
             : kind === 'mic'
               ? 'Mic gain'
-              : kind === 'scroll'
-                ? 'Scroll wheel'
-                : 'Trackpad'
+              : kind === 'obs'
+                ? 'OBS input'
+                : kind === 'scroll'
+                  ? 'Scroll wheel'
+                  : 'Trackpad'
       showToast(
         fallback
           ? `${name} added as ${span.columns}×${span.rows} — no ${preferredSpan.columns}×${preferredSpan.rows} space was free`
@@ -568,6 +610,20 @@ function AppContent() {
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), 'error')
     }
+  }
+
+  const openObsInputPicker = (): void => {
+    if (!server) return
+    if (server.obsStatus.state !== 'connected') {
+      showToast('OBS is not connected — open Settings → OBS Studio to connect it first.', 'info')
+      return
+    }
+    setObsPickerOpen(true)
+  }
+
+  const addObsInput = (input: ObsInputView): void => {
+    setObsPickerOpen(false)
+    addNewControl('obs', input.name)
   }
 
   const handleConfigImported = (next: DeckConfig): void => {
@@ -688,6 +744,16 @@ function AppContent() {
                   onClick: () => addNewControl('volume-wheel'),
                 },
                 {
+                  label: 'OBS input',
+                  section: 'Integrations',
+                  icon: 'sliders',
+                  description:
+                    server.obsStatus.state === 'connected'
+                      ? '3 × 1 · pick an OBS source, tap to mute'
+                      : 'Connect OBS in Settings first',
+                  onClick: openObsInputPicker,
+                },
+                {
                   label: 'Scroll wheel',
                   section: 'Navigation',
                   icon: 'mouse',
@@ -769,6 +835,9 @@ function AppContent() {
         </footer>
       </main>
 
+      {obsPickerOpen && (
+        <ObsInputDialog onPick={addObsInput} onClose={() => setObsPickerOpen(false)} />
+      )}
       {pairOpen && (
         <PairDialog
           server={server}

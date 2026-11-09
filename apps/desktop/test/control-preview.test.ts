@@ -19,4 +19,10 @@ describe('controlBadge', () => {
   it('labels mic gain', () => {
     expect(controlBadge(control({ type: 'mic', mode: 'gain' }))).toBe('MIC · GAIN')
   })
+
+  it('labels OBS input volume', () => {
+    expect(controlBadge(control({ type: 'obs', target: 'inputVolume', input: 'Mic/Aux' }))).toBe(
+      'OBS · VOL',
+    )
+  })
 })

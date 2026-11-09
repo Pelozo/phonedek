@@ -14,6 +14,7 @@ export function controlBadge(control: SliderOrDialControlSpec): string {
     return control.binding.mode === 'absolute' ? 'VOL · ABS' : 'VOL · REL'
   }
   if (control.binding.type === 'mic') return 'MIC · GAIN'
+  if (control.binding.type === 'obs') return 'OBS · VOL'
   return 'SCROLL'
 }
 

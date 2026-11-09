@@ -31,6 +31,8 @@ import {
   updateTheme,
 } from '@phonedek/shared'
 import type { ServerInfoView } from '../../../shared/api'
+import { obsInputAvailability } from '../lib/obs'
+import { useObsInputs } from '../lib/useObsInputs'
 import { backgroundStyle, buttonBackground, textColorFor } from '../lib/ui'
 import { ActionEditor } from './ActionEditor'
 import { BackgroundEditor } from './BackgroundEditor'
@@ -118,6 +120,11 @@ export function Inspector({
   const [iconBusy, setIconBusy] = useState<'image' | 'video' | null>(null)
   const platform = useHostPlatform()
   const confirm = useConfirm()
+  const initialObsBinding =
+    button?.control && button.control.kind !== 'trackpad' && button.control.binding.type === 'obs'
+      ? button.control.binding
+      : null
+  const obsInputsState = useObsInputs(initialObsBinding !== null)
 
   const makeAction = (type: Action['type']): Action => defaultAction(type, platform)
 
@@ -373,7 +380,7 @@ export function Inspector({
     })
   }
 
-  const setControlBinding = (type: 'volume' | 'scroll' | 'mic'): void => {
+  const setControlBinding = (type: 'volume' | 'scroll' | 'mic' | 'obs'): void => {
     if (!button.control || button.control.kind === 'trackpad') return
     if (button.control.binding.type === type) return
     if (type === 'scroll') {
@@ -388,6 +395,18 @@ export function Inspector({
         max: 100,
         step: 1,
         initial: 50,
+        unit: '%',
+      })
+      return
+    }
+    if (type === 'obs') {
+      updateControl({
+        emit: 'value',
+        binding: { type: 'obs', target: 'inputVolume' },
+        min: 0,
+        max: 200,
+        step: 1,
+        initial: 100,
         unit: '%',
       })
       return
@@ -461,7 +480,8 @@ export function Inspector({
   }
 
   const setControlMax = (value: number): void => {
-    const max = Math.max(controlMin + 1, Math.min(Math.round(value), 1000))
+    const ceiling = control?.binding.type === 'obs' ? 2000 : 1000
+    const max = Math.max(controlMin + 1, Math.min(Math.round(value), ceiling))
     updateControl({ max, initial: Math.min(Math.max(controlInitial, controlMin), max) })
   }
 
@@ -495,6 +515,18 @@ export function Inspector({
   const control =
     button.control && button.control.kind !== 'trackpad' ? button.control : undefined
   const trackpad = button.control?.kind === 'trackpad' ? button.control : undefined
+  const obsControlBinding = control?.binding.type === 'obs' ? control.binding : null
+  const obsSelectedInput = obsControlBinding?.input?.trim() ?? ''
+  const obsAvailability = obsInputAvailability({
+    status: server?.obsStatus ?? null,
+    selected: obsSelectedInput,
+    inputs: obsInputsState.inputs,
+    loaded: obsInputsState.loaded,
+  })
+  const obsSelectedIsMissing =
+    obsSelectedInput.length > 0 &&
+    obsInputsState.loaded &&
+    !obsInputsState.inputs.some((input) => input.name === obsSelectedInput)
   const controlMin = control?.min ?? 0
   const controlMax = control?.max ?? 100
   const controlStep = Math.max(1, control?.step ?? 1)
@@ -554,6 +586,45 @@ export function Inspector({
       result.ok
         ? `Sent one ${control.binding.type === 'volume' ? 'volume' : 'scroll'} step ${direction < 0 ? 'down' : 'up'}`
         : (result.error ?? 'Control test failed'),
+      result.ok ? 'success' : 'error',
+    )
+  }
+
+  const updateObsInput = (input: string | undefined): void => {
+    if (!control || !obsControlBinding) return
+    const previous = obsControlBinding.input
+    const next = input?.trim() || undefined
+    update({
+      control: {
+        ...control,
+        binding: {
+          type: 'obs',
+          target: 'inputVolume',
+          ...(next ? { input: next } : {}),
+        },
+      },
+      actions: button.actions.map((action): Action =>
+        action.type === 'obs' && (action.input === previous || action.input === undefined)
+          ? { type: 'obs', action: 'toggleMute', ...(next ? { input: next } : {}) }
+          : action,
+      ),
+    })
+  }
+
+  const testObsVolume = async (percent: number): Promise<void> => {
+    const result = await window.phonedek.testObsInputVolume(obsSelectedInput || undefined, percent)
+    onToast(
+      result.ok
+        ? `Set OBS “${obsSelectedInput || 'default input'}” to ${percent}%`
+        : (result.error ?? 'OBS volume test failed'),
+      result.ok ? 'success' : 'error',
+    )
+  }
+
+  const testObsMute = async (): Promise<void> => {
+    const result = await window.phonedek.testObsMute(obsSelectedInput || undefined)
+    onToast(
+      result.ok ? `Toggled mute on OBS “${obsSelectedInput || 'default input'}”` : (result.error ?? 'OBS mute test failed'),
       result.ok ? 'success' : 'error',
     )
   }
@@ -994,7 +1065,9 @@ export function Inspector({
                   ? `VOL · ${control.binding.mode === 'absolute' ? 'ABS' : 'REL'}`
                   : control.binding.type === 'mic'
                     ? 'MIC · GAIN'
-                    : 'SCROLL'}
+                    : control.binding.type === 'obs'
+                      ? 'OBS · VOL'
+                      : 'SCROLL'}
               </span>
             </div>
 
@@ -1019,6 +1092,34 @@ export function Inspector({
                     Test mute
                   </button>
                   <span className="hint">Toggles the default capture device on this PC</span>
+                </>
+              ) : control.binding.type === 'obs' ? (
+                <>
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    title="Set this OBS input to 45%"
+                    onClick={() => void testObsVolume(45)}
+                  >
+                    Test −
+                  </button>
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    title="Set this OBS input to 55%"
+                    onClick={() => void testObsVolume(55)}
+                  >
+                    Test +
+                  </button>
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    title="Toggle mute on this OBS input"
+                    onClick={() => void testObsMute()}
+                  >
+                    Test mute
+                  </button>
+                  <span className="hint">Talks to OBS directly · sets 45% / 55%</span>
                 </>
               ) : (
                 <>
@@ -1062,10 +1163,13 @@ export function Inspector({
                 <span>Binding</span>
                 <select
                   value={control.binding.type}
-                  onChange={(event) => setControlBinding(event.target.value as 'volume' | 'scroll' | 'mic')}
+                  onChange={(event) =>
+                    setControlBinding(event.target.value as 'volume' | 'scroll' | 'mic' | 'obs')
+                  }
                 >
                   <option value="volume">Volume</option>
                   <option value="mic">Mic</option>
+                  <option value="obs">OBS input volume</option>
                   <option value="scroll">Scroll</option>
                 </select>
               </label>
@@ -1091,6 +1195,54 @@ export function Inspector({
                 </label>
                 <p className="hint">
                   Absolute sets the PC volume directly; relative sends volume-key steps.
+                </p>
+              </>
+            )}
+
+            {control.binding.type === 'obs' && (
+              <>
+                <label className="field">
+                  <span>OBS input</span>
+                  <select
+                    value={obsSelectedInput}
+                    disabled={obsInputsState.loading && !obsInputsState.loaded}
+                    onChange={(event) => updateObsInput(event.target.value || undefined)}
+                  >
+                    <option value="">Default — first audio input</option>
+                    {obsSelectedIsMissing && (
+                      <option value={obsSelectedInput}>{obsSelectedInput} (missing — pick again)</option>
+                    )}
+                    {obsInputsState.inputs.map((input) => (
+                      <option key={input.name} value={input.name}>
+                        {input.name}
+                        {input.kind ? ` · ${input.kind}` : ''}
+                        {input.audio ? ' · audio' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <div className="row between">
+                  <span className={`obs-availability ${obsAvailability.tone}`}>
+                    <strong>{obsAvailability.label}</strong>
+                    <small>{obsAvailability.detail}</small>
+                  </span>
+                  <button
+                    type="button"
+                    className="button ghost small"
+                    onClick={() => void obsInputsState.refresh()}
+                    disabled={obsInputsState.loading}
+                  >
+                    <Icon name="refresh" size={14} />
+                    {obsInputsState.loading ? 'Refreshing…' : 'Refresh inputs'}
+                  </button>
+                </div>
+                {obsInputsState.error && obsAvailability.label !== 'NO OBS' && (
+                  <p className="hint error-text">{obsInputsState.error}</p>
+                )}
+                <p className="hint">
+                  100% = 0 dB · 200% = +6 dB. Input names belong to the current OBS scene collection;
+                  renaming one in OBS may require picking it again.
                 </p>
               </>
             )}
@@ -1149,13 +1301,14 @@ export function Inspector({
                   value={controlMin}
                   min={0}
                   max={1000}
+                  disabled={control.binding.type === 'obs'}
                   onChange={setControlMin}
                 />
                 <NumberField
                   label="Max"
                   value={controlMax}
                   min={1}
-                  max={1000}
+                  max={control.binding.type === 'obs' ? 2000 : 1000}
                   onChange={setControlMax}
                 />
               </div>
@@ -1213,9 +1366,11 @@ export function Inspector({
             <p className="hint">
               {control.binding.type === 'mic'
                 ? 'Editor preview only. Drag on the phone to set mic gain; tap the label or mic glyph to mute. The mic action below stays as the fallback.'
-                : control.binding.type === 'volume' && control.binding.mode === 'absolute'
-                  ? 'Editor preview only. The phone sends an absolute value; tap actions stay as the fallback.'
-                  : 'Editor preview only. The phone renders this control and sends relative deltas; tap actions stay as the fallback.'}
+                : control.binding.type === 'obs'
+                  ? 'Editor preview only. Drag on the phone to set the OBS input level; Test −, Test + and Test mute talk to OBS directly. Input names are scene-collection scoped.'
+                  : control.binding.type === 'volume' && control.binding.mode === 'absolute'
+                    ? 'Editor preview only. The phone sends an absolute value; tap actions stay as the fallback.'
+                    : 'Editor preview only. The phone renders this control and sends relative deltas; tap actions stay as the fallback.'}
             </p>
 
             <button type="button" className="button danger ghost full" onClick={() => void removeControl()}>
@@ -1256,6 +1411,7 @@ export function Inspector({
                   { label: 'Open URL', icon: 'link', description: 'Open a web page', onClick: () => update({ actions: [...button.actions, makeAction('url')] }) },
                   { label: 'Run command', icon: 'terminal', description: 'Run a shell command', onClick: () => update({ actions: [...button.actions, makeAction('command')] }) },
                   { label: 'Media key', icon: 'music', description: 'Play, pause, volume…', onClick: () => update({ actions: [...button.actions, makeAction('media')] }) },
+                  { label: 'OBS mute', section: 'Integrations', icon: 'microphone', description: 'Toggle mute on an OBS input', onClick: () => update({ actions: [...button.actions, makeAction('obs')] }) },
                   { label: 'Delay', icon: 'clock', description: 'Wait before the next action', onClick: () => update({ actions: [...button.actions, makeAction('delay')] }) },
                   { label: 'Change page', icon: 'layers', description: 'Navigate to another deck page', onClick: () => update({ actions: [...button.actions, makeAction('page')] }) },
                 ]}
@@ -1272,7 +1428,9 @@ export function Inspector({
                     ? 'No tap action needed. Tapping this tile on the phone opens the full-screen pointer pad.'
                     : button.control.binding.type === 'mic'
                       ? 'No tap action needed. Drag this control on the phone to set mic gain; use Test mute above to verify the mic on this PC.'
-                      : 'No tap action needed. Drag this control on the phone to send volume or scroll steps; use Test − / Test + above to verify it on this PC.'
+                      : button.control.binding.type === 'obs'
+                        ? 'No tap action needed. Drag this control on the phone to set the OBS input level; add an OBS mute action if you want a tap action.'
+                        : 'No tap action needed. Drag this control on the phone to send volume or scroll steps; use Test − / Test + above to verify it on this PC.'
                   : 'No actions yet. This button will do nothing when pressed.'}
               </p>
             </div>

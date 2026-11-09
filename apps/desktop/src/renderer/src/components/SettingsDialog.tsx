@@ -1,13 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
 import { BRIGHTNESS_CAPABILITY } from '@phonedek/shared'
 import type { ConnectedClient, DeckConfig } from '@phonedek/shared'
-import type { ServerInfoView, SettingsView, UpdateStatus, PermissionStatus } from '../../../shared/api'
+import type {
+  ObsInputView,
+  ObsSettingsInput,
+  ObsStatusView,
+  ServerInfoView,
+  SettingsView,
+  UpdateStatus,
+  PermissionStatus,
+} from '../../../shared/api'
 import {
   canCheckForUpdates,
   formatProgressDetail,
   summarizeUpdateStatus,
   updateProgressPercent,
 } from '../../../shared/update-status'
+import { obsEndpoint, obsStatusSummary } from '../lib/obs'
 import { Icon } from './Icons'
 import { Modal, Slider, Toggle, useConfirm } from './Primitives'
 
@@ -158,9 +167,44 @@ export function SettingsDialog({
 }) {
   const [busy, setBusy] = useState(false)
   const [nameDraft, setNameDraft] = useState(serverName)
+  const [obsStatus, setObsStatus] = useState<ObsStatusView>(server.obsStatus)
+  const [obsHostDraft, setObsHostDraft] = useState(settings.obsHost)
+  const [obsPortDraft, setObsPortDraft] = useState(String(settings.obsPort))
+  const [obsPasswordDraft, setObsPasswordDraft] = useState('')
+  const [obsBusy, setObsBusy] = useState(false)
+  const [obsInputList, setObsInputList] = useState<ObsInputView[] | null>(null)
+  const [obsInputsError, setObsInputsError] = useState<string | null>(null)
   const confirm = useConfirm()
 
   useEffect(() => setNameDraft(serverName), [serverName])
+  useEffect(() => setObsStatus(server.obsStatus), [server.obsStatus])
+  useEffect(() => setObsHostDraft(settings.obsHost), [settings.obsHost])
+  useEffect(() => setObsPortDraft(String(settings.obsPort)), [settings.obsPort])
+  useEffect(() => {
+    if (!settings.obsHasPassword) setObsPasswordDraft('')
+  }, [settings.obsHasPassword])
+
+  // Re-poll while the dialog is open: the main process pushes status changes,
+  // but a direct poll also refreshes the retry countdown and first connect.
+  useEffect(() => {
+    let active = true
+    const refresh = async (): Promise<void> => {
+      try {
+        const next = await window.phonedek.getObsStatus()
+        if (active) setObsStatus(next)
+      } catch {
+        // OBS status is informational; keep the rest of Settings usable.
+      }
+    }
+    void refresh()
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refresh()
+    }, 1500)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [])
 
   const commitName = (): void => {
     const next = nameDraft.trim()
@@ -231,6 +275,132 @@ export function SettingsDialog({
       if (!result.ok) onToast(result.error ?? 'Could not update pointer control', 'error')
     } finally {
       setBusy(false)
+    }
+  }
+
+  const pushObsSettings = async (input: ObsSettingsInput) => {
+    const result = await window.phonedek.setObsSettings(input)
+    if (result.state) onServerUpdate(result.state.server)
+    return result
+  }
+
+  const refreshObsStatus = async (): Promise<ObsStatusView | null> => {
+    try {
+      const next = await window.phonedek.getObsStatus()
+      setObsStatus(next)
+      return next
+    } catch {
+      return null
+    }
+  }
+
+  const applyObsSettings = async (input: ObsSettingsInput, success?: string): Promise<boolean> => {
+    setObsBusy(true)
+    try {
+      const result = await pushObsSettings(input)
+      if (!result.ok) onToast(result.error ?? 'Could not update OBS settings', 'error')
+      else if (success) onToast(success, 'success')
+      await refreshObsStatus()
+      return result.ok
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : String(error), 'error')
+      return false
+    } finally {
+      setObsBusy(false)
+    }
+  }
+
+  const toggleObs = (enabled: boolean): void => {
+    void applyObsSettings({ enabled }, enabled ? 'OBS control enabled' : 'OBS control disabled')
+  }
+
+  const commitObsHost = (): void => {
+    const next = obsHostDraft.trim()
+    if (next === settings.obsHost) {
+      setObsHostDraft(settings.obsHost)
+      return
+    }
+    void applyObsSettings({ host: next }, 'OBS host updated')
+  }
+
+  const commitObsPort = (): void => {
+    const port = Number(obsPortDraft)
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      onToast('OBS port must be between 1 and 65535', 'error')
+      setObsPortDraft(String(settings.obsPort))
+      return
+    }
+    if (port === settings.obsPort) return
+    void applyObsSettings({ port }, 'OBS port updated')
+  }
+
+  const setObsPassword = async (): Promise<void> => {
+    if (!obsPasswordDraft) return
+    const ok = await applyObsSettings({ password: obsPasswordDraft }, 'OBS password updated')
+    if (ok) setObsPasswordDraft('')
+  }
+
+  const clearObsPassword = async (): Promise<void> => {
+    const confirmed = await confirm({
+      title: 'Clear OBS password',
+      message: 'Remove the stored OBS WebSocket password?',
+      warning: 'Only do this when OBS WebSocket authentication is disabled.',
+      confirmLabel: 'Clear password',
+      danger: true,
+    })
+    if (!confirmed) return
+    const ok = await applyObsSettings({ clearPassword: true }, 'OBS password cleared')
+    if (ok) setObsPasswordDraft('')
+  }
+
+  const testObsConnection = async (): Promise<void> => {
+    setObsBusy(true)
+    try {
+      if (!settings.obsEnabled) {
+        const enabled = await pushObsSettings({ enabled: true })
+        if (!enabled.ok) {
+          onToast(enabled.error ?? 'Could not enable OBS', 'error')
+          return
+        }
+      } else {
+        // The client only restarts on a config change; cycle the master switch
+        // to force an immediate attempt instead of waiting for the backoff.
+        await pushObsSettings({ enabled: false })
+        const enabled = await pushObsSettings({ enabled: true })
+        if (!enabled.ok) {
+          onToast(enabled.error ?? 'Could not reconnect OBS', 'error')
+          return
+        }
+      }
+      const next = await refreshObsStatus()
+      onToast(
+        next?.state === 'connected'
+          ? 'OBS connected'
+          : 'OBS reconnect requested — check that OBS is running with the WebSocket server enabled',
+        next?.state === 'connected' ? 'success' : 'info',
+      )
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : String(error), 'error')
+    } finally {
+      setObsBusy(false)
+    }
+  }
+
+  const refreshObsInputs = async (): Promise<void> => {
+    setObsBusy(true)
+    setObsInputsError(null)
+    try {
+      const result = await window.phonedek.listObsInputs()
+      if (!result.ok) {
+        setObsInputsError(result.error ?? 'Could not list OBS inputs')
+        setObsInputList([])
+        return
+      }
+      setObsInputList(result.inputs ?? [])
+    } catch (error) {
+      setObsInputsError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setObsBusy(false)
     }
   }
 
@@ -309,6 +479,11 @@ export function SettingsDialog({
     }
   }
 
+  const obsSummary = obsStatusSummary(obsStatus)
+  const obsHostIsLoopback = /^(?:localhost|127(?:\.\d{1,3}){3}|::1|\[::1\])$/i.test(
+    obsHostDraft.trim(),
+  )
+
   const updateSummary = updateStatus
     ? summarizeUpdateStatus(updateStatus)
     : {
@@ -377,6 +552,151 @@ export function SettingsDialog({
           onChange={(enabled) => void togglePointerControl(enabled)}
           disabled={busy}
         />
+      </div>
+
+      <div className="settings-section">
+        <h3>OBS Studio</h3>
+        <Toggle
+          label="Control OBS through its WebSocket server"
+          description="OBS 28 or newer. The connection is unencrypted; use localhost or a trusted LAN."
+          checked={settings.obsEnabled}
+          onChange={toggleObs}
+          disabled={busy || obsBusy}
+        />
+
+        <div className={`obs-status ${obsSummary.tone}`}>
+          <span
+            className={`dot ${
+              obsSummary.tone === 'ok' ? 'online' : obsSummary.tone === 'error' ? 'error' : 'offline'
+            }`}
+            aria-hidden="true"
+          />
+          <div>
+            <strong>{obsSummary.label}</strong>
+            <small>{obsSummary.detail}</small>
+          </div>
+          <span className="mono obs-status-endpoint">{obsEndpoint(obsStatus)}</span>
+        </div>
+
+        <div className="two-col">
+          <label className="field">
+            <span>Host</span>
+            <input
+              value={obsHostDraft}
+              placeholder="127.0.0.1"
+              spellCheck={false}
+              disabled={!settings.obsEnabled || obsBusy}
+              onChange={(event) => setObsHostDraft(event.target.value)}
+              onBlur={commitObsHost}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') (event.target as HTMLInputElement).blur()
+              }}
+            />
+          </label>
+          <label className="field">
+            <span>Port</span>
+            <input
+              type="number"
+              min={1}
+              max={65535}
+              value={obsPortDraft}
+              placeholder="4455"
+              disabled={!settings.obsEnabled || obsBusy}
+              onChange={(event) => setObsPortDraft(event.target.value)}
+              onBlur={commitObsPort}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') (event.target as HTMLInputElement).blur()
+              }}
+            />
+          </label>
+        </div>
+        {!obsHostIsLoopback && (
+          <p className="hint">
+            This host is not loopback. OBS WebSocket is not encrypted, so only use a host on a trusted LAN.
+          </p>
+        )}
+
+        <label className="field">
+          <span>
+            Password {settings.obsHasPassword && <em className="tag">Password set</em>}
+          </span>
+          <input
+            type="password"
+            value={obsPasswordDraft}
+            autoComplete="new-password"
+            disabled={!settings.obsEnabled || obsBusy}
+            placeholder={
+              settings.obsHasPassword
+                ? 'Enter a new password to replace the stored one'
+                : 'No password set'
+            }
+            onChange={(event) => setObsPasswordDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') (event.target as HTMLInputElement).blur()
+            }}
+          />
+        </label>
+        <div className="row gap">
+          <button
+            type="button"
+            className="button secondary small"
+            onClick={() => void setObsPassword()}
+            disabled={!obsPasswordDraft || obsBusy || !settings.obsEnabled}
+          >
+            Set password
+          </button>
+          {settings.obsHasPassword && (
+            <button
+              type="button"
+              className="button ghost small"
+              onClick={() => void clearObsPassword()}
+              disabled={obsBusy || !settings.obsEnabled}
+            >
+              Clear password
+            </button>
+          )}
+          <span className="hint">Stored on this PC only; never shown or sent to the phone.</span>
+        </div>
+
+        <div className="row gap">
+          <button
+            type="button"
+            className="button secondary small"
+            onClick={() => void testObsConnection()}
+            disabled={obsBusy}
+          >
+            <Icon name="refresh" size={14} /> Test / reconnect
+          </button>
+          <button
+            type="button"
+            className="button secondary small"
+            onClick={() => void refreshObsInputs()}
+            disabled={obsBusy || obsStatus.state !== 'connected'}
+          >
+            <Icon name="sliders" size={14} /> Refresh inputs
+          </button>
+          <span className="hint">In OBS: Tools → WebSocket Server Settings → Enable WebSocket server.</span>
+        </div>
+
+        {obsInputsError && <p className="hint error-text">{obsInputsError}</p>}
+        {obsInputList && !obsInputsError && (
+          <div className="obs-input-summary">
+            <span className="mono">
+              {obsInputList.length} input{obsInputList.length === 1 ? '' : 's'} in this scene collection
+            </span>
+            {obsInputList.length > 0 && (
+              <div className="obs-input-chips">
+                {obsInputList.slice(0, 8).map((input) => (
+                  <span className="obs-input-chip" key={input.name}>
+                    {input.name}
+                    {input.audio ? ' · audio' : ''}
+                  </span>
+                ))}
+                {obsInputList.length > 8 && <span className="obs-input-chip">+{obsInputList.length - 8}</span>}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="settings-section">

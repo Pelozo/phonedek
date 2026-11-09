@@ -4517,3 +4517,185 @@ input[type="range"]:disabled {
   font-size: 12px;
   line-height: 1.5;
 }
+
+/* ------------------------------------------------------------------ */
+/* OBS integration                                                     */
+/* ------------------------------------------------------------------ */
+
+.obs-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  background: transparent;
+}
+
+.obs-status.ok {
+  border-left-color: var(--ok);
+}
+
+.obs-status.warn {
+  border-left-color: var(--warn);
+}
+
+.obs-status.error {
+  border-left-color: var(--danger);
+}
+
+.obs-status > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.obs-status strong {
+  font-size: 12px;
+}
+
+.obs-status small {
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.obs-status-endpoint {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 9px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.obs-availability {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.obs-availability strong {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+}
+
+.obs-availability small {
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.obs-availability.ok strong {
+  color: var(--ok);
+}
+
+.obs-availability.warn strong {
+  color: var(--warn);
+}
+
+.obs-availability.error strong {
+  color: var(--danger);
+}
+
+.obs-availability.muted strong {
+  color: var(--muted);
+}
+
+.obs-input-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.obs-input-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--text-soft);
+  text-align: left;
+}
+
+.obs-input-option:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+}
+
+.obs-input-option.selected {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.obs-input-name {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.obs-input-name strong {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.obs-input-name small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+.obs-input-tag {
+  padding: 2px 5px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 8.5px;
+  letter-spacing: 0.08em;
+}
+
+.obs-input-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.obs-input-summary > .mono {
+  color: var(--muted);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+}
+
+.obs-input-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.obs-input-chip {
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9.5px;
+}
+
+.error-text {
+  color: var(--danger) !important;
+}
+

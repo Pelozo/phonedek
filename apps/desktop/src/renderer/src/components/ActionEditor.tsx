@@ -371,6 +371,27 @@ export function ActionEditor({
           </p>
         )}
 
+        {action.type === 'obs' && (
+          <div className="stack">
+            <label className="field">
+              <span>OBS input</span>
+              <input
+                value={action.input ?? ''}
+                maxLength={128}
+                spellCheck={false}
+                placeholder="Default — first audio input"
+                onChange={(event) =>
+                  onUpdate({ ...action, input: event.target.value || undefined })
+                }
+              />
+            </label>
+            <p className="hint">
+              Toggles mute through OBS WebSocket. Leave the field blank to use the first OBS audio
+              input. Names belong to the current scene collection.
+            </p>
+          </div>
+        )}
+
         {action.type === 'page' && (
           <div className="two-col">
             <label className="field">
