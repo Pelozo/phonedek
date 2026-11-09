@@ -349,6 +349,23 @@ function Send-Pointer($Step) {
     }
     [void][PhoneDeckNative]::SetCursorPos($targetX, $targetY)
 
+    # Some environments (UIPI, remote sessions, certain DPI setups) accept
+    # SetCursorPos but leave the cursor in place. Verify once and fall back to
+    # relative mouse_event movement so a frame is never silently lost.
+    if ($targetX -ne $point.X -or $targetY -ne $point.Y) {
+        $verify = [PhoneDeckNative+POINT]::new()
+        $moved = [PhoneDeckNative]::GetCursorPos([ref]$verify) -and
+            [Math]::Abs($verify.X - $targetX) -le 1 -and
+            [Math]::Abs($verify.Y - $targetY) -le 1
+        if (-not $moved) {
+            $relX = [int]($targetX - $point.X)
+            $relY = [int]($targetY - $point.Y)
+            $mouseDx = if ($relX -lt 0) { [System.UInt32]([System.Int64]$relX + 4294967296) } else { [System.UInt32]$relX }
+            $mouseDy = if ($relY -lt 0) { [System.UInt32]([System.Int64]$relY + 4294967296) } else { [System.UInt32]$relY }
+            [PhoneDeckNative]::mouse_event([System.UInt32]0x0001, $mouseDx, $mouseDy, [System.UInt32]0, [UIntPtr]::Zero)
+        }
+    }
+
     if ($null -ne $Step.scrollY) {
         $delta = [int][Math]::Round(([double]$Step.scrollY) * 120.0)
         $delta = [Math]::Max(-12000, [Math]::Min(12000, $delta))
