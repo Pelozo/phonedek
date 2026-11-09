@@ -2,7 +2,11 @@ package com.phonedek.app.data
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 
 const val DEFAULT_HTTP_PORT = 47654
@@ -128,6 +132,31 @@ data class PointerButtonEvent(
     val action: String,
 )
 
+/**
+ * Live state for one watched control, as sent by `controlState`. Runtime data
+ * only: this is never part of [DeckConfig] and is never persisted.
+ */
+@Serializable
+data class ControlStateEntryDto(
+    val controlId: String = "",
+    val revision: Int = 0,
+    val value: Float? = null,
+    val muted: Boolean? = null,
+    val available: Boolean = false,
+    val detail: String? = null,
+)
+
+/** Alias used by the connection/UI API; the wire shape is [ControlStateEntryDto]. */
+typealias ControlStateDto = ControlStateEntryDto
+
+/** Batched `controlState` message: one entry per watched control. */
+@Serializable
+data class ControlStateMessageDto(
+    val profileId: String = "",
+    val pageId: String = "",
+    val states: List<ControlStateEntryDto> = emptyList(),
+)
+
 @Serializable
 data class MediaIconDto(
     val type: String = "",
@@ -202,6 +231,54 @@ object DeckJson {
         runCatching { format.decodeFromJsonElement<DeckConfig>(element) }
             .getOrNull()
             ?.normalized()
+
+    /**
+     * Parses one `controlState` message. Unknown fields are ignored and
+     * malformed entries are dropped instead of failing the whole batch.
+     */
+    fun parseControlState(raw: String): ControlStateMessageDto? =
+        runCatching { format.parseToJsonElement(raw) }
+            .getOrNull()
+            ?.let(::parseControlState)
+
+    fun parseControlState(element: JsonElement): ControlStateMessageDto? {
+        val obj = element as? JsonObject ?: return null
+        val profileId = (obj["profileId"] as? JsonPrimitive)
+            ?.contentOrNull?.trim().orEmpty()
+        val pageId = (obj["pageId"] as? JsonPrimitive)
+            ?.contentOrNull?.trim().orEmpty()
+        if (profileId.isEmpty() || pageId.isEmpty()) return null
+        val rawStates = obj["states"] as? JsonArray ?: return null
+        val states = rawStates
+            .asSequence()
+            .mapNotNull { entry ->
+                // One malformed entry must not discard the whole batch.
+                runCatching { format.decodeFromJsonElement<ControlStateEntryDto>(entry) }
+                    .getOrNull()
+                    ?.sanitized()
+            }
+            .take(32)
+            .toList()
+        return ControlStateMessageDto(
+            profileId = profileId,
+            pageId = pageId,
+            states = states,
+        )
+    }
+}
+
+private fun ControlStateEntryDto.sanitized(): ControlStateEntryDto? {
+    val id = controlId.trim()
+    if (id.isEmpty() || id.length > 128 || revision < 0) return null
+    // `value` is normalized 0..1; a non-finite or out-of-range value means the
+    // entry cannot be applied, so keep the configured initial for that control.
+    val safeValue = value?.takeIf { it.isFinite() && it in 0f..1f }
+    if (value != null && safeValue == null) return null
+    return copy(
+        controlId = id,
+        value = safeValue,
+        detail = detail?.trim()?.take(64)?.takeIf { it.isNotEmpty() },
+    )
 }
 
 /**

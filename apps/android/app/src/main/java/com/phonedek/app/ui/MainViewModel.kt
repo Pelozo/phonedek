@@ -11,6 +11,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.phonedek.app.BuildConfig
 import com.phonedek.app.data.ConfigCache
+import com.phonedek.app.data.ControlStateDto
 import com.phonedek.app.data.DeckButton
 import com.phonedek.app.data.DeckConfig
 import com.phonedek.app.data.DeckJson
@@ -53,6 +54,8 @@ import kotlinx.coroutines.withContext
 private const val CONTROL_INPUT_FLUSH_MS = 40L
 private const val POINTER_FLUSH_MS = 16L
 private const val POINTER_KEEPALIVE_MS = 2_000L
+private const val WATCH_DEBOUNCE_MS = 250L
+private const val WATCH_MIN_INTERVAL_MS = 500L
 
 /** Immutable settings captured when the pad opens. */
 data class PointerPadOptions(
@@ -74,6 +77,8 @@ data class UiState(
     val connection: ConnectionStatus = ConnectionStatus.OFFLINE,
     val inputCapable: Boolean = false,
     val pointerCapable: Boolean = false,
+    val stateCapable: Boolean = false,
+    val controlStates: Map<String, ControlStateDto> = emptyMap(),
     val pointerPadOpen: Boolean = false,
     val pointerPadOptions: PointerPadOptions = PointerPadOptions(),
     val phoneBrightness: Float? = null,
@@ -136,6 +141,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var backupJob: Job? = null
     private var importJob: Job? = null
     private var inputFlushJob: Job? = null
+    private var watchJob: Job? = null
+    private var lastWatchKey: String? = null
+    private var lastWatchSentAt = 0L
     private var activeControlId: String? = null
     private var activeControlAbsolute = false
     private var pendingInputDelta = 0f
@@ -164,6 +172,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         device = deviceInfo,
         listener = object : DeckConnection.Listener {
             override fun onStatus(status: ConnectionStatus) {
+                if (status != ConnectionStatus.CONNECTED) {
+                    // The server drops the subscription with the socket. Forget
+                    // our signature so the next hello re-subscribes even if the
+                    // visible controls did not change.
+                    stopWatching(sendEmpty = false)
+                }
                 _state.update { it.copy(connection = status) }
                 if (status != ConnectionStatus.CONNECTED &&
                     (_state.value.pointerPadOpen || pointerControlId != null)
@@ -186,16 +200,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val inputCapable = "input-v1" in capabilities
                 val brightnessCapable = "brightness-v1" in capabilities
                 val pointerCapable = "pointer-v1" in capabilities
+                val stateCapable = "control-state-v1" in capabilities
                 _state.update { current ->
                     current.copy(
                         inputCapable = inputCapable,
                         pointerCapable = pointerCapable,
+                        stateCapable = stateCapable,
+                        // A hello starts a new socket; state from the previous
+                        // connection (and its revision counter) is stale.
+                        controlStates = emptyMap(),
                         phoneBrightness = if (brightnessCapable) {
                             current.phoneBrightness
                         } else {
                             null
                         },
                     )
+                }
+                if (stateCapable) {
+                    scheduleWatch()
+                } else {
+                    stopWatching(sendEmpty = false)
                 }
                 if (inputCapable) inputUnsupportedShown = false
                 if (pointerCapable) pointerUnsupportedShown = false
@@ -257,6 +281,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(phoneBrightness = normalized) }
             }
 
+            override fun onControlState(
+                profileId: String,
+                pageId: String,
+                states: Map<String, ControlStateDto>,
+            ) {
+                val snapshot = _state.value
+                if (!snapshot.stateCapable) return
+                if (snapshot.activeProfileId != profileId ||
+                    snapshot.activePageId != pageId
+                ) {
+                    return
+                }
+                if (states.isEmpty()) return
+                _state.update { current ->
+                    if (current.activeProfileId != profileId ||
+                        current.activePageId != pageId
+                    ) {
+                        current
+                    } else {
+                        current.copy(
+                            controlStates = ControlStateStore.merge(
+                                current.controlStates,
+                                states.values,
+                            ),
+                        )
+                    }
+                }
+            }
+
             override fun onPointerResult(seq: Long, ok: Boolean, error: String?) {
                 if (ok) return
                 Diag.w("Pointer rejected seq=$seq error=\"${error.orEmpty()}\"")
@@ -295,6 +348,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onBackground() {
         Diag.i("App backgrounded; stopping WebSocket")
+        stopWatching(sendEmpty = true)
         closePointerPad()
         foreground = false
         connection.stop()
@@ -444,6 +498,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         importJob = null
         inputFlushJob?.cancel()
         inputFlushJob = null
+        watchJob?.cancel()
+        watchJob = null
+        lastWatchKey = null
+        lastWatchSentAt = 0L
         activeControlId = null
         activeControlAbsolute = false
         pendingInputDelta = 0f
@@ -1058,6 +1116,73 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Coalesces watch updates triggered by hello/config/page changes. The
+     * desktop allows one watch per 500 ms, so a fast page flip must not send a
+     * burst; the last visible page wins.
+     */
+    private fun scheduleWatch() {
+        val snapshot = _state.value
+        if (!foreground || !snapshot.stateCapable) return
+        watchJob?.cancel()
+        val elapsed = if (lastWatchSentAt == 0L) {
+            0L
+        } else {
+            SystemClock.elapsedRealtime() - lastWatchSentAt
+        }
+        val spacing = (WATCH_MIN_INTERVAL_MS - elapsed).coerceAtLeast(0L)
+        val wait = maxOf(WATCH_DEBOUNCE_MS, spacing)
+        watchJob = viewModelScope.launch {
+            delay(wait)
+            sendWatchNow()
+        }
+    }
+
+    private fun sendWatchNow() {
+        watchJob = null
+        val snapshot = _state.value
+        if (!foreground || !snapshot.stateCapable) return
+        if (snapshot.connection != ConnectionStatus.CONNECTED) return
+        val profile = snapshot.config?.profiles?.firstOrNull {
+            it.id == snapshot.activeProfileId
+        } ?: return
+        val page = profile.pages.firstOrNull { it.id == snapshot.activePageId } ?: return
+        val ids = ControlStateStore.absoluteVolumeControlIds(page)
+        val key = "${profile.id}|${page.id}|${ids.joinToString(",")}"
+        if (key == lastWatchKey) return
+        val sent = connection.sendWatch(
+            profileId = profile.id,
+            pageId = page.id,
+            controlIds = ids,
+        )
+        if (sent) {
+            lastWatchKey = key
+            lastWatchSentAt = SystemClock.elapsedRealtime()
+            Diag.i("Watch page=${page.id} controls=${ids.size}")
+        } else {
+            Diag.w("Watch message dropped: page=${page.id} controls=${ids.size}")
+        }
+    }
+
+    /**
+     * Drops the subscription. `sendEmpty` is used when the app is backgrounded
+     * but the socket still exists; a reconnect or socket loss needs no message.
+     */
+    private fun stopWatching(sendEmpty: Boolean) {
+        watchJob?.cancel()
+        watchJob = null
+        val hadWatch = lastWatchKey != null
+        if (sendEmpty && hadWatch && connection.isConnected()) {
+            val snapshot = _state.value
+            val profileId = snapshot.activeProfileId
+            val pageId = snapshot.activePageId
+            if (profileId != null && pageId != null) {
+                connection.sendWatch(profileId, pageId, emptyList())
+            }
+        }
+        lastWatchKey = null
+    }
+
+    /**
      * Relative slider/dial input. Moves are coalesced to about 25 Hz; `end`
      * always flushes the pending delta and is sent even when it is zero.
      */
@@ -1391,14 +1516,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 lastProfileId = active.first
                 lastPageId = active.second
+                val pageChanged = current.activeProfileId != active.first ||
+                    current.activePageId != active.second
                 _state.update {
                     it.copy(
                         config = config,
                         activeProfileId = active.first,
                         activePageId = active.second,
+                        controlStates = if (pageChanged) emptyMap() else it.controlStates,
                     )
                 }
                 cache.write(rawJson)
+                scheduleWatch()
 
                 val pairing = _state.value.pairing
                 if (pairing != null && config.serverName.isNotBlank() &&
@@ -1463,9 +1592,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun setActivePage(profileId: String, pageId: String) {
         val current = _state.value
         if (current.activeProfileId == profileId && current.activePageId == pageId) return
-        _state.update { it.copy(activeProfileId = profileId, activePageId = pageId) }
+        _state.update {
+            it.copy(
+                activeProfileId = profileId,
+                activePageId = pageId,
+                // State is scoped to the visible page; never let a stale entry
+                // light a tile on the page we just moved to.
+                controlStates = emptyMap(),
+            )
+        }
         lastProfileId = profileId
         lastPageId = pageId
+        scheduleWatch()
         viewModelScope.launch {
             runCatching { prefs.setLastPage(profileId, pageId) }
         }
@@ -1479,6 +1617,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         backupJob?.cancel()
         importJob?.cancel()
         inputFlushJob?.cancel()
+        stopWatching(sendEmpty = false)
         stopPointerKeepalive()
         pointerFlushJob?.cancel()
         connection.stop()

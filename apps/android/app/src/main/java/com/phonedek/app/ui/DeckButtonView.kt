@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.phonedek.app.data.ControlStateDto
 import com.phonedek.app.data.DeckButton
 import com.phonedek.app.data.MediaIconDto
 import com.phonedek.app.data.Pairing
@@ -94,6 +95,8 @@ fun DeckButtonView(
     ) -> Unit = { _, _, _, _ -> },
     onControlInteracting: (Boolean) -> Unit = {},
     trackpad: TrackpadActions = TrackpadActions(),
+    controlState: ControlStateDto? = null,
+    stateCapable: Boolean = false,
     isActive: Boolean = true,
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -195,6 +198,11 @@ fun DeckButtonView(
                 control = control,
                 label = button.label,
                 textColor = textColor,
+                externalValue = controlState?.value,
+                stateAvailable = controlState?.available == true,
+                stateDetail = controlState?.detail,
+                stateRevision = controlState?.revision ?: -1,
+                stateCapable = stateCapable,
                 onInput = { phase, delta, value ->
                     onControlInput(button.id, phase, delta, value)
                 },

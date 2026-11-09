@@ -1,6 +1,7 @@
 package com.phonedek.app.net
 
 import android.os.SystemClock
+import com.phonedek.app.data.ControlStateDto
 import com.phonedek.app.data.DeckJson
 import com.phonedek.app.data.DeviceInfo
 import com.phonedek.app.data.PROTOCOL_VERSION
@@ -47,7 +48,12 @@ internal fun buildWebSocketUrl(host: String, port: Int, token: String): HttpUrl?
         .build()
 }.getOrNull()
 
-internal val CLIENT_CAPABILITIES = listOf("input-v1", "brightness-v1", "pointer-v1")
+internal val CLIENT_CAPABILITIES = listOf(
+    "input-v1",
+    "brightness-v1",
+    "pointer-v1",
+    "control-state-v1",
+)
 
 internal fun buildHelloPayload(device: DeviceInfo): JsonObject = buildJsonObject {
     put("type", "hello")
@@ -94,6 +100,11 @@ class DeckConnection(
         fun onInputResult(requestId: String, controlId: String, ok: Boolean, error: String?)
         fun onPointerResult(seq: Long, ok: Boolean, error: String?)
         fun onBrightness(level: Float?)
+        fun onControlState(
+            profileId: String,
+            pageId: String,
+            states: Map<String, ControlStateDto>,
+        )
         fun onServerError(code: String, message: String)
         fun onNavigate(direction: String, pageId: String?)
         fun onPong()
@@ -223,6 +234,31 @@ class DeckConnection(
             scrollX = scrollX,
             scrollY = scrollY,
             buttons = buttons,
+        )
+        return socket.send(payload.toString())
+    }
+
+    /**
+     * Subscribes this connection to live state for [controlIds] on the visible
+     * page. An empty list unsubscribes. The desktop replaces any previous
+     * subscription, so this is safe to call on every page/config change.
+     */
+    fun sendWatch(
+        profileId: String,
+        pageId: String,
+        controlIds: List<String>,
+        intervalMs: Int = 1000,
+    ): Boolean {
+        val socket = webSocketRef
+        if (!active || !connected || socket == null) {
+            Diag.w("sendWatch dropped: connected=$connected active=$active socket=${socket != null}")
+            return false
+        }
+        val payload = buildWatchPayload(
+            profileId = profileId,
+            pageId = pageId,
+            controlIds = controlIds,
+            intervalMs = intervalMs,
         )
         return socket.send(payload.toString())
     }
@@ -417,6 +453,17 @@ class DeckConnection(
                 }
             }
 
+            "controlState" -> {
+                val message = DeckJson.parseControlState(obj)
+                if (message != null) {
+                    listener.onControlState(
+                        profileId = message.profileId,
+                        pageId = message.pageId,
+                        states = message.states.associateBy { it.controlId },
+                    )
+                }
+            }
+
             "error" -> {
                 val code = obj.string("code") ?: "error"
                 val message = obj.string("message") ?: "The desktop reported an error."
@@ -472,6 +519,33 @@ internal fun buildInputPayload(
     put("phase", phase)
     if (delta != null) put("delta", delta.coerceIn(-100f, 100f).toDouble())
     if (value != null) put("value", value.coerceIn(0f, 1f).toDouble())
+}
+
+/**
+ * `watch` payload shared by [DeckConnection.sendWatch] and tests. The protocol
+ * caps ids at 32 and the poll hint at 500..5000 ms; an empty list is an
+ * explicit unsubscribe, not "every control".
+ */
+internal fun buildWatchPayload(
+    profileId: String,
+    pageId: String,
+    controlIds: List<String>,
+    intervalMs: Int = 1000,
+): JsonObject = buildJsonObject {
+    put("type", "watch")
+    put("profileId", profileId)
+    put("pageId", pageId)
+    val safeIds = controlIds
+        .asSequence()
+        .map { it.trim() }
+        .filter { it.isNotEmpty() && it.length <= 128 }
+        .distinct()
+        .take(32)
+        .toList()
+    put("controlIds", buildJsonArray {
+        safeIds.forEach { id -> add(id) }
+    })
+    put("intervalMs", intervalMs.coerceIn(500, 5000))
 }
 
 private val POINTER_PHASES = setOf("start", "move", "end", "cancel")

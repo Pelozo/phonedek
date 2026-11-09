@@ -78,6 +78,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.phonedek.app.data.ControlStateDto
 import com.phonedek.app.data.DeckButton
 import com.phonedek.app.data.DeckPage
 import com.phonedek.app.data.DeckProfile
@@ -204,6 +205,8 @@ fun DeckScreen(
                 pairing = state.pairing,
                 topInset = topInset,
                 controlInteracting = controlInteracting,
+                controlStates = state.controlStates,
+                stateCapable = state.stateCapable,
                 onPageSettled = { pageId -> viewModel.onPageSelected(profile.id, pageId) },
                 onPress = viewModel::onButtonPressed,
                 onControlInput = viewModel::onControlInput,
@@ -675,6 +678,8 @@ private fun DeckPager(
     pairing: Pairing?,
     topInset: Dp,
     controlInteracting: Boolean,
+    controlStates: Map<String, ControlStateDto>,
+    stateCapable: Boolean,
     onPageSettled: (String) -> Unit,
     onPress: (DeckButton) -> Unit,
     onControlInput: (
@@ -777,6 +782,8 @@ private fun DeckPager(
                 pairing = pairing,
                 topInset = topInset,
                 isActive = index == settledPage,
+                controlStates = controlStates,
+                stateCapable = stateCapable,
                 onPress = onPress,
                 onControlInput = onControlInput,
                 onControlInteracting = onControlInteracting,
@@ -793,6 +800,8 @@ private fun DeckPageContent(
     pairing: Pairing?,
     topInset: Dp,
     isActive: Boolean,
+    controlStates: Map<String, ControlStateDto>,
+    stateCapable: Boolean,
     onPress: (DeckButton) -> Unit,
     onControlInput: (
         controlId: String,
@@ -816,6 +825,8 @@ private fun DeckPageContent(
             pairing = pairing,
             topInset = topInset,
             isActive = isActive,
+            controlStates = controlStates,
+            stateCapable = stateCapable,
             onPress = onPress,
             onControlInput = onControlInput,
             onControlInteracting = onControlInteracting,
@@ -831,6 +842,8 @@ private fun DeckGrid(
     pairing: Pairing?,
     topInset: Dp,
     isActive: Boolean,
+    controlStates: Map<String, ControlStateDto>,
+    stateCapable: Boolean,
     onPress: (DeckButton) -> Unit,
     onControlInput: (
         controlId: String,
@@ -889,6 +902,8 @@ private fun DeckGrid(
                     theme = profile.theme,
                     pairing = pairing,
                     isActive = isActive,
+                    controlState = controlStates[button.id],
+                    stateCapable = stateCapable,
                     onPress = { onPress(button) },
                     onControlInput = onControlInput,
                     onControlInteracting = onControlInteracting,

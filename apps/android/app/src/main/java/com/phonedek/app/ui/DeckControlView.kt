@@ -1,5 +1,7 @@
 package com.phonedek.app.ui
 
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -16,8 +18,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -32,6 +36,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -68,6 +73,11 @@ fun DeckControlView(
     onInteractingChange: (Boolean) -> Unit,
     onTap: () -> Unit,
     modifier: Modifier = Modifier,
+    externalValue: Float? = null,
+    stateAvailable: Boolean = false,
+    stateDetail: String? = null,
+    stateRevision: Int = -1,
+    stateCapable: Boolean = false,
 ) {
     val minValue = control.min ?: 0f
     val maxValue = control.max ?: 100f
@@ -87,21 +97,56 @@ fun DeckControlView(
     val dialDetentPx = with(density) { 12.dp.toPx() }
     val dialDecidePx = with(density) { 8.dp.toPx() }
 
-    var value by remember(control) {
-        mutableFloatStateOf(
-            (control.initial ?: ((minValue + maxValue) / 2f))
-                .coerceIn(minValue, maxValue),
-        )
-    }
-    var interacting by remember(control) { mutableStateOf(false) }
-
     fun fractionOf(raw: Float): Float =
         ((raw - minValue) / range).coerceIn(0f, 1f)
 
-    fun snap(raw: Float): Float {
-        val clamped = raw.coerceIn(minValue, maxValue)
-        val steps = ((clamped - minValue) / stepValue).roundToInt()
-        return (minValue + steps * stepValue).coerceIn(minValue, maxValue)
+    fun snap(raw: Float): Float =
+        ControlStateStore.snapControlValue(raw, minValue, maxValue, stepValue)
+
+    // A cached snapshot usually arrives before first composition; seed from it
+    // so the slider starts at the real volume instead of sweeping from 50%.
+    val stateSeed = externalValue
+        ?.takeIf { stateAvailable && it.isFinite() }
+        ?.let { ControlStateStore.valueFromNormalized(it, minValue, maxValue, stepValue) }
+    var value by remember(control) {
+        mutableFloatStateOf(
+            stateSeed
+                ?: (control.initial ?: ((minValue + maxValue) / 2f))
+                    .coerceIn(minValue, maxValue),
+        )
+    }
+    var interacting by remember(control) { mutableStateOf(false) }
+    var appliedRevision by remember(control) {
+        mutableIntStateOf(if (stateSeed != null) stateRevision else -1)
+    }
+    var tileHeightPx by remember { mutableIntStateOf(0) }
+
+    // Remote state never fights a finger. While the control is interactive we
+    // remember the revision we superseded, so the pre-drag snapshot cannot
+    // snap back on release; only the post-write revision is applied.
+    LaunchedEffect(control, stateRevision, stateAvailable, externalValue, interacting) {
+        if (interacting) {
+            if (stateAvailable && stateRevision > appliedRevision) {
+                appliedRevision = stateRevision
+            }
+            return@LaunchedEffect
+        }
+        if (!stateAvailable) {
+            // No entry at all (page change, reconnect, old desktop): forget the
+            // old socket's revision so a restarted desktop counter can apply.
+            if (stateRevision < 0) appliedRevision = -1
+            return@LaunchedEffect
+        }
+        val targetRaw = externalValue?.takeIf { it.isFinite() } ?: return@LaunchedEffect
+        if (stateRevision <= appliedRevision) return@LaunchedEffect
+        appliedRevision = stateRevision
+        val target = snap(minValue + targetRaw.coerceIn(0f, 1f) * range)
+        if (target == value) return@LaunchedEffect
+        val start = value
+        animate(0f, 1f, animationSpec = tween(durationMillis = 140)) { fraction, _ ->
+            value = start + (target - start) * fraction
+        }
+        value = target
     }
 
     fun performDetentHaptic() {
@@ -141,10 +186,23 @@ fun DeckControlView(
     }
 
     val valueText = "${value.roundToInt()}$displayUnit"
+    val displayText = if (stateAvailable && !interacting) {
+        stateDetail?.trim()?.takeIf { it.isNotEmpty() } ?: valueText
+    } else {
+        valueText
+    }
+    val stateBadge = if (stateCapable && stateAvailable && externalValue != null) {
+        "LIVE"
+    } else {
+        "LOCAL"
+    }
+    val showStateBadge = tileHeightPx == 0 ||
+        with(density) { tileHeightPx.toDp() } >= 48.dp
 
     Column(
         modifier = modifier
             .fillMaxSize()
+            .onSizeChanged { tileHeightPx = it.height }
             .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.Center,
     ) {
@@ -175,13 +233,24 @@ fun DeckControlView(
                 )
             }
             Text(
-                text = valueText,
+                text = displayText,
                 color = textColor,
                 fontFamily = ConsoleMono,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
             )
+            if (showStateBadge) {
+                Text(
+                    text = stateBadge,
+                    color = textColor.copy(alpha = 0.55f),
+                    fontFamily = ConsoleMono,
+                    fontSize = 7.sp,
+                    letterSpacing = 0.8.sp,
+                    maxLines = 1,
+                    modifier = Modifier.padding(start = 4.dp),
+                )
+            }
         }
         Spacer(Modifier.height(4.dp))
 
