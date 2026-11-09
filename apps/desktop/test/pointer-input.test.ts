@@ -4,7 +4,7 @@ import type {
   PointerMessage,
   PointerResult,
 } from '@phonedek/shared'
-import { PointerRouter, type PointerTarget } from '../src/main/pointer-input'
+import { PointerRouter, pointerInputAllowed, type PointerTarget } from '../src/main/pointer-input'
 import type { PointerSenderLike } from '../src/main/pointer-sender'
 
 const target: PointerTarget = {
@@ -345,6 +345,15 @@ describe('PointerRouter button lifecycle', () => {
   })
 })
 
+describe('pointerInputAllowed gate', () => {
+  it('requires the master switch and no native dialog', () => {
+    expect(pointerInputAllowed(true, false)).toBe(true)
+    expect(pointerInputAllowed(false, false)).toBe(false)
+    expect(pointerInputAllowed(true, true)).toBe(false)
+    expect(pointerInputAllowed(false, true)).toBe(false)
+  })
+})
+
 describe('PointerRouter rate limit and blocked gate', () => {
   it('limits moves but lets end and cancel through', () => {
     const sender = new FakeSender()
@@ -378,7 +387,7 @@ describe('PointerRouter rate limit and blocked gate', () => {
     expect(router.isBlocked).toBe(true)
     expect(router.handle('phone-a', move(3, { dx: 0.2 }), target)).toMatchObject({
       ok: false,
-      error: expect.stringMatching(/dialog/),
+      error: expect.stringMatching(/suspended/),
     })
     expectOk(router.handle('phone-a', cancel(4), target))
 

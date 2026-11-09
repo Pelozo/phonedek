@@ -17,7 +17,7 @@ import { createKeySender, type KeySender } from './key-sender'
 import { createLogger, type Logger } from './logger'
 import { lanAddresses, primaryLanAddress, urlsForPort } from './lan'
 import { keyboardHelperPath } from './platform'
-import { PointerRouter } from './pointer-input'
+import { PointerRouter, pointerInputAllowed } from './pointer-input'
 import {
   createPointerSender,
   pointerPlatformSupport,
@@ -59,6 +59,8 @@ let controlState: ControlStateService | null = null
 let volumeProbe: HelperVolumeProbe | null = null
 let pointerSender: PointerSender | null = null
 let pointerRouter: PointerRouter | null = null
+/** A native import/destructive dialog is waiting for a decision. */
+let pointerDialogOpen = false
 let updater: UpdateService
 let serverError: string | null = null
 let pairCache: { key: string; value: PairView } | null = null
@@ -180,6 +182,7 @@ async function buildServerInfo(): Promise<ServerInfoView> {
       discovery: currentSettings.discovery,
       launchAtLogin: currentSettings.launchAtLogin,
       minimizeToTray: currentSettings.minimizeToTray,
+      allowPointerControl: currentSettings.allowPointerControl,
       pairHost: currentSettings.pairHost,
       screenshotDirectory: currentSettings.screenshotDirectory,
     },
@@ -201,10 +204,22 @@ async function buildState(): Promise<AppState> {
       discovery: settings.get().discovery,
       launchAtLogin: settings.get().launchAtLogin,
       minimizeToTray: settings.get().minimizeToTray,
+      allowPointerControl: settings.get().allowPointerControl,
       pairHost: settings.get().pairHost,
       screenshotDirectory: settings.get().screenshotDirectory,
     },
   }
+}
+
+function applyPointerGate(): void {
+  pointerRouter?.setBlocked(
+    !pointerInputAllowed(settings.get().allowPointerControl, pointerDialogOpen),
+  )
+}
+
+function setPointerDialogOpen(open: boolean): void {
+  pointerDialogOpen = open
+  applyPointerGate()
 }
 
 function trayIconPath(): string {
@@ -541,6 +556,19 @@ function registerIpc(): void {
     return { ok: true, state: await buildState() }
   })
 
+  ipcMain.handle(
+    IPC.setAllowPointerControl,
+    async (_event, enabled: unknown): Promise<OperationResult> => {
+      if (typeof enabled !== 'boolean') {
+        return { ok: false, error: 'Pointer control must be true or false', state: await buildState() }
+      }
+      settings.update({ allowPointerControl: enabled })
+      applyPointerGate()
+      await pushServerInfo()
+      return { ok: true, state: await buildState() }
+    },
+  )
+
   ipcMain.handle(IPC.exportConfig, async (): Promise<OperationResult> => {
     const result = await showSave({
       title: 'Export PhoneDeck backup',
@@ -821,6 +849,7 @@ async function bootstrap(): Promise<void> {
     const support = pointerPlatformSupport()
     logger.info(`Pointer control disabled: ${support.reason ?? 'not supported on this host'}`)
   }
+  applyPointerGate()
 
   server = new DeckServer({
     port: settings.get().port,
@@ -885,7 +914,7 @@ async function bootstrap(): Promise<void> {
       mainWindow.focus()
       mainWindow.setAlwaysOnTop(true, 'screen-saver')
       logger.info(`Showing phone import approval dialog for "${preview.serverName}"`)
-      pointerRouter?.setBlocked(true)
+      setPointerDialogOpen(true)
       const choice = await (async () => {
         try {
           return await dialog.showMessageBox(mainWindow, {
@@ -900,7 +929,7 @@ async function bootstrap(): Promise<void> {
           })
         } finally {
           mainWindow.setAlwaysOnTop(false)
-          pointerRouter?.setBlocked(false)
+          setPointerDialogOpen(false)
         }
       })()
       logger.info(`Phone import approval: ${choice.response === 0 ? 'approved' : 'cancelled'}`)

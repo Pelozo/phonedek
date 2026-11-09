@@ -44,6 +44,14 @@ const MAX_DELTA = 2
 const MAX_SCROLL = 10
 const SUPPORTED_BUTTONS = new Set<PointerButton>(['left', 'right', 'middle'])
 
+/**
+ * Pointer input is allowed only when the Settings master switch is on and no
+ * native import/destructive dialog is waiting for a decision on the PC.
+ */
+export function pointerInputAllowed(allowPointerControl: boolean, dialogOpen: boolean): boolean {
+  return allowPointerControl && !dialogOpen
+}
+
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value))
 }
@@ -117,7 +125,7 @@ export class PointerRouter {
       return {
         seq: message.seq,
         ok: false,
-        error: 'Pointer control is suspended while a dialog is open on the PC.',
+        error: 'Pointer control is suspended on the PC.',
       }
     }
 
@@ -161,9 +169,9 @@ export class PointerRouter {
       return
     }
     for (const [clientId, state] of this.clients) {
-      if (state.held.size > 0) this.releaseHeld(clientId, 'pointer blocked by a dialog')
+      if (state.held.size > 0) this.releaseHeld(clientId, 'pointer input suspended')
     }
-    this.logger?.info('Pointer control suspended while a PC dialog is open')
+    this.logger?.info('Pointer control suspended on the PC')
   }
 
   /** Release everything this connection held; call from the WS close handler. */

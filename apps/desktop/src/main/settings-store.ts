@@ -11,6 +11,8 @@ export interface AppSettings {
   launchAtLogin: boolean
   /** Keep the deck server alive in the system tray when the window is closed. */
   minimizeToTray: boolean
+  /** Let paired phones move the cursor and click. Off suspends all pointer input. */
+  allowPointerControl: boolean
   /** Optional LAN address to advertise in the QR code. Empty = auto. */
   pairHost: string
   /** macOS full-screen capture folder. Empty = OS Desktop. */
@@ -29,6 +31,7 @@ export function defaultSettings(): AppSettings {
     discovery: true,
     launchAtLogin: false,
     minimizeToTray: false,
+    allowPointerControl: true,
     pairHost: '',
     screenshotDirectory: '',
   }
@@ -65,6 +68,10 @@ function sanitize(input: Partial<AppSettings> | null | undefined): AppSettings {
     launchAtLogin: typeof input.launchAtLogin === 'boolean' ? input.launchAtLogin : defaults.launchAtLogin,
     minimizeToTray:
       typeof input.minimizeToTray === 'boolean' ? input.minimizeToTray : defaults.minimizeToTray,
+    allowPointerControl:
+      typeof input.allowPointerControl === 'boolean'
+        ? input.allowPointerControl
+        : defaults.allowPointerControl,
     pairHost,
     screenshotDirectory,
   }

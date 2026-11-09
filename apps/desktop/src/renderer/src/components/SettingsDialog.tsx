@@ -223,6 +223,17 @@ export function SettingsDialog({
     }
   }
 
+  const togglePointerControl = async (enabled: boolean): Promise<void> => {
+    setBusy(true)
+    try {
+      const result = await window.phonedek.setAllowPointerControl(enabled)
+      if (result.state) onServerUpdate(result.state.server)
+      if (!result.ok) onToast(result.error ?? 'Could not update pointer control', 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const exportConfig = async (): Promise<void> => {
     setBusy(true)
     try {
@@ -353,6 +364,17 @@ export function SettingsDialog({
           description="Closing the window keeps the deck server running. Use the tray menu to show or quit PhoneDeck."
           checked={settings.minimizeToTray}
           onChange={(enabled) => void toggleTray(enabled)}
+          disabled={busy}
+        />
+      </div>
+
+      <div className="settings-section">
+        <h3>Input</h3>
+        <Toggle
+          label="Allow pointer control"
+          description="A paired phone can move the mouse and click. Turn this off to suspend all pointer input."
+          checked={settings.allowPointerControl}
+          onChange={(enabled) => void togglePointerControl(enabled)}
           disabled={busy}
         />
       </div>

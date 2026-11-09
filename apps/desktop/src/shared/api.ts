@@ -30,6 +30,8 @@ export interface SettingsView {
   discovery: boolean
   launchAtLogin: boolean
   minimizeToTray: boolean
+  /** Paired phones may move the cursor and click. */
+  allowPointerControl: boolean
   pairHost: string
   /** macOS capture folder; empty = OS Desktop. */
   screenshotDirectory: string
@@ -111,6 +113,7 @@ export interface PhoneDeckApi {
   setDiscovery(enabled: boolean): Promise<OperationResult>
   setLaunchAtLogin(enabled: boolean): Promise<OperationResult>
   setMinimizeToTray(enabled: boolean): Promise<OperationResult>
+  setAllowPointerControl(enabled: boolean): Promise<OperationResult>
   setPairHost(host: string): Promise<OperationResult>
   setPhoneBrightness(clientId: string, level: number | null): Promise<OperationResult>
   setScreenshotDirectory(path: string): Promise<OperationResult>
@@ -146,6 +149,7 @@ export const IPC = {
   setDiscovery: 'phonedek:set-discovery',
   setLaunchAtLogin: 'phonedek:set-launch-at-login',
   setMinimizeToTray: 'phonedek:set-minimize-to-tray',
+  setAllowPointerControl: 'phonedek:set-allow-pointer-control',
   setPairHost: 'phonedek:set-pair-host',
   setPhoneBrightness: 'phonedek:set-phone-brightness',
   setScreenshotDirectory: 'phonedek:set-screenshot-directory',
