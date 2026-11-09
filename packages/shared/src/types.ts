@@ -14,6 +14,9 @@ export const BRIGHTNESS_CAPABILITY = 'brightness-v1' as const
 /** Desktop capability for trackpad/pointer control over the `pointer` message. */
 export const POINTER_CAPABILITY = 'pointer-v1' as const
 
+/** Desktop capability for live control state (volume readback and friends). */
+export const CONTROL_STATE_CAPABILITY = 'control-state-v1' as const
+
 export const DEFAULT_HTTP_PORT = 47654
 export const DISCOVERY_PORT = 47655
 export const DISCOVERY_MAGIC = 'PHONEDECK'
@@ -459,6 +462,21 @@ export interface InputMessage {
   delta?: number
 }
 
+/**
+ * Subscribe to live state for the controls on the visible page. One
+ * subscription per connection; the last watch replaces the previous one.
+ * An empty `controlIds` drops the subscription.
+ */
+export interface WatchMessage {
+  type: 'watch'
+  profileId: string
+  pageId: string
+  /** 0..32 control ids; omitted = every continuous control on the page. */
+  controlIds?: string[]
+  /** Poll interval while a subscribed control is visible. Default 1000 ms. */
+  intervalMs?: number
+}
+
 export type ClientMessage =
   | {
       type: 'hello'
@@ -470,6 +488,7 @@ export type ClientMessage =
   | PressMessage
   | InputMessage
   | PointerMessage
+  | WatchMessage
   | { type: 'ping'; t: number }
 
 /* ------------------------------------------------------------------ */
@@ -540,6 +559,28 @@ export interface BrightnessMessage {
   level: number | null
 }
 
+/** Live state for one control the phone is watching. */
+export interface ControlStateEntry {
+  controlId: string
+  /** Monotonic per control; the phone ignores older revisions. */
+  revision: number
+  /** Normalized 0..1 for value controls. */
+  value?: number
+  muted?: boolean
+  /** False when the backend is missing or the value is unknown. */
+  available: boolean
+  /** Optional short display string, e.g. "42%". */
+  detail?: string
+}
+
+/** Batched state snapshot; sent immediately on watch and then on change/interval. */
+export interface ControlStateMessage {
+  type: 'controlState'
+  profileId: string
+  pageId: string
+  states: ControlStateEntry[]
+}
+
 export type ServerMessage =
   | {
       type: 'hello'
@@ -556,6 +597,7 @@ export type ServerMessage =
   | { type: 'inputResult'; requestId: string; controlId: string; ok: boolean; error?: string }
   | ({ type: 'pointerResult' } & PointerResult)
   | BrightnessMessage
+  | ControlStateMessage
   | { type: 'navigate'; direction: 'next' | 'prev' | 'goto'; pageId?: string }
   | { type: 'error'; code: string; message: string }
   | { type: 'pong'; t: number }

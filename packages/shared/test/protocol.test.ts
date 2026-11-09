@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { isInputMessage, isPointerMessage, isPressMessage, parseClientMessage } from '../src/protocol'
+import {
+  ControlStateMessageSchema,
+  isInputMessage,
+  isPointerMessage,
+  isPressMessage,
+  isWatchMessage,
+  parseClientMessage,
+} from '../src/protocol'
 import type { BrightnessMessage, PointerResult, ServerMessage } from '../src/types'
 
 const press = {
@@ -180,6 +187,63 @@ describe('pointer protocol', () => {
     expect(parseClientMessage({ ...move, seq: 0 }).ok).toBe(true)
     expect(parseClientMessage({ ...move, phase: 'hold' }).ok).toBe(false)
     expect(parseClientMessage({ ...move, type: 'pointerResult' }).ok).toBe(false)
+  })
+
+  it('accepts a page watch and rejects malformed subscriptions', () => {
+    const parsed = parseClientMessage({
+      type: 'watch',
+      profileId: 'profile-desktop',
+      pageId: 'page-main',
+      controlIds: ['btn-vol', 'btn-wheel'],
+      intervalMs: 1000,
+    })
+    expect(parsed.ok).toBe(true)
+    if (parsed.ok) expect(isWatchMessage(parsed.message)).toBe(true)
+
+    expect(
+      parseClientMessage({ type: 'watch', profileId: 'p', pageId: 'g' }).ok,
+    ).toBe(true)
+    expect(parseClientMessage({ type: 'watch', pageId: 'g' }).ok).toBe(false)
+    expect(parseClientMessage({ type: 'watch', profileId: 'p' }).ok).toBe(false)
+    for (const intervalMs of [499, 5001, 1000.5]) {
+      expect(
+        parseClientMessage({ type: 'watch', profileId: 'p', pageId: 'g', intervalMs }).ok,
+        `interval ${intervalMs}`,
+      ).toBe(false)
+    }
+    const tooMany = Array.from({ length: 33 }, (_, index) => `c${index}`)
+    expect(
+      parseClientMessage({ type: 'watch', profileId: 'p', pageId: 'g', controlIds: tooMany }).ok,
+    ).toBe(false)
+  })
+
+  it('defines the batched controlState server message shape', () => {
+    const parsed = ControlStateMessageSchema.safeParse({
+      type: 'controlState',
+      profileId: 'p',
+      pageId: 'g',
+      states: [
+        { controlId: 'btn-vol', revision: 12, value: 0.42, muted: false, available: true, detail: '42%' },
+      ],
+    })
+    expect(parsed.success).toBe(true)
+
+    expect(
+      ControlStateMessageSchema.safeParse({
+        type: 'controlState',
+        profileId: 'p',
+        pageId: 'g',
+        states: [{ controlId: 'btn-vol', revision: 1, value: 1.2, available: true }],
+      }).success,
+    ).toBe(false)
+    expect(
+      ControlStateMessageSchema.safeParse({
+        type: 'controlState',
+        profileId: 'p',
+        pageId: 'g',
+        states: [{ controlId: 'btn-vol', revision: 1 }],
+      }).success,
+    ).toBe(false)
   })
 
   it('defines the pointerResult server message shape', () => {

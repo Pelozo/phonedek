@@ -70,6 +70,30 @@ export const PointerMessageSchema = z
     }
   })
 
+export const WatchMessageSchema = z.object({
+  type: z.literal('watch'),
+  profileId: z.string().min(1).max(64),
+  pageId: z.string().min(1).max(64),
+  controlIds: z.array(z.string().min(1).max(128)).max(32).optional(),
+  intervalMs: z.number().int().min(500).max(5000).optional(),
+})
+
+export const ControlStateEntrySchema = z.object({
+  controlId: z.string().min(1).max(128),
+  revision: z.number().int().min(0),
+  value: z.number().finite().min(0).max(1).optional(),
+  muted: z.boolean().optional(),
+  available: z.boolean(),
+  detail: z.string().max(64).optional(),
+})
+
+export const ControlStateMessageSchema = z.object({
+  type: z.literal('controlState'),
+  profileId: z.string().min(1).max(64),
+  pageId: z.string().min(1).max(64),
+  states: z.array(ControlStateEntrySchema).max(32),
+})
+
 export const ClientMessageSchema = z.union([
   z.object({
     type: z.literal('hello'),
@@ -95,6 +119,7 @@ export const ClientMessageSchema = z.union([
     delta: z.number().finite().min(-100).max(100).optional(),
   }),
   PointerMessageSchema,
+  WatchMessageSchema,
   z.object({ type: z.literal('ping'), t: z.number().finite() }),
 ])
 
@@ -118,4 +143,8 @@ export function isInputMessage(message: ClientMessage): message is Extract<Clien
 
 export function isPointerMessage(message: ClientMessage): message is Extract<ClientMessage, { type: 'pointer' }> {
   return message.type === 'pointer'
+}
+
+export function isWatchMessage(message: ClientMessage): message is Extract<ClientMessage, { type: 'watch' }> {
+  return message.type === 'watch'
 }
