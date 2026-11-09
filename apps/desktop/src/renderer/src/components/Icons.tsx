@@ -4,6 +4,8 @@ export type IconName =
   | 'plus'
   | 'trash'
   | 'copy'
+  | 'cut'
+  | 'clipboard'
   | 'chevron-down'
   | 'chevron-left'
   | 'chevron-right'
@@ -48,6 +50,8 @@ const paths: Record<IconName, string> = {
   plus: 'M12 5v14M5 12h14',
   trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6',
   copy: 'M9 9h11v11H9zM4 15V4h11',
+  cut: 'M6 4l12 12M18 4 6 16M6 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
+  clipboard: 'M9 4h6v3H9zM8 5H5v16h14V5h-2M9 12h6M9 16h4',
   'chevron-down': 'm6 9 6 6 6-6',
   'chevron-left': 'm15 18-6-6 6-6',
   'chevron-right': 'm9 18 6-6-6-6',

@@ -37,6 +37,7 @@ import { DeckMedia } from './DeckMedia'
 import { Icon } from './Icons'
 import { IconPicker } from './IconPicker'
 import { PopMenu } from './Menu'
+import { MoveToDialog } from './MoveToDialog'
 import { PresetPicker } from './PresetPicker'
 import { ColorField, NumberField, Toggle, useConfirm } from './Primitives'
 import { useHostPlatform } from '../lib/platform'
@@ -79,6 +80,12 @@ export function Inspector({
   onChangeConfig,
   onSelectButton,
   onToast,
+  clipboardLabel,
+  canPaste,
+  onCopyButton,
+  onCutButton,
+  onPasteButton,
+  onMoveButton,
 }: {
   config: DeckConfig
   profile: DeckProfile
@@ -88,11 +95,18 @@ export function Inspector({
   onChangeConfig: (config: DeckConfig) => void
   onSelectButton: (id: string | null) => void
   onToast: (message: string, kind?: 'info' | 'success' | 'error') => void
+  clipboardLabel: string | null
+  canPaste: boolean
+  onCopyButton: () => void
+  onCutButton: () => void
+  onPasteButton: () => void
+  onMoveButton: (profileId: string, pageId: string) => void
 }) {
   const [customBackground, setCustomBackground] = useState(button?.background !== undefined)
   const [customText, setCustomText] = useState(button?.textColor !== undefined)
   const [pageCustomBackground, setPageCustomBackground] = useState(page.background !== undefined)
   const [presetsOpen, setPresetsOpen] = useState(false)
+  const [moveOpen, setMoveOpen] = useState(false)
   const [iconBusy, setIconBusy] = useState<'image' | 'video' | null>(null)
   const platform = useHostPlatform()
   const confirm = useConfirm()
@@ -108,7 +122,12 @@ export function Inspector({
     setPageCustomBackground(page.background !== undefined)
   }, [page.id, page.background])
 
+  useEffect(() => {
+    setMoveOpen(false)
+  }, [button?.id])
+
   const buttonDefaultBackground = profile.theme.buttonBackground
+  const primaryKey = platform === 'darwin' ? '⌘' : 'Ctrl'
 
   const testActions = async (actions: Action[], label: string): Promise<void> => {
     if (!actions.length) {
@@ -136,6 +155,26 @@ export function Inspector({
         </div>
 
         <div className="inspector-scroll">
+          <section className="inspector-section">
+            <div className="section-heading">
+              <h3>Component</h3>
+              <span className="inspector-badge mono">PAGE</span>
+            </div>
+            <button
+              type="button"
+              className="button secondary full"
+              onClick={onPasteButton}
+              disabled={!canPaste}
+            >
+              <Icon name="clipboard" size={15} /> Paste component on this page
+            </button>
+            <p className="hint">
+              {canPaste
+                ? `Clipboard: “${clipboardLabel || 'Untitled'}”. It will use the first free cell on this page.`
+                : 'Copy or cut a component on another page to paste it here.'}
+            </p>
+          </section>
+
           <section className="inspector-section">
             <div className="section-heading">
               <h3>Page background</h3>
@@ -599,6 +638,37 @@ export function Inspector({
       </div>
 
       <div className="inspector-scroll">
+        <section className="inspector-section">
+          <div className="section-heading">
+            <h3>Component</h3>
+            <span className="inspector-badge mono">{button.control ? 'CONTROL' : 'BUTTON'}</span>
+          </div>
+          <div className="component-actions">
+            <button type="button" className="button secondary small" onClick={onCopyButton}>
+              <Icon name="copy" size={14} /> Copy
+            </button>
+            <button type="button" className="button secondary small" onClick={onCutButton}>
+              <Icon name="cut" size={14} /> Cut
+            </button>
+            <button
+              type="button"
+              className="button secondary small"
+              onClick={onPasteButton}
+              disabled={!canPaste}
+              title={canPaste ? `Paste “${clipboardLabel || 'Untitled'}” on this page` : 'Copy a component first'}
+            >
+              <Icon name="clipboard" size={14} /> Paste
+            </button>
+            <button type="button" className="button secondary small" onClick={() => setMoveOpen(true)}>
+              <Icon name="layers" size={14} /> Move to…
+            </button>
+          </div>
+          <p className="hint">
+            {primaryKey}+C copy · {primaryKey}+X cut · {primaryKey}+V paste on the active page.
+            {clipboardLabel ? ` Clipboard: “${clipboardLabel}”.` : ' Clipboard empty.'}
+          </p>
+        </section>
+
         <section className="inspector-section">
           <div className="section-heading">
             <h3>Content</h3>
@@ -1181,6 +1251,19 @@ export function Inspector({
       </div>
 
       {presetsOpen && <PresetPicker onClose={() => setPresetsOpen(false)} onPick={addPreset} />}
+      {moveOpen && (
+        <MoveToDialog
+          config={config}
+          sourceProfileId={profile.id}
+          sourcePageId={page.id}
+          buttonLabel={button.label}
+          onMove={(targetProfileId, targetPageId) => {
+            setMoveOpen(false)
+            onMoveButton(targetProfileId, targetPageId)
+          }}
+          onClose={() => setMoveOpen(false)}
+        />
+      )}
     </aside>
   )
 }

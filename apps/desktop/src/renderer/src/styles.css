@@ -4397,3 +4397,123 @@ input[type="range"]:disabled {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Component clipboard actions + move picker                           */
+/* ------------------------------------------------------------------ */
+
+.component-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.component-actions .button {
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.move-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.move-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.move-profile {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+}
+
+.move-profile svg {
+  color: var(--accent);
+}
+
+.move-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-soft);
+  font: inherit;
+  text-align: left;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.move-group .move-option:first-of-type {
+  border-top: 1px solid var(--line);
+}
+
+.move-option:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.move-option.selected {
+  background: var(--accent-wash);
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--text);
+}
+
+.move-option.selected .move-option-name svg {
+  color: var(--accent);
+}
+
+.move-option-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.move-option-name strong {
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.move-option-name svg {
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.move-option-meta {
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.move-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+}
+
+.move-empty p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}

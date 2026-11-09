@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   addButton,
+  buttonSpan,
   canPlaceButton,
   createEmptyButton,
   nextFreeSlotForPage,
@@ -21,6 +22,7 @@ import { PermissionBanner } from './components/PermissionBanner'
 import { ConfirmProvider } from './components/Primitives'
 import { SettingsDialog } from './components/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
+import { cutButtonFromPage, moveButtonToPage, pasteButtonIntoPage } from './lib/clipboard'
 import { HostPlatformProvider } from './lib/platform'
 
 type ToastKind = 'info' | 'success' | 'error'
@@ -31,6 +33,14 @@ interface ToastState {
 
 type SaveStatus = 'saved' | 'saving' | 'error'
 
+/** Clipboard shortcuts must never steal native text editing. */
+function isEditableTarget(target: EventTarget | null): boolean {
+  const element = target as HTMLElement | null
+  if (!element) return false
+  if (element.isContentEditable) return true
+  return Boolean(element.closest?.('input, textarea, select, [contenteditable="true"], [contenteditable="plaintext-only"]'))
+}
+
 function AppContent() {
   const [config, setConfig] = useState<DeckConfig | null>(null)
   const [server, setServer] = useState<ServerInfoView | null>(null)
@@ -38,6 +48,7 @@ function AppContent() {
   const [selectedProfileId, setSelectedProfileId] = useState('')
   const [selectedPageId, setSelectedPageId] = useState('')
   const [selectedButtonId, setSelectedButtonId] = useState<string | null>(null)
+  const [clipboard, setClipboard] = useState<DeckButton | null>(null)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved')
   const [saveErrors, setSaveErrors] = useState<string[]>([])
   const [toast, setToast] = useState<ToastState | null>(null)
@@ -248,22 +259,139 @@ function AppContent() {
     }
   }, [page, selectedButtonId])
 
+  const selectedButton = page?.buttons.find((item) => item.id === selectedButtonId) ?? null
+
+  const copySelectedButton = useCallback((): boolean => {
+    if (!selectedButton) return false
+    setClipboard(structuredClone(selectedButton))
+    showToast(`Copied “${selectedButton.label || 'Untitled'}”`, 'success')
+    return true
+  }, [selectedButton, showToast])
+
+  const cutSelectedButton = useCallback((): boolean => {
+    if (!config || !profile || !page || !selectedButton) return false
+    const result = cutButtonFromPage(config, profile.id, page.id, selectedButton.id)
+    if (!result.ok) {
+      showToast(result.error, 'error')
+      return false
+    }
+    setClipboard(result.button)
+    setConfig(result.config)
+    setSelectedButtonId(null)
+    showToast(
+      `Cut “${result.button.label || 'Untitled'}” — paste it on the target page`,
+      'success',
+    )
+    return true
+  }, [config, page, profile, selectedButton, showToast])
+
+  const pasteClipboard = useCallback((): boolean => {
+    if (!config || !clipboard || !profile || !page) return false
+    const result = pasteButtonIntoPage(config, profile.id, page.id, clipboard)
+    if (!result.ok) {
+      showToast(result.error, 'error')
+      return false
+    }
+    setConfig(result.config)
+    setSelectedButtonId(result.button.id)
+    const label = result.button.label || 'Untitled'
+    if (result.fallback === 'span-reduced') {
+      const span = buttonSpan(clipboard)
+      showToast(
+        `Pasted “${label}” as 1×1 — no ${span.columns}×${span.rows} space was free on this page`,
+        'info',
+      )
+    } else {
+      showToast(`Pasted “${label}” at slot ${result.button.slot + 1}`, 'success')
+    }
+    return true
+  }, [clipboard, config, page, profile, showToast])
+
+  const moveSelectedButton = useCallback(
+    (targetProfileId: string, targetPageId: string): boolean => {
+      if (!config || !profile || !page || !selectedButton) return false
+      const result = moveButtonToPage(
+        config,
+        profile.id,
+        page.id,
+        targetProfileId,
+        targetPageId,
+        selectedButton.id,
+      )
+      if (!result.ok) {
+        showToast(result.error, 'error')
+        return false
+      }
+      setConfig(result.config)
+      setSelectedProfileId(targetProfileId)
+      setSelectedPageId(targetPageId)
+      setSelectedButtonId(result.button.id)
+      const targetProfile = result.config.profiles.find((item) => item.id === targetProfileId)
+      const targetPage = targetProfile?.pages.find((item) => item.id === targetPageId)
+      const where =
+        targetProfile && targetPage ? `${targetProfile.name} · ${targetPage.name}` : 'the target page'
+      const label = result.button.label || 'Untitled'
+      if (result.fallback === 'span-reduced') {
+        const span = buttonSpan(selectedButton)
+        showToast(
+          `Moved “${label}” to ${where} as 1×1 — no ${span.columns}×${span.rows} space was free`,
+          'info',
+        )
+      } else {
+        showToast(`Moved “${label}” to ${where}`, 'success')
+      }
+      return true
+    },
+    [config, page, profile, selectedButton, showToast],
+  )
+
+  const pasteOnActivePage = useCallback((): void => {
+    pasteClipboard()
+  }, [pasteClipboard])
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+      const editable = isEditableTarget(event.target)
+      const primary = hostPlatform === 'darwin' ? event.metaKey : event.ctrlKey
+      const key = event.key.toLowerCase()
+
+      if (!editable && primary && !event.altKey && !event.shiftKey) {
+        if (key === 'c' && selectedButtonId) {
+          if (copySelectedButton()) event.preventDefault()
+          return
+        }
+        if (key === 'x' && selectedButtonId) {
+          if (cutSelectedButton()) event.preventDefault()
+          return
+        }
+        if (key === 'v' && clipboard) {
+          if (pasteClipboard()) event.preventDefault()
+          return
+        }
+      }
+
+      if (!editable && (event.ctrlKey || event.metaKey) && key === 's') {
         event.preventDefault()
         if (config) void save(config)
         return
       }
       if (event.key !== 'Escape' || !selectedButtonId) return
-      const target = event.target as HTMLElement | null
-      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
+      if (editable) return
       if (document.querySelector('.modal-backdrop')) return
       setSelectedButtonId(null)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [config, save, selectedButtonId])
+  }, [
+    clipboard,
+    config,
+    copySelectedButton,
+    cutSelectedButton,
+    hostPlatform,
+    pasteClipboard,
+    save,
+    selectedButtonId,
+  ])
 
   const selectProfile = (id: string): void => {
     setSelectedProfileId(id)
@@ -455,7 +583,6 @@ function AppContent() {
     )
   }
 
-  const selectedButton = page.buttons.find((item) => item.id === selectedButtonId) ?? null
   const saveLabel = saveStatus === 'saving' ? 'Saving…' : saveStatus === 'error' ? 'Unsaved' : 'Saved'
   const activeGrid = pageGrid(profile, page)
   const activeCapacity = pageCapacity(profile, page)
@@ -590,6 +717,12 @@ function AppContent() {
             onChangeConfig={setConfig}
             onSelectButton={setSelectedButtonId}
             onToast={showToast}
+            clipboardLabel={clipboard?.label ?? null}
+            canPaste={clipboard !== null}
+            onCopyButton={copySelectedButton}
+            onCutButton={cutSelectedButton}
+            onPasteButton={pasteOnActivePage}
+            onMoveButton={moveSelectedButton}
           />
         </div>
 
