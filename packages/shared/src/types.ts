@@ -271,6 +271,27 @@ export interface ObsInputVolumeBinding {
 }
 
 /**
+ * A key wheel: one chord per dial detent or slider slice.
+ *
+ * `holdKeys` are pressed (key down) on the first movement of a gesture and
+ * released when it ends; they are never part of the emitted chord. The reverse
+ * direction sends `reverseKeys` when provided, otherwise `keys`.
+ */
+export interface ShortcutBinding {
+  type: 'shortcut'
+  /** Chord for positive movement (right/up/clockwise). 1..8 keys. */
+  keys: string[]
+  /** Chord for negative movement. Defaults to `keys`. */
+  reverseKeys?: string[]
+  /** Keys held down for the whole gesture (e.g. ALT for the app switcher). */
+  holdKeys?: string[]
+  /** Repeat each chord 1..5 times. Default 1. */
+  repeat?: number
+  /** Slider slices across the full track, 4..100. Default 20. Dials ignore it. */
+  travelSteps?: number
+}
+
+/**
  * What a continuous control drives.
  *
  * Relative volume emits deltas that become repeated media-volume keys. Absolute
@@ -301,6 +322,7 @@ export type ControlBinding =
       mode: 'gain'
     }
   | ObsInputVolumeBinding
+  | ShortcutBinding
 
 /**
  * Pointer binding used by a `trackpad` control.

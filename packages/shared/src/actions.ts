@@ -11,6 +11,29 @@ import { normalizeCombo, isModifier, formatCombo } from './keys'
 
 const DEFAULT_HOLD_MS = 35
 const DEFAULT_CHAR_MS = 4
+const DEFAULT_SHORTCUT_TRAVEL_STEPS = 20
+/** One flush never emits more than this many chords (repeat included). */
+export const MAX_SHORTCUT_CHORDS_PER_FLUSH = 10
+
+/** Raw input delta that corresponds to one shortcut chord slice. */
+export function shortcutDeltaPerStep(control: ControlSpec): number {
+  if (control.binding.type !== 'shortcut') return 1
+  if (control.kind === 'dial') return 1
+  const steps = control.binding.travelSteps ?? DEFAULT_SHORTCUT_TRAVEL_STEPS
+  return 100 / steps
+}
+
+function shortcutChordCount(control: ControlSpec, delta: number): number {
+  if (control.binding.type !== 'shortcut') return 0
+  const repeat = Math.max(1, Math.min(5, Math.round(control.binding.repeat ?? 1)))
+  const magnitude = Math.abs(delta)
+  // Sliders emit one chord per travel slice; dials emit one per detent/unit.
+  const slices =
+    control.kind === 'slider'
+      ? Math.round((magnitude * (control.binding.travelSteps ?? DEFAULT_SHORTCUT_TRAVEL_STEPS)) / 100)
+      : Math.round(magnitude)
+  return Math.max(0, Math.min(MAX_SHORTCUT_CHORDS_PER_FLUSH, slices * repeat))
+}
 
 export interface PlanOptions {
   holdMs?: number
@@ -144,6 +167,11 @@ export function hasHostActions(actions: readonly ExecutableAction[]): boolean {
  * - `scroll`: one macro containing a mouse wheel action; positive delta means
  *   up/right, negative means down/left, flipped by `invert`. Amount is capped
  *   at 100.
+ * - `shortcut`: repeated `hotkey` actions; positive delta uses `keys` and
+ *   negative uses `reverseKeys ?? keys`. Sliders emit one chord per
+ *   `travelSteps` slice (a 100-unit full travel), dials one per detent. `repeat`
+ *   multiplies the chord and the whole batch is capped at 10. `holdKeys` are
+ *   managed by the desktop router and never become press actions.
  *
  * Absolute/value controls and trackpad (pointer) controls return an empty batch.
  */
@@ -157,6 +185,18 @@ export function controlToActions(control: ControlSpec, delta: number): Action[] 
   const magnitude = Math.ceil(Math.abs(delta))
 
   switch (control.binding.type) {
+    case 'shortcut': {
+      const count = shortcutChordCount(control, delta)
+      if (count === 0) return []
+      const chord = normalizeCombo(
+        delta > 0 ? control.binding.keys : (control.binding.reverseKeys ?? control.binding.keys),
+      )
+      const actions: Action[] = []
+      for (let index = 0; index < count; index += 1) {
+        actions.push({ type: 'hotkey', keys: [...chord] })
+      }
+      return actions
+    }
     case 'volume': {
       const steps = Math.max(1, Math.min(20, magnitude))
       const key: 'volumeup' | 'volumedown' = delta > 0 ? 'volumeup' : 'volumedown'

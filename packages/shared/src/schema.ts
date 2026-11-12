@@ -97,6 +97,21 @@ const keys = z
 
 const holdMs = z.number().int().min(0).max(5000).optional()
 const perCharMs = z.number().int().min(0).max(1000).optional()
+
+/** Shortcut chords use the same key validation as hotkeys. */
+const shortcutBindingSchema = z.object({
+  type: z.literal('shortcut'),
+  keys,
+  reverseKeys: keys.optional(),
+  holdKeys: keys.optional(),
+  repeat: z.number().int().min(1, 'repeat must be between 1 and 5').max(5, 'repeat must be between 1 and 5').optional(),
+  travelSteps: z
+    .number()
+    .int()
+    .min(4, 'travelSteps must be between 4 and 100')
+    .max(100, 'travelSteps must be between 4 and 100')
+    .optional(),
+})
 const mediaKey = z.enum(['playpause', 'next', 'prev', 'stop', 'volumeup', 'volumedown', 'mute'])
 
 const hotkeySchema = z.object({
@@ -223,6 +238,7 @@ export const ControlBindingSchema = z.union([
     target: z.literal('inputVolume'),
     input: z.string().min(1).max(128).optional(),
   }),
+  shortcutBindingSchema,
 ])
 
 /** Pointer bindings are only valid on `trackpad` controls. */
@@ -271,6 +287,13 @@ const sliderOrDialControlSchema = z
         code: z.ZodIssueCode.custom,
         path: ['emit'],
         message: 'Mic gain requires emit "value"',
+      })
+    }
+    if (control.binding.type === 'shortcut' && control.emit !== 'delta') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['emit'],
+        message: 'Shortcut controls require emit "delta"',
       })
     }
     if (control.binding.type === 'obs') {

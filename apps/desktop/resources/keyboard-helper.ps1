@@ -330,9 +330,47 @@ function Get-VkCode([string]$Name) {
     throw "Unknown key: $Name"
 }
 
-function Send-Chord([string[]]$Keys, [int]$HoldMs) {
+$SCRIPT:HeldCodes = New-Object System.Collections.ArrayList
+
+function Release-HeldKeys {
+    if ($null -eq $SCRIPT:HeldCodes -or $SCRIPT:HeldCodes.Count -eq 0) { return }
+    for ($i = $SCRIPT:HeldCodes.Count - 1; $i -ge 0; $i--) {
+        try {
+            [PhoneDeckNative]::keybd_event([byte]$SCRIPT:HeldCodes[$i], 0, 2, [UIntPtr]::Zero)
+        } catch {
+            # Best effort: keep releasing the remaining keys.
+        }
+    }
+    $SCRIPT:HeldCodes.Clear()
+}
+
+function Send-Chord([string[]]$Keys, [int]$HoldMs, [string]$Action = 'press') {
     $codes = @()
     foreach ($key in $Keys) { $codes += Get-VkCode $key }
+    $mode = if ($Action) { $Action.ToLowerInvariant() } else { 'press' }
+
+    if ($mode -eq 'down') {
+        foreach ($code in $codes) {
+            [PhoneDeckNative]::keybd_event([byte]$code, 0, 0, [UIntPtr]::Zero)
+            if (-not $SCRIPT:HeldCodes.Contains([int]$code)) {
+                [void]$SCRIPT:HeldCodes.Add([int]$code)
+            }
+        }
+        return
+    }
+
+    if ($mode -eq 'up') {
+        $reversed = $codes.Clone()
+        [array]::Reverse($reversed)
+        foreach ($code in $reversed) {
+            [PhoneDeckNative]::keybd_event([byte]$code, 0, 2, [UIntPtr]::Zero)
+            [void]$SCRIPT:HeldCodes.Remove([int]$code)
+        }
+        return
+    }
+
+    if ($mode -ne 'press') { throw "Unknown key action: $Action" }
+
     try {
         foreach ($code in $codes) {
             [PhoneDeckNative]::keybd_event([byte]$code, 0, 0, [UIntPtr]::Zero)
@@ -532,27 +570,32 @@ function Invoke-Step($Step) {
 [Console]::Out.WriteLine('{"ready":true}')
 [Console]::Out.Flush()
 
-while ($null -ne ($line = [Console]::In.ReadLine())) {
-    if ([string]::IsNullOrWhiteSpace($line)) { continue }
-    $id = ''
-    try {
-        $command = $line | ConvertFrom-Json
-        $id = [string]$command.id
-        $stepData = $null
-        foreach ($step in $command.steps) {
-            $result = Invoke-Step $step
-            if ($null -ne $result) { $stepData = $result }
+try {
+    while ($null -ne ($line = [Console]::In.ReadLine())) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        $id = ''
+        try {
+            $command = $line | ConvertFrom-Json
+            $id = [string]$command.id
+            $stepData = $null
+            foreach ($step in $command.steps) {
+                $result = Invoke-Step $step
+                if ($null -ne $result) { $stepData = $result }
+            }
+            $response = @{ id = $id; ok = $true }
+            if ($stepData -is [hashtable]) {
+                foreach ($key in $stepData.Keys) { $response[$key] = $stepData[$key] }
+            }
+            $response = $response | ConvertTo-Json -Compress
+        } catch {
+            $message = $_.Exception.Message
+            if (-not $message) { $message = 'Unknown keyboard helper error' }
+            $response = @{ id = $id; ok = $false; error = $message } | ConvertTo-Json -Compress
         }
-        $response = @{ id = $id; ok = $true }
-        if ($stepData -is [hashtable]) {
-            foreach ($key in $stepData.Keys) { $response[$key] = $stepData[$key] }
-        }
-        $response = $response | ConvertTo-Json -Compress
-    } catch {
-        $message = $_.Exception.Message
-        if (-not $message) { $message = 'Unknown keyboard helper error' }
-        $response = @{ id = $id; ok = $false; error = $message } | ConvertTo-Json -Compress
+        [Console]::Out.WriteLine($response)
+        [Console]::Out.Flush()
     }
-    [Console]::Out.WriteLine($response)
-    [Console]::Out.Flush()
+} finally {
+    # EOF or a process-level failure: never leave a held shortcut key down.
+    Release-HeldKeys
 }

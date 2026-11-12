@@ -341,8 +341,7 @@ describe('ControlInputRouter', () => {
   })
 })
 
-describe('OBS control input', () => {
-  const obsVolume: ControlSpec = {
+describe('OBS control input', () => {  const obsVolume: ControlSpec = {
     kind: 'slider',
     emit: 'value',
     binding: { type: 'obs', target: 'inputVolume', input: 'Mic/Aux' },
@@ -402,3 +401,171 @@ describe('OBS control input', () => {
     router.dispose()
   })
 })
+
+const appWheel: ControlSpec = {
+  kind: 'dial',
+  emit: 'delta',
+  binding: {
+    type: 'shortcut',
+    keys: ['TAB'],
+    reverseKeys: ['SHIFT', 'TAB'],
+    holdKeys: ['ALT'],
+  },
+}
+
+const brushSlider: ControlSpec = {
+  kind: 'slider',
+  emit: 'delta',
+  binding: { type: 'shortcut', keys: ['['], reverseKeys: [']'], travelSteps: 20 },
+}
+
+const held = (keys: string[], action: 'down' | 'up') => ({
+  type: 'hotkey' as const,
+  keys,
+  holdMs: 0,
+  action,
+})
+
+describe('shortcut wheel hold keys', () => {
+  function setup(options: { watchdogMs?: number } = {}) {
+    const calls: Action[][] = []
+    const router = new ControlInputRouter({
+      execute: async (actions) => {
+        calls.push(actions)
+        return { ok: true }
+      },
+      flushMs: 50,
+      ...(options.watchdogMs ? { watchdogMs: options.watchdogMs } : {}),
+    })
+    return { calls, router }
+  }
+
+  it('presses holdKeys on the first non-zero move, before the chord, and releases last', async () => {
+    vi.useFakeTimers()
+    const { calls, router } = setup()
+    const wheel = target(appWheel, 'App wheel')
+
+    await router.handle(message('start'), wheel)
+    await router.handle(message('move', 0), wheel)
+    expect(calls).toEqual([])
+
+    await router.handle(message('move', 1), wheel)
+    expect(calls).toEqual([[held(['ALT'], 'down')]])
+
+    await vi.advanceTimersByTimeAsync(50)
+    expect(calls).toEqual([[held(['ALT'], 'down')], [{ type: 'hotkey', keys: ['TAB'] }]])
+
+    await expect(router.handle(message('end'), wheel)).resolves.toEqual({ ok: true })
+    expect(calls).toEqual([
+      [held(['ALT'], 'down')],
+      [{ type: 'hotkey', keys: ['TAB'] }],
+      [held(['ALT'], 'up')],
+    ])
+    await router.dispose()
+  })
+
+  it('sends nothing for a tap with no movement', async () => {
+    const { calls, router } = setup()
+    await router.handle(message('start'), target(appWheel, 'App wheel'))
+    await expect(router.handle(message('end'), target(appWheel, 'App wheel'))).resolves.toEqual({
+      ok: true,
+    })
+    expect(calls).toEqual([])
+    await router.dispose()
+  })
+
+  it('releases held keys on cancel and client close', async () => {
+    const { calls, router } = setup()
+    const wheel = { control: appWheel, label: 'App wheel', clientId: 'phone-1' }
+    await router.handle(message('start'), wheel)
+    await router.handle(message('move', 1), wheel)
+
+    await router.cancel('test cancel')
+    expect(calls.at(-1)).toEqual([held(['ALT'], 'up')])
+
+    calls.length = 0
+    await router.handle(message('start'), wheel)
+    await router.handle(message('move', 1), wheel)
+    expect(calls[0]).toEqual([held(['ALT'], 'down')])
+
+    router.clientDisconnected('phone-2')
+    expect(calls.at(-1)).toEqual([held(['ALT'], 'down')])
+    router.clientDisconnected('phone-1')
+    expect(calls.at(-1)).toEqual([held(['ALT'], 'up')])
+    await router.dispose()
+  })
+
+  it('releases held keys when the stuck-key watchdog fires', async () => {
+    vi.useFakeTimers()
+    const { calls, router } = setup({ watchdogMs: 6_000 })
+    await router.handle(message('start'), target(appWheel, 'App wheel'))
+    await router.handle(message('move', 1), target(appWheel, 'App wheel'))
+    expect(calls).toEqual([[held(['ALT'], 'down')]])
+
+    await vi.advanceTimersByTimeAsync(5_999)
+    expect(calls.at(-1)).toEqual([{ type: 'hotkey', keys: ['TAB'] }])
+    expect(
+      calls.some((batch) => batch[0]?.type === 'hotkey' && batch[0].action === 'up'),
+    ).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(calls.at(-1)).toEqual([held(['ALT'], 'up')])
+    await router.dispose()
+  })
+
+  it('releases previous hold keys when another control starts a gesture', async () => {
+    vi.useFakeTimers()
+    const { calls, router } = setup()
+    await router.handle(message('start', undefined, 'btn-wheel'), target(appWheel, 'App wheel'))
+    await router.handle(message('move', 1, 'btn-wheel'), target(appWheel, 'App wheel'))
+    expect(calls).toEqual([[held(['ALT'], 'down')]])
+
+    await router.handle(
+      message('start', undefined, 'btn-brush'),
+      target(brushSlider, 'Brush size'),
+    )
+    expect(calls.at(-1)).toEqual([held(['ALT'], 'up')])
+
+    await router.handle(message('move', 5, 'btn-brush'), target(brushSlider, 'Brush size'))
+    await vi.advanceTimersByTimeAsync(50)
+    await expect(
+      router.handle(message('end', undefined, 'btn-brush'), target(brushSlider, 'Brush size')),
+    ).resolves.toEqual({ ok: true })
+
+    expect(
+      calls.filter(
+        (batch) => batch[0]?.type === 'hotkey' && batch[0].action === 'down',
+      ),
+    ).toHaveLength(1)
+    expect(
+      calls.filter(
+        (batch) => batch[0]?.type === 'hotkey' && batch[0].action === 'up',
+      ),
+    ).toHaveLength(1)
+    expect(calls.at(-1)).toEqual([{ type: 'hotkey', keys: ['['] }])
+    await router.dispose()
+  })
+
+  it('accumulates slider movement until a whole travelSteps slice', async () => {
+    vi.useFakeTimers()
+    const { calls, router } = setup()
+    const brush = target(brushSlider, 'Brush size')
+
+    await router.handle(message('start'), brush)
+    for (let index = 0; index < 4; index += 1) {
+      await router.handle(message('move', 1), brush)
+    }
+    await vi.advanceTimersByTimeAsync(50)
+    expect(calls).toEqual([])
+
+    await router.handle(message('move', 1), brush)
+    await vi.advanceTimersByTimeAsync(50)
+    expect(calls).toEqual([[{ type: 'hotkey', keys: ['['] }]])
+
+    // A sub-slice remainder is dropped when the gesture ends.
+    await router.handle(message('move', 2), brush)
+    await expect(router.handle(message('end'), brush)).resolves.toEqual({ ok: true })
+    expect(calls).toHaveLength(1)
+    await router.dispose()
+  })
+})
+

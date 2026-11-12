@@ -1105,8 +1105,12 @@ async function bootstrap(): Promise<void> {
     logger,
     onPress: async (_client, _message, context: PressContext) =>
       executor.execute(context.button.actions, context.button.label),
-    onInput: async (_client, message, context) =>
-      router.handle(message, { control: context.control, label: context.button.label }),
+    onInput: async (client, message, context) =>
+      router.handle(message, {
+        control: context.control,
+        label: context.button.label,
+        clientId: client.id,
+      }),
     pointerSupported: pointerRouter !== null,
     controlState: controlState ?? undefined,
     controlStateSupported: controlState !== null,
@@ -1125,7 +1129,10 @@ async function bootstrap(): Promise<void> {
         context ? { control: context.control, label: context.label } : undefined,
       )
     },
-    onClientClosed: (client) => pointerRouter?.clientDisconnected(client.id),
+    onClientClosed: (client) => {
+      pointerRouter?.clientDisconnected(client.id)
+      inputRouter?.clientDisconnected(client.id)
+    },
     importBackup: async (filePath, preview) => {
       if (!mainWindow || mainWindow.isDestroyed()) {
         return { ok: false, error: 'No PhoneDeck window is available for approval.' }
@@ -1309,7 +1316,7 @@ if (!gotLock) {
     shuttingDown = true
     void (async () => {
       try {
-        inputRouter?.dispose()
+        await inputRouter?.dispose()
         controlState?.dispose()
         obsSource?.dispose()
         obsClient?.dispose()
