@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -28,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -40,6 +42,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,7 +53,6 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.min
-import kotlin.math.roundToInt
 import kotlin.math.sin
 
 private const val DIAL_DETENT_DEGREES = 15f
@@ -125,6 +127,11 @@ fun DeckControlView(
         mutableIntStateOf(if (stateSeed != null) stateRevision else -1)
     }
     var tileHeightPx by remember { mutableIntStateOf(0) }
+    // Absolute controls can open the exact-value plate from the readout;
+    // relative controls keep the row tap for their action.
+    val canEnterValue = ValueEntry.supports(control)
+    var entryOpen by remember(control) { mutableStateOf(false) }
+    var entryStart by remember(control) { mutableFloatStateOf(0f) }
 
     // Remote state never fights a finger. While the control is interactive we
     // remember the revision we superseded, so the pre-drag snapshot cannot
@@ -190,7 +197,7 @@ fun DeckControlView(
         }
     }
 
-    val valueText = "${value.roundToInt()}$displayUnit"
+    val valueText = ValueEntry.formatValue(value, displayUnit)
     val displayText = ControlStateStore.displayText(
         localText = valueText,
         statePresent = statePresent,
@@ -252,6 +259,27 @@ fun DeckControlView(
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
+                modifier = if (canEnterValue) {
+                    // The readout opens exact entry; it takes priority over the
+                    // label row's tap action. Relative controls keep the row tap.
+                    Modifier
+                        .clip(RoundedCornerShape(3.dp))
+                        .clickable(
+                            role = Role.Button,
+                            onClickLabel = "Set exact value",
+                        ) {
+                            entryStart = value
+                            entryOpen = true
+                            if (control.haptics) {
+                                haptics.performHapticFeedback(
+                                    HapticFeedbackType.TextHandleMove,
+                                )
+                            }
+                        }
+                        .padding(horizontal = 5.dp, vertical = 4.dp)
+                } else {
+                    Modifier
+                },
             )
             // LIVE is implicit once the value follows the PC; only the LOCAL
             // fallback (old desktop) needs a label.
@@ -677,5 +705,29 @@ fun DeckControlView(
                 }
             }
         }
+    }
+
+    if (entryOpen) {
+        ValueEntryDialog(
+            title = label,
+            minValue = minValue,
+            maxValue = maxValue,
+            step = stepValue,
+            unit = displayUnit,
+            initial = entryStart,
+            onDismiss = { entryOpen = false },
+            onConfirm = { entered ->
+                val next = entered.coerceIn(minValue, maxValue)
+                value = next
+                // The VM coalesces this and repeats the final value on end, so
+                // the desktop sees the change both live and committed.
+                onInput("move", null, fractionOf(next))
+                onInput("end", null, fractionOf(next))
+                entryOpen = false
+                if (control.haptics) {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                }
+            },
+        )
     }
 }
