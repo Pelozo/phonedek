@@ -1,9 +1,22 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { randomInt } from 'node:crypto'
-import { DEFAULT_HTTP_PORT } from '@phonedek/shared'
+import { DEFAULT_HTTP_PORT, LIGHT_DEFAULT_PORT } from '@phonedek/shared'
 import type { Logger } from './logger'
 import { builtinTwitchClientId, sanitizeTwitchClientId } from './twitch-auth'
+
+/** One local light device. Elgato is the only provider in this MVP. */
+export interface LightDeviceSettings {
+  /** Stable id referenced by bindings/actions; unique within the list. */
+  id: string
+  /** Display name. */
+  name: string
+  type: 'elgato'
+  /** Hostname or IPv4/IPv6 literal, no scheme/path. */
+  host: string
+  /** HTTP port; Elgato's default is 9123. */
+  port: number
+}
 
 export interface AppSettings {
   port: number
@@ -30,6 +43,10 @@ export interface AppSettings {
   twitchEnabled: boolean
   /** Public Twitch client ID. Defaults to a bundled/env value when present. */
   twitchClientId: string
+  /** Turn local-light control on. Defaults to true when devices are configured. */
+  lightsEnabled: boolean
+  /** Local devices (Elgato Key Light family). No credentials. Max 8. */
+  lights: LightDeviceSettings[]
 }
 
 /** Four-digit pairing PIN (the QR/link is the low-friction path). */
@@ -39,6 +56,10 @@ export function createToken(): string {
 
 export const DEFAULT_OBS_HOST = '127.0.0.1'
 export const DEFAULT_OBS_PORT = 4455
+export const DEFAULT_LIGHT_PORT = LIGHT_DEFAULT_PORT
+export const MAX_LIGHT_DEVICES = 8
+const LIGHT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
+const LIGHT_HOST_PATTERN = /^[A-Za-z0-9][A-Za-z0-9.-]*$/
 
 /**
  * Accept localhost, IPv4, hostnames and a bracketed IPv6 literal. Reject
@@ -71,6 +92,72 @@ export function sanitizeObsPassword(value: unknown): string {
   return value.slice(0, 256)
 }
 
+/** A valid device host, or null when the value cannot be a bare hostname/IP. */
+export function sanitizeLightHost(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const host = value.trim()
+  if (!host || host.length > 253) return null
+  if (host.includes('://') || /[/\\?#@\s]/.test(host)) return null
+  const ipv6 = /^\[([0-9a-fA-F:.]+)\]$/.exec(host)
+  if (ipv6) return ipv6[1]!.includes(':') ? host : null
+  if (host.includes(':')) return null
+  if (!LIGHT_HOST_PATTERN.test(host)) return null
+  if (host.includes('..') || host.startsWith('.') || host.endsWith('.')) return null
+  return host
+}
+
+export function sanitizeLightPort(value: unknown): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 65535
+    ? value
+    : DEFAULT_LIGHT_PORT
+}
+
+function lightName(value: unknown, index: number): string {
+  if (typeof value === 'string') {
+    const name = value.trim().slice(0, 40)
+    if (name) return name
+  }
+  return `Light ${index + 1}`
+}
+
+/**
+ * Sanitize the persisted device list: drop invalid hosts/providers, cap at 8,
+ * and make ids stable, valid and unique. An id is derived from the list index
+ * when it is missing or malformed, so a hand-edited settings.json still loads.
+ */
+export function sanitizeLightDevices(input: unknown): LightDeviceSettings[] {
+  if (!Array.isArray(input)) return []
+  const devices: LightDeviceSettings[] = []
+  const used = new Set<string>()
+  for (const [index, item] of input.entries()) {
+    if (devices.length >= MAX_LIGHT_DEVICES) break
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) continue
+    const candidate = item as Record<string, unknown>
+    const type = candidate.type
+    if (type !== undefined && type !== 'elgato') continue
+    const host = sanitizeLightHost(candidate.host)
+    if (!host) continue
+
+    const rawId = typeof candidate.id === 'string' ? candidate.id.trim() : ''
+    let id = LIGHT_ID_PATTERN.test(rawId) ? rawId : `light-${index + 1}`
+    if (used.has(id)) {
+      let suffix = 2
+      while (used.has(`${id}-${suffix}`)) suffix += 1
+      id = `${id}-${suffix}`
+    }
+    used.add(id)
+
+    devices.push({
+      id,
+      name: lightName(candidate.name, index),
+      type: 'elgato',
+      host,
+      port: sanitizeLightPort(candidate.port),
+    })
+  }
+  return devices
+}
+
 export function defaultSettings(): AppSettings {
   return {
     port: DEFAULT_HTTP_PORT,
@@ -87,6 +174,8 @@ export function defaultSettings(): AppSettings {
     obsPassword: '',
     twitchEnabled: false,
     twitchClientId: builtinTwitchClientId(),
+    lightsEnabled: false,
+    lights: [],
   }
 }
 
@@ -114,6 +203,7 @@ function sanitize(input: Partial<AppSettings> | null | undefined): AppSettings {
     isAbsolute(rawScreenshotDirectory)
       ? rawScreenshotDirectory
       : ''
+  const lights = sanitizeLightDevices(input.lights)
   return {
     port,
     token,
@@ -139,6 +229,11 @@ function sanitize(input: Partial<AppSettings> | null | undefined): AppSettings {
       input.twitchClientId === undefined
         ? defaults.twitchClientId
         : sanitizeTwitchClientId(input.twitchClientId),
+    // A configured device list means the user wants lights on; an explicit
+    // boolean still wins so the user can temporarily disable them.
+    lightsEnabled:
+      typeof input.lightsEnabled === 'boolean' ? input.lightsEnabled : lights.length > 0,
+    lights,
   }
 }
 
@@ -155,11 +250,15 @@ export class SettingsStore {
   }
 
   get(): AppSettings {
-    return { ...this.settings }
+    return { ...this.settings, lights: this.settings.lights.map((device) => ({ ...device })) }
   }
 
   update(patch: Partial<AppSettings>): AppSettings {
-    this.settings = sanitize({ ...this.settings, ...patch })
+    const effectivePatch =
+      patch.lights !== undefined && patch.lightsEnabled === undefined
+        ? { ...patch, lightsEnabled: Array.isArray(patch.lights) && patch.lights.length > 0 }
+        : patch
+    this.settings = sanitize({ ...this.settings, ...effectivePatch })
     this.write()
     return this.get()
   }

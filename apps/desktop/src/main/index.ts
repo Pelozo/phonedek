@@ -16,8 +16,8 @@ import type { MenuItemConstructorOptions, OpenDialogOptions, SaveDialogOptions }
 import { existsSync } from 'node:fs'
 import { basename, isAbsolute, join } from 'node:path'
 import { z } from 'zod'
-import { ActionSchema, controlToActions, validateConfig } from '@phonedek/shared'
-import type { Action, AssetKind, DeckConfig, PressResult } from '@phonedek/shared'
+import { ActionSchema, controlToActions, lightControlDefaults, validateConfig } from '@phonedek/shared'
+import type { Action, AssetKind, DeckConfig, LightBinding, PressResult } from '@phonedek/shared'
 import { AssetStore } from './assets'
 import { applyBackupImport, readBackupFile, writeBackupFile } from './backup'
 import { ConfigStore } from './config-store'
@@ -40,6 +40,7 @@ import { createPairInfo } from './qr'
 import { DeckServer, type PressContext } from './server'
 import {
   SettingsStore,
+  sanitizeLightDevices,
   sanitizeObsHost,
   sanitizeObsPort,
   type AppSettings,
@@ -54,10 +55,13 @@ import { SecretStore } from './secret-store'
 import { TwitchAuth, sanitizeTwitchClientId } from './twitch-auth'
 import { TwitchClient } from './twitch-client'
 import { TwitchStateSource } from './twitch-source'
+import { LightStateSource } from './light-source'
 import { IPC } from '../shared/api'
 import type {
   AppState,
   AssetPickResult,
+  LightSettingsInput,
+  LightStatusView,
   ObsInputsResult,
   ObsSettingsInput,
   ObsStatusView,
@@ -94,6 +98,7 @@ let obsSource: ObsStateSource | null = null
 let twitchAuth: TwitchAuth | null = null
 let twitchClient: TwitchClient | null = null
 let twitchSource: TwitchStateSource | null = null
+let lightSource: LightStateSource | null = null
 let pointerSender: PointerSender | null = null
 let pointerRouter: PointerRouter | null = null
 /** A native import/destructive dialog is waiting for a decision. */
@@ -229,6 +234,8 @@ async function buildServerInfo(): Promise<ServerInfoView> {
       twitchEnabled: currentSettings.twitchEnabled,
       twitchClientId: currentSettings.twitchClientId,
       twitchHasToken: twitchAuth?.hasToken === true,
+      lightsEnabled: lightsActive(currentSettings),
+      lights: currentSettings.lights.map((device) => ({ ...device })),
     },
     clients: server?.getClients() ?? [],
     error: serverError,
@@ -244,6 +251,24 @@ async function buildServerInfo(): Promise<ServerInfoView> {
       },
     twitchStatus: buildTwitchStatus(),
   }
+}
+
+/** Lights are advertised/read only when enabled and at least one device exists. */
+function lightsActive(current: AppSettings): boolean {
+  return current.lightsEnabled && current.lights.length > 0
+}
+
+/**
+ * Map a normalized value-control value to a raw light value.
+ * Power is semantic (on/off at 0.5); brightness/temperature honor the
+ * control's configured min/max.
+ */
+function lightRawValue(binding: LightBinding, value: number, min?: number, max?: number): number {
+  if (binding.target === 'power') return value >= 0.5 ? 100 : 0
+  const defaults = lightControlDefaults(binding.target)
+  const floor = typeof min === 'number' && Number.isFinite(min) ? min : defaults.min
+  const ceiling = typeof max === 'number' && Number.isFinite(max) ? max : defaults.max
+  return floor + Math.max(0, Math.min(1, value)) * (ceiling - floor)
 }
 
 function buildTwitchStatus(): TwitchStatusView {
@@ -284,6 +309,8 @@ async function buildState(): Promise<AppState> {
       twitchEnabled: settings.get().twitchEnabled,
       twitchClientId: settings.get().twitchClientId,
       twitchHasToken: twitchAuth?.hasToken === true,
+      lightsEnabled: lightsActive(settings.get()),
+      lights: settings.get().lights.map((device) => ({ ...device })),
     },
   }
 }
@@ -524,6 +551,21 @@ function registerIpc(): void {
           try {
             const input = await obsSource.setVolume(button.control.binding.input, percent)
             await controlState?.noteObsWritten(input, percent)
+            return { ok: true }
+          } catch (error) {
+            return { ok: false, error: error instanceof Error ? error.message : String(error) }
+          }
+        }
+        if (button.control.binding.type === 'light') {
+          if (!lightSource) return { ok: false, error: 'Local lights are not available on this desktop.' }
+          const binding = button.control.binding
+          try {
+            await lightSource.setLevel(
+              binding.light,
+              binding.target,
+              lightRawValue(binding, value, button.control.min, button.control.max),
+            )
+            await controlState?.noteLightWritten(binding.light)
             return { ok: true }
           } catch (error) {
             return { ok: false, error: error instanceof Error ? error.message : String(error) }
@@ -789,6 +831,68 @@ function registerIpc(): void {
     await controlState?.noteTwitchChanged()
     await pushServerInfo()
     return { ok: true, state: await buildState() }
+  })
+
+  ipcMain.handle(
+    IPC.setLightSettings,
+    async (_event, input: unknown): Promise<OperationResult> => {
+      if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+        return { ok: false, error: 'Light settings must be an object', state: await buildState() }
+      }
+      const value = input as LightSettingsInput
+      const patch: Partial<AppSettings> = {}
+
+      if (value.enabled !== undefined) {
+        if (typeof value.enabled !== 'boolean') {
+          return { ok: false, error: 'Light enabled must be true or false', state: await buildState() }
+        }
+        patch.lightsEnabled = value.enabled
+      }
+
+      if (value.lights !== undefined) {
+        if (!Array.isArray(value.lights)) {
+          return { ok: false, error: 'Lights must be a list', state: await buildState() }
+        }
+        if (value.lights.length > 8) {
+          return { ok: false, error: 'At most 8 lights can be configured', state: await buildState() }
+        }
+        const devices = sanitizeLightDevices(value.lights)
+        if (devices.length !== value.lights.length) {
+          return {
+            ok: false,
+            error:
+              'Each light needs an Elgato type, a name and a bare hostname or IP address (no scheme or path).',
+            state: await buildState(),
+          }
+        }
+        patch.lights = devices
+        if (value.enabled === undefined) patch.lightsEnabled = devices.length > 0
+      }
+
+      const updated = settings.update(patch)
+      lightSource?.configure(updated.lights)
+      await controlState?.noteLightChanged()
+      await pushServerInfo()
+      return { ok: true, state: await buildState() }
+    },
+  )
+
+  ipcMain.handle(IPC.getLightStatuses, async (): Promise<LightStatusView[]> => {
+    if (!lightSource) return []
+    const statuses = await lightSource.listStatuses()
+    return statuses.map((status) => ({
+      id: status.id,
+      name: status.name,
+      host: status.host,
+      port: status.port,
+      available: status.available,
+      ...(status.state?.on === undefined ? {} : { on: status.state.on }),
+      ...(status.state?.brightness === undefined ? {} : { brightness: status.state.brightness }),
+      ...(status.state?.temperature === undefined
+        ? {}
+        : { temperature: status.state.temperature }),
+      ...(status.error ? { error: status.error } : {}),
+    }))
   })
 
   ipcMain.handle(
@@ -1122,6 +1226,12 @@ async function bootstrap(): Promise<void> {
   })
   if (settings.get().twitchEnabled) void twitchAuth.start()
 
+  lightSource = new LightStateSource({ logger })
+  lightSource.configure(settings.get().lights)
+  lightSource.onChange((lightId) => {
+    void controlState?.noteLightWritten(lightId)
+  })
+
   const host = createHostActions({
     platform: process.platform,
     logger,
@@ -1163,6 +1273,11 @@ async function bootstrap(): Promise<void> {
       await twitchSource.execute(step)
       await controlState?.noteTwitchChanged()
     },
+    runLightAction: async (step) => {
+      if (!lightSource) throw new Error('Local lights are not available on this desktop.')
+      await lightSource.execute(step)
+      await controlState?.noteLightWritten(step.light)
+    },
   })
   executor = new ActionExecutor(keySender, host, logger, {
     onScreenshot: (path) => {
@@ -1189,12 +1304,17 @@ async function bootstrap(): Promise<void> {
           : null)
       : createVolumeReader(process.platform)
   controlState =
-    volumeReader || microphone || settings.get().obsEnabled || settings.get().twitchEnabled
+    volumeReader ||
+    microphone ||
+    settings.get().obsEnabled ||
+    settings.get().twitchEnabled ||
+    lightsActive(settings.get())
       ? new ControlStateService({
           ...(volumeReader ? { reader: volumeReader } : {}),
           ...(microphone ? { micReader: microphone } : {}),
           ...(obsSource ? { obsReader: obsSource } : {}),
           ...(twitchSource ? { twitchReader: twitchSource } : {}),
+          ...(lightSource ? { lightReader: lightSource } : {}),
           logger,
         })
       : null
@@ -1204,6 +1324,7 @@ async function bootstrap(): Promise<void> {
       microphone ? 'microphone' : null,
       obsSource ? 'OBS' : null,
       twitchSource ? 'Twitch' : null,
+      lightSource && lightsActive(settings.get()) ? 'lights' : null,
     ]
       .filter(Boolean)
       .join(' + ')
@@ -1226,6 +1347,21 @@ async function bootstrap(): Promise<void> {
           const input = await obsSource.setVolume(control.binding.input, percent)
           await controlState?.noteObsWritten(input, percent)
           logger.info(`Set OBS input "${input}" to ${Math.round(percent)}% for "${label}"`)
+          return { ok: true }
+        } catch (error) {
+          return { ok: false, error: error instanceof Error ? error.message : String(error) }
+        }
+      }
+      if (control.binding.type === 'light') {
+        if (!lightSource) return { ok: false, error: 'Local lights are not available on this desktop.' }
+        const binding = control.binding
+        const min = 'min' in control && typeof control.min === 'number' ? control.min : undefined
+        const max = 'max' in control && typeof control.max === 'number' ? control.max : undefined
+        try {
+          const raw = lightRawValue(binding, value, min, max)
+          await lightSource.setLevel(binding.light, binding.target, raw)
+          await controlState?.noteLightWritten(binding.light)
+          logger.info(`Set light "${binding.light ?? 'first'}" ${binding.target} to ${Math.round(raw)} for "${label}"`)
           return { ok: true }
         } catch (error) {
           return { ok: false, error: error instanceof Error ? error.message : String(error) }
@@ -1275,6 +1411,7 @@ async function bootstrap(): Promise<void> {
     controlStateSupported: controlState !== null,
     obsSupported: () => obsClient?.connected === true,
     twitchSupported: () => twitchSource?.connected === true,
+    lightSupported: () => lightsActive(settings.get()),
     onPointer: async (client, message, context) => {
       if (!pointerRouter) {
         return {
@@ -1481,6 +1618,7 @@ if (!gotLock) {
         twitchAuth?.dispose()
         obsSource?.dispose()
         obsClient?.dispose()
+        lightSource?.dispose()
         volumeProbe?.dispose()
         pointerRouter?.dispose()
         pointerSender?.dispose()

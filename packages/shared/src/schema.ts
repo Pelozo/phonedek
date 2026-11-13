@@ -215,6 +215,24 @@ const twitchSchema = z.union([
   z.object({ type: z.literal('twitch'), action: z.literal('setGame'), game: twitchGame }),
 ])
 
+/** Local-light device id reference; omitted = the first configured light. */
+const lightRef = id.optional()
+const lightTarget = z.enum(['power', 'brightness', 'temperature'])
+
+const lightSchema = z.union([
+  z.object({
+    type: z.literal('light'),
+    action: z.literal('setPower'),
+    light: lightRef,
+    on: z.boolean(),
+  }),
+  z.object({
+    type: z.literal('light'),
+    action: z.literal('togglePower'),
+    light: lightRef,
+  }),
+])
+
 export const MacroStepSchema = z.discriminatedUnion('type', [
   hotkeySchema,
   textSchema,
@@ -244,6 +262,7 @@ export const ActionSchema = z.union([
   micSchema,
   obsSchema,
   twitchSchema,
+  lightSchema,
 ])
 
 export const GridSchema = z.object({
@@ -294,6 +313,11 @@ export const ControlBindingSchema = z.union([
     type: z.literal('obs'),
     target: z.literal('inputVolume'),
     input: z.string().min(1).max(128).optional(),
+  }),
+  z.object({
+    type: z.literal('light'),
+    target: z.enum(['power', 'brightness', 'temperature']),
+    light: id.optional(),
   }),
   shortcutBindingSchema,
 ])
@@ -376,6 +400,47 @@ const sliderOrDialControlSchema = z
         })
       }
     }
+    if (control.binding.type === 'light') {
+      if (control.emit !== 'value') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['emit'],
+          message: 'Light controls require emit "value"',
+        })
+      }
+      if (control.binding.target === 'brightness' || control.binding.target === 'power') {
+        if (control.min !== undefined && (control.min < 0 || control.min > 100)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['min'],
+            message: 'Light brightness/power min must be between 0 and 100',
+          })
+        }
+        if (control.max !== undefined && (control.max < 0 || control.max > 100)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['max'],
+            message: 'Light brightness/power max must be between 0 and 100',
+          })
+        }
+      }
+      if (control.binding.target === 'temperature') {
+        if (control.min !== undefined && (control.min < 143 || control.min > 344)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['min'],
+            message: 'Elgato temperature min must be between 143 and 344 mired',
+          })
+        }
+        if (control.max !== undefined && (control.max < 143 || control.max > 344)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['max'],
+            message: 'Elgato temperature max must be between 143 and 344 mired',
+          })
+        }
+      }
+    }
     if (control.min !== undefined && control.max !== undefined && control.min >= control.max) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -432,7 +497,18 @@ export const TwitchStateBindingSchema = z.object({
   target: z.enum(['live', 'viewers', 'uptime', 'title', 'game']),
 })
 
-export const StateBindingSchema = z.union([ObsStateBindingSchema, TwitchStateBindingSchema])
+/** Read-only local-light status tile (power/brightness/temperature). */
+export const LightStateBindingSchema = z.object({
+  type: z.literal('light'),
+  target: lightTarget,
+  light: id.optional(),
+})
+
+export const StateBindingSchema = z.union([
+  ObsStateBindingSchema,
+  TwitchStateBindingSchema,
+  LightStateBindingSchema,
+])
 
 export const ButtonSchema = z.object({
   id,

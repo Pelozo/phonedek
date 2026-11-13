@@ -3,6 +3,7 @@ import type {
   ControlStateMessage,
   DeckButton,
   DeckConfig,
+  LightTarget,
   ObsStateTarget,
   TwitchStateTarget,
 } from '@phonedek/shared'
@@ -11,13 +12,14 @@ import type { VolumeReader, VolumeReading } from './volume-source'
 import type { MicReader, MicReading } from './microphone-source'
 import type { ObsInputReading, ObsStateReader, ObsStatusReading } from './obs-source'
 import type { TwitchStateReader, TwitchStatusReading } from './twitch-source'
+import type { LightStateReader, LightStatusReading } from './light-source'
 
 /** Minimum allowed watch poll interval, matching the shared protocol schema. */
 export const MIN_WATCH_INTERVAL_MS = 500
 export const DEFAULT_WATCH_INTERVAL_MS = 1000
 const WRITE_GRACE_MS = 1500
 
-export type ControlStateSource = 'volume' | 'mic' | 'obs' | 'twitch'
+export type ControlStateSource = 'volume' | 'mic' | 'obs' | 'twitch' | 'light'
 
 export interface StateControl {
   id: string
@@ -33,6 +35,10 @@ export interface StateControl {
   scene?: string
   /** Read-only status target from a Twitch button `state` binding. */
   twitchTarget?: TwitchStateTarget
+  /** Configured light id; omitted = the first configured light. */
+  lightId?: string
+  /** Light power/brightness/temperature target (value control or state tile). */
+  lightTarget?: LightTarget
 }
 
 export interface AbsoluteVolumeControl {
@@ -71,6 +77,22 @@ export function isObsStateButton(button: DeckButton): boolean {
 /** A normal button with a Twitch read-only `state` binding (status tile). */
 export function isTwitchStateButton(button: DeckButton): boolean {
   return button.state?.type === 'twitch'
+}
+
+/** A normal button with a local-light read-only `state` binding (status tile). */
+export function isLightStateButton(button: DeckButton): boolean {
+  return button.state?.type === 'light'
+}
+
+/** A value-bearing slider/dial that reads and writes one local light. */
+export function isLightControl(button: DeckButton): boolean {
+  const control = button.control
+  return (
+    control !== undefined &&
+    control.kind !== 'trackpad' &&
+    control.binding.type === 'light' &&
+    control.emit === 'value'
+  )
 }
 
 /** A value-bearing slider/dial that reads and writes one OBS input. */
@@ -144,14 +166,28 @@ export function resolveStateControls(
       if (controls.length >= 32) break
       continue
     }
+    if (state?.type === 'light') {
+      controls.push({
+        id: button.id,
+        label: button.label,
+        source: 'light',
+        lightTarget: state.target,
+        ...(state.light ? { lightId: state.light } : {}),
+      })
+      if (controls.length >= 32) break
+      continue
+    }
     const obs = isObsVolumeControl(button) ? button.control : null
+    const light = isLightControl(button) ? button.control : null
     const source: ControlStateSource | null = isAbsoluteVolumeControl(button)
       ? 'volume'
       : isMicGainControl(button)
         ? 'mic'
         : obs
           ? 'obs'
-          : null
+          : light
+            ? 'light'
+            : null
     if (!source) continue
     if (requested !== null && !requested.has(button.id)) continue
     if (source === 'obs' && obs && obs.kind !== 'trackpad' && obs.binding.type === 'obs') {
@@ -161,6 +197,14 @@ export function resolveStateControls(
         source,
         ...(obs.binding.input ? { input: obs.binding.input } : {}),
         max: obs.max ?? 200,
+      })
+    } else if (source === 'light' && light && light.kind !== 'trackpad' && light.binding.type === 'light') {
+      controls.push({
+        id: button.id,
+        label: button.label,
+        source,
+        ...(light.binding.light ? { lightId: light.binding.light } : {}),
+        lightTarget: light.binding.target,
       })
     } else {
       controls.push({ id: button.id, label: button.label, source })
@@ -186,6 +230,7 @@ export interface ControlStateServiceOptions {
   micReader?: MicReader | null
   obsReader?: ObsStateReader | null
   twitchReader?: TwitchStateReader | null
+  lightReader?: LightStateReader | null
   logger?: Logger
   now?: () => number
   defaultIntervalMs?: number
@@ -216,8 +261,14 @@ function stateSignature(entry: ControlStateEntry): string {
 }
 
 function isStatusReading(
-  reading: VolumeReading | MicReading | ObsInputReading | ObsStatusReading | TwitchStatusReading,
-): reading is ObsStatusReading | TwitchStatusReading {
+  reading:
+    | VolumeReading
+    | MicReading
+    | ObsInputReading
+    | ObsStatusReading
+    | TwitchStatusReading
+    | LightStatusReading,
+): reading is ObsStatusReading | TwitchStatusReading | LightStatusReading {
   return typeof (reading as ObsStatusReading).detail === 'string'
 }
 
@@ -250,13 +301,29 @@ function twitchUnavailableDetail(error: string): string {
 function unavailableDetail(source: ControlStateSource, error: string): string {
   if (source === 'obs') return obsUnavailableDetail(error)
   if (source === 'twitch') return twitchUnavailableDetail(error)
+  if (source === 'light') return lightUnavailableDetail(error)
   return error.slice(0, 60)
+}
+
+function lightUnavailableDetail(error: string): string {
+  if (/no lights? are configured|not configured/i.test(error)) return 'NO LIGHT'
+  if (/timed out|timeout|unreachable|econn|network|refused|not reachable/i.test(error)) {
+    return 'OFFLINE'
+  }
+  return error.slice(0, 60) || 'NO LIGHT'
 }
 
 function readingEntry(
   controlId: string,
   source: ControlStateSource,
-  reading: VolumeReading | MicReading | ObsInputReading | ObsStatusReading | TwitchStatusReading | null,
+  reading:
+    | VolumeReading
+    | MicReading
+    | ObsInputReading
+    | ObsStatusReading
+    | TwitchStatusReading
+    | LightStatusReading
+    | null,
   error: string | null,
   max?: number,
 ): ControlStateEntry {
@@ -316,6 +383,7 @@ export class ControlStateService {
   private readonly micReader?: MicReader | null
   private readonly obsReader?: ObsStateReader | null
   private readonly twitchReader?: TwitchStateReader | null
+  private readonly lightReader?: LightStateReader | null
   private readonly logger?: Logger
   private readonly now: () => number
   private readonly defaultIntervalMs: number
@@ -338,6 +406,7 @@ export class ControlStateService {
     this.micReader = options.micReader
     this.obsReader = options.obsReader
     this.twitchReader = options.twitchReader
+    this.lightReader = options.lightReader
     this.logger = options.logger
     this.now = options.now ?? Date.now
     this.defaultIntervalMs = clampInterval(options.defaultIntervalMs, DEFAULT_WATCH_INTERVAL_MS)
@@ -476,6 +545,29 @@ export class ControlStateService {
     if (this.disposed) return Promise.resolve()
     return this.enqueue(async () => {
       this.twitchReader?.invalidateStatus(target)
+      this.suppressUntil = Math.max(this.suppressUntil, this.now() + this.writeGraceMs)
+      await this.refresh(undefined, false, true)
+    })
+  }
+
+  /**
+   * Light write or external change: invalidate the device cache and push the
+   * new value immediately so a slider/tile does not wait for the next tick.
+   */
+  noteLightChanged(lightId?: string): Promise<void> {
+    if (this.disposed) return Promise.resolve()
+    return this.enqueue(async () => {
+      this.lightReader?.invalidateStatus(lightId)
+      this.suppressUntil = Math.max(this.suppressUntil, this.now() + this.writeGraceMs)
+      await this.refresh(undefined, false, true)
+    })
+  }
+
+  /** Alias used by write paths; the source cache is already updated on PUT. */
+  noteLightWritten(lightId?: string): Promise<void> {
+    void lightId
+    if (this.disposed) return Promise.resolve()
+    return this.enqueue(async () => {
       this.suppressUntil = Math.max(this.suppressUntil, this.now() + this.writeGraceMs)
       await this.refresh(undefined, false, true)
     })
@@ -633,6 +725,38 @@ export class ControlStateService {
       }
     }
 
+    const lightControls = watched.filter((control) => control.source === 'light')
+    if (lightControls.length > 0) {
+      // Group by device + target: one GET covers every tile for that light.
+      const groups = new Map<string, typeof lightControls>()
+      for (const control of lightControls) {
+        const key = `${control.lightId ?? ''}\u0000${control.lightTarget ?? 'power'}`
+        const group = groups.get(key)
+        if (group) group.push(control)
+        else groups.set(key, [control])
+      }
+      for (const controls of groups.values()) {
+        const first = controls[0]!
+        let reading: LightStatusReading | null = null
+        let error: string | null = null
+        if (!this.lightReader) {
+          error = 'Light state is not available on this desktop.'
+        } else {
+          try {
+            reading = await this.lightReader.readStatus(
+              first.lightId,
+              first.lightTarget ?? 'power',
+            )
+          } catch (caught) {
+            error = caught instanceof Error ? caught.message : String(caught)
+          }
+        }
+        for (const control of controls) {
+          this.updateEntry(control.key, control.controlId, 'light', reading, error)
+        }
+      }
+    }
+
     const now = this.now()
     for (const sub of [...this.subscriptions.values()]) {
       if (immediate === sub) {
@@ -667,6 +791,8 @@ export class ControlStateService {
     target?: ObsStateTarget
     scene?: string
     twitchTarget?: TwitchStateTarget
+    lightId?: string
+    lightTarget?: LightTarget
   }> {
     const controls = new Map<
       string,
@@ -679,6 +805,8 @@ export class ControlStateService {
         target?: ObsStateTarget
         scene?: string
         twitchTarget?: TwitchStateTarget
+        lightId?: string
+        lightTarget?: LightTarget
       }
     >()
     for (const sub of this.subscriptions.values()) {
@@ -695,6 +823,8 @@ export class ControlStateService {
           ...(meta?.target ? { target: meta.target } : {}),
           ...(meta?.scene ? { scene: meta.scene } : {}),
           ...(meta?.twitchTarget ? { twitchTarget: meta.twitchTarget } : {}),
+          ...(meta?.lightId ? { lightId: meta.lightId } : {}),
+          ...(meta?.lightTarget ? { lightTarget: meta.lightTarget } : {}),
         })
       }
     }
@@ -714,7 +844,14 @@ export class ControlStateService {
     key: string,
     controlId: string,
     source: ControlStateSource,
-    reading: VolumeReading | MicReading | ObsInputReading | ObsStatusReading | TwitchStatusReading | null,
+    reading:
+      | VolumeReading
+      | MicReading
+      | ObsInputReading
+      | ObsStatusReading
+      | TwitchStatusReading
+      | LightStatusReading
+      | null,
     error: string | null,
     max?: number,
   ): void {

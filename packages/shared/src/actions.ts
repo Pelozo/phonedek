@@ -3,10 +3,13 @@ import type {
   ControlSpec,
   ExecutableAction,
   KeyboardPlanStep,
+  LightAction,
+  LightPlanStep,
   MacroStep,
   ObsAction,
   ObsPlanStep,
   PagePlanStep,
+  PlannableAction,
   PlanStep,
   TwitchAction,
   TwitchPlanStep,
@@ -147,12 +150,31 @@ function twitchActionToPlan(action: TwitchAction): TwitchPlanStep {
   }
 }
 
+/** Map every local-light action variant to its plan step. */
+function lightActionToPlan(action: LightAction): LightPlanStep {
+  switch (action.action) {
+    case 'setPower':
+      return {
+        kind: 'light',
+        action: 'setPower',
+        ...(action.light ? { light: action.light } : {}),
+        on: action.on,
+      }
+    case 'togglePower':
+      return {
+        kind: 'light',
+        action: 'togglePower',
+        ...(action.light ? { light: action.light } : {}),
+      }
+  }
+}
+
 /**
  * Flatten a button's actions into an ordered execution plan.
  * Page actions are returned as units; the phone normally handles them locally,
  * while the desktop executor ignores them.
  */
-export function actionsToPlan(actions: readonly ExecutableAction[], options: PlanOptions = {}): PlanStep[] {
+export function actionsToPlan(actions: readonly PlannableAction[], options: PlanOptions = {}): PlanStep[] {
   const plan: PlanStep[] = []
   for (const action of actions) {
     switch (action.type) {
@@ -201,16 +223,19 @@ export function actionsToPlan(actions: readonly ExecutableAction[], options: Pla
       case 'twitch':
         plan.push(twitchActionToPlan(action))
         break
+      case 'light':
+        plan.push(lightActionToPlan(action))
+        break
     }
   }
   return plan
 }
 
-export function pageActions(actions: readonly ExecutableAction[]): PagePlanStep[] {
+export function pageActions(actions: readonly PlannableAction[]): PagePlanStep[] {
   return actionsToPlan(actions).filter((step): step is PagePlanStep => step.kind === 'page')
 }
 
-export function hasHostActions(actions: readonly ExecutableAction[]): boolean {
+export function hasHostActions(actions: readonly PlannableAction[]): boolean {
   return actionsToPlan(actions).some((step) => step.kind !== 'page')
 }
 
@@ -240,6 +265,7 @@ export function controlToActions(control: ControlSpec, delta: number): Action[] 
   if (!Number.isFinite(delta) || delta === 0) return []
   if (control.binding.type === 'mic') return []
   if (control.binding.type === 'obs') return []
+  if (control.binding.type === 'light') return []
   if (control.binding.type === 'volume' && control.binding.mode === 'absolute') return []
   const magnitude = Math.ceil(Math.abs(delta))
 
@@ -526,7 +552,7 @@ export function describeStep(step: MacroStep): string {
   }
 }
 
-export function describeAction(action: ExecutableAction, platform?: string): string {
+export function describeAction(action: PlannableAction, platform?: string): string {
   switch (action.type) {
     case 'hotkey':
       return formatCombo(action.keys, platform)
@@ -603,6 +629,15 @@ export function describeAction(action: ExecutableAction, platform?: string): str
         }
         case 'setGame':
           return `Set Twitch category "${action.game.slice(0, 40)}"`
+      }
+    case 'light':
+      switch (action.action) {
+        case 'setPower':
+          return action.light
+            ? `Turn light "${action.light}" ${action.on ? 'on' : 'off'}`
+            : `Turn the first light ${action.on ? 'on' : 'off'}`
+        case 'togglePower':
+          return action.light ? `Toggle light "${action.light}"` : 'Toggle the first light'
       }
   }
 }

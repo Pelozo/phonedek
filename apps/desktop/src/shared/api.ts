@@ -49,6 +49,47 @@ export interface SettingsView {
   twitchClientId: string
   /** True when a Twitch token bundle is stored. */
   twitchHasToken: boolean
+  /** Local-light control is on and at least one device is configured. */
+  lightsEnabled: boolean
+  /** Configured local lights; never contains credentials. */
+  lights: LightDeviceView[]
+}
+
+/** One configured local light as exposed to the renderer. */
+export interface LightDeviceView {
+  id: string
+  name: string
+  type: 'elgato'
+  host: string
+  port: number
+}
+
+/** Live per-device availability for the Settings test row. */
+export interface LightStatusView {
+  id: string
+  name: string
+  host: string
+  port: number
+  available: boolean
+  on?: boolean
+  brightness?: number
+  /** Mireds, 143..344. */
+  temperature?: number
+  error?: string
+}
+
+export interface LightDeviceInput {
+  id: string
+  name: string
+  type?: 'elgato'
+  host: string
+  port?: number
+}
+
+export interface LightSettingsInput {
+  enabled?: boolean
+  /** Full replacement list (max 8). Omit to change only `enabled`. */
+  lights?: LightDeviceInput[]
 }
 
 export type ObsStateView =
@@ -224,6 +265,8 @@ export interface PhoneDeckApi {
   startTwitchAuth(): Promise<TwitchAuthStartResult>
   cancelTwitchAuth(): Promise<OperationResult>
   disconnectTwitch(): Promise<OperationResult>
+  setLightSettings(input: LightSettingsInput): Promise<OperationResult>
+  getLightStatuses(): Promise<LightStatusView[]>
   exportConfig(): Promise<OperationResult>
   importConfig(): Promise<SaveConfigResult>
   openLogs(): Promise<void>
@@ -270,6 +313,8 @@ export const IPC = {
   startTwitchAuth: 'phonedek:twitch-start-auth',
   cancelTwitchAuth: 'phonedek:twitch-cancel-auth',
   disconnectTwitch: 'phonedek:twitch-disconnect',
+  setLightSettings: 'phonedek:lights-set-settings',
+  getLightStatuses: 'phonedek:lights-get-statuses',
   exportConfig: 'phonedek:export-config',
   importConfig: 'phonedek:import-config',
   openLogs: 'phonedek:open-logs',

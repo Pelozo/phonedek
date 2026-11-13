@@ -211,6 +211,7 @@ export class ControlInputRouter {
   private isValueControl(control: ControlSpec): boolean {
     if (control.binding.type === 'mic') return true
     if (control.binding.type === 'obs') return true
+    if (control.binding.type === 'light') return true
     return control.binding.type === 'volume' && control.binding.mode === 'absolute'
   }
 
@@ -219,11 +220,13 @@ export class ControlInputRouter {
       if (control.emit !== 'value') {
         if (control.binding.type === 'mic') return 'Mic gain requires a value control.'
         if (control.binding.type === 'obs') return 'OBS input volume requires a value control.'
+        if (control.binding.type === 'light') return 'Light controls require a value control.'
         return 'Absolute volume requires a value control.'
       }
       if (!this.applyAbsolute) {
         if (control.binding.type === 'mic') return 'Microphone gain is not available on this desktop.'
         if (control.binding.type === 'obs') return 'OBS input volume is not available on this desktop.'
+        if (control.binding.type === 'light') return 'Local lights are not available on this desktop.'
         return 'Absolute volume is not available on this desktop.'
       }
       return null

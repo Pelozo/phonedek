@@ -1,6 +1,6 @@
 import { basename } from 'node:path'
 import { actionsToPlan, isScreenshotShortcut } from '@phonedek/shared'
-import type { ExecutableAction, KeyboardPlanStep, PressResult } from '@phonedek/shared'
+import type { PlannableAction, KeyboardPlanStep, PressResult } from '@phonedek/shared'
 import type { HostActions } from './host-actions'
 import type { KeySender } from './key-sender'
 import type { Logger } from './logger'
@@ -34,7 +34,7 @@ export class ActionExecutor {
     this.onScreenshot = options.onScreenshot
   }
 
-  execute(actions: readonly ExecutableAction[], label = 'button'): Promise<PressResult> {
+  execute(actions: readonly PlannableAction[], label = 'button'): Promise<PressResult> {
     const task = this.queue.then(() => this.run(actions, label))
     this.queue = task.then(
       () => undefined,
@@ -115,7 +115,7 @@ export class ActionExecutor {
     }
   }
 
-  private async run(actions: readonly ExecutableAction[], label: string): Promise<PressResult> {
+  private async run(actions: readonly PlannableAction[], label: string): Promise<PressResult> {
     const plan = actionsToPlan(actions)
     if (plan.length === 0) {
       this.logger?.info(`Pressed "${label}" (no actions)`)
@@ -156,6 +156,12 @@ export class ActionExecutor {
               throw new Error('Twitch is not available on this desktop.')
             }
             await this.host.runTwitchAction(step)
+            break
+          case 'light':
+            if (!this.host.runLightAction) {
+              throw new Error('Local lights are not available on this desktop.')
+            }
+            await this.host.runLightAction(step)
             break
           default:
             if (KEYBOARD_KINDS.has(step.kind)) {

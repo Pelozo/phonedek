@@ -8,6 +8,7 @@ import { WebSocket, WebSocketServer } from 'ws'
 import {
   BRIGHTNESS_CAPABILITY,
   CONTROL_STATE_CAPABILITY,
+  LIGHT_CAPABILITY,
   OBS_CAPABILITY,
   POINTER_CAPABILITY,
   TWITCH_CAPABILITY,
@@ -52,6 +53,7 @@ export const SERVER_CAPABILITIES = [
   CONTROL_STATE_CAPABILITY,
   OBS_CAPABILITY,
   TWITCH_CAPABILITY,
+  LIGHT_CAPABILITY,
 ] as const
 
 /**
@@ -65,12 +67,14 @@ export function serverCapabilities(
   stateSupported = false,
   obsSupported = false,
   twitchSupported = false,
+  lightSupported = false,
 ): string[] {
   return SERVER_CAPABILITIES.filter((capability) => {
     if (capability === POINTER_CAPABILITY) return pointerSupported
     if (capability === CONTROL_STATE_CAPABILITY) return stateSupported
     if (capability === OBS_CAPABILITY) return obsSupported
     if (capability === TWITCH_CAPABILITY) return twitchSupported
+    if (capability === LIGHT_CAPABILITY) return lightSupported
     return true
   })
 }
@@ -161,6 +165,8 @@ export interface DeckServerOptions {
   obsSupported?: () => boolean
   /** Dynamic: advertise `twitch-v1` only while Twitch is authorized. */
   twitchSupported?: () => boolean
+  /** Dynamic: advertise `light-v1` while at least one light is configured. */
+  lightSupported?: () => boolean
   /** Called when a phone disconnects, so held pointer buttons can be released. */
   onClientClosed?: (client: ConnectedClient) => void
   /** Called only after an uploaded backup validates; show native approval here. */
@@ -408,6 +414,7 @@ export class DeckServer {
       this.options.controlStateSupported === true,
       this.options.obsSupported?.() === true,
       this.options.twitchSupported?.() === true,
+      this.options.lightSupported?.() === true,
     )
   }
 

@@ -4,6 +4,8 @@ import { IPC } from '../shared/api'
 import type {
   AppState,
   AssetPickResult,
+  LightSettingsInput,
+  LightStatusView,
   ObsInputsResult,
   ObsSettingsInput,
   ObsStatusView,
@@ -62,6 +64,9 @@ const api: PhoneDeckApi = {
   startTwitchAuth: (): Promise<TwitchAuthStartResult> => ipcRenderer.invoke(IPC.startTwitchAuth),
   cancelTwitchAuth: (): Promise<OperationResult> => ipcRenderer.invoke(IPC.cancelTwitchAuth),
   disconnectTwitch: (): Promise<OperationResult> => ipcRenderer.invoke(IPC.disconnectTwitch),
+  setLightSettings: (input: LightSettingsInput): Promise<OperationResult> =>
+    ipcRenderer.invoke(IPC.setLightSettings, input),
+  getLightStatuses: (): Promise<LightStatusView[]> => ipcRenderer.invoke(IPC.getLightStatuses),
   exportConfig: (): Promise<OperationResult> => ipcRenderer.invoke(IPC.exportConfig),
   importConfig: (): Promise<SaveConfigResult> => ipcRenderer.invoke(IPC.importConfig),
   openLogs: (): Promise<void> => ipcRenderer.invoke(IPC.openLogs),

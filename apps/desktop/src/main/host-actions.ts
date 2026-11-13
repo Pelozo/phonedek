@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, statSync, accessSync, constants } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { ObsPlanStep, TwitchPlanStep } from '@phonedek/shared'
+import type { LightPlanStep, ObsPlanStep, TwitchPlanStep } from '@phonedek/shared'
 import type { Logger } from './logger'
 import {
   LINUX_INPUT_COMMAND,
@@ -34,6 +34,8 @@ export interface HostActions {
   runObsAction?(step: ObsPlanStep): Promise<void>
   /** Run any Twitch plan step (optional; absent when Twitch is not wired). */
   runTwitchAction?(step: TwitchPlanStep): Promise<void>
+  /** Run any local-light plan step (optional; absent when lights are not wired). */
+  runLightAction?(step: LightPlanStep): Promise<void>
 }
 
 export interface HostActionOptions {
@@ -58,6 +60,8 @@ export interface HostActionOptions {
   runObsAction?: (step: ObsPlanStep) => Promise<void>
   /** Test seam / shared controller for the full Twitch action family. */
   runTwitchAction?: (step: TwitchPlanStep) => Promise<void>
+  /** Test seam / shared controller for the full local-light action family. */
+  runLightAction?: (step: LightPlanStep) => Promise<void>
   /** Overrides the user's home directory (used by tests to avoid touching ~/Desktop). */
   homeDir?: string
   logger?: Logger
@@ -438,6 +442,15 @@ export function createHostActions(options: HostActionOptions = {}): HostActions 
           async runTwitchAction(step: TwitchPlanStep) {
             await options.runTwitchAction!(step)
             logger?.info(`Ran Twitch action: ${step.action}`)
+          },
+        }
+      : {}),
+
+    ...(options.runLightAction
+      ? {
+          async runLightAction(step: LightPlanStep) {
+            await options.runLightAction!(step)
+            logger?.info(`Ran light action: ${step.action}`)
           },
         }
       : {}),

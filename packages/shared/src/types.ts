@@ -26,6 +26,16 @@ export const OBS_CAPABILITY = 'obs-v1' as const
 /** Desktop capability for Twitch Helix reads and actions (authorized only). */
 export const TWITCH_CAPABILITY = 'twitch-v1' as const
 
+/** Desktop capability for local smart-light control and readback. */
+export const LIGHT_CAPABILITY = 'light-v1' as const
+
+/** Elgato Key Light / Key Light Air / Key Light Mini default HTTP port. */
+export const LIGHT_DEFAULT_PORT = 9123
+
+/** Elgato's white-balance range, expressed in mireds (1e6 / Kelvin). */
+export const ELGATO_TEMPERATURE_MIN = 143
+export const ELGATO_TEMPERATURE_MAX = 344
+
 export const DEFAULT_HTTP_PORT = 47654
 export const DISCOVERY_PORT = 47655
 export const DISCOVERY_MAGIC = 'PHONEDECK'
@@ -271,11 +281,27 @@ export type TwitchAction =
   | { type: 'twitch'; action: 'setGame'; game: string }
 
 /**
+ * Local smart-light actions. `light` is a configured device id; omitted = the
+ * first configured light. Power is an action (not a value control): on/off is
+ * better served by a tap tile plus a `light` state binding.
+ */
+export type LightAction =
+  | { type: 'light'; action: 'setPower'; light?: string; on: boolean }
+  | { type: 'light'; action: 'togglePower'; light?: string }
+
+/**
  * Everything the host can execute. `MicAction` and `TwitchAction` are accepted
  * by ActionSchema and the plan builder but deliberately stay out of `Action`
  * so older renderers do not have to handle them.
  */
 export type ExecutableAction = Action | MicAction | TwitchAction
+
+/**
+ * Host-executable actions plus the newer local-light family. Kept separate from
+ * `ExecutableAction` so a renderer that keys maps by `ExecutableAction['type']`
+ * compiles unchanged until it adds light UI.
+ */
+export type PlannableAction = ExecutableAction | LightAction
 
 /** Footprint of a button measured in grid cells. */
 export interface CellSpan {
@@ -332,8 +358,37 @@ export interface TwitchStateBinding {
   target: TwitchStateTarget
 }
 
-/** State binding union; OBS and Twitch status tiles. */
-export type StateBinding = ObsStateBinding | TwitchStateBinding
+/** What a light slider/dial or status tile reads or controls. */
+export type LightTarget = 'power' | 'brightness' | 'temperature'
+
+/**
+ * A local-light value control.
+ *
+ * - `brightness`: raw 0..100.
+ * - `temperature`: white balance in mireds, Elgato's native 143..344 range
+ *   (143 ≈ 6993 K coolest, 344 ≈ 2907 K warmest). See `miredToKelvin`.
+ * - `power`: 0..100 treated as off (< 50) / on (>= 50). Prefer actions for
+ *   on/off and a `LightStateBinding` for the tile readout; the value form is
+ *   accepted for symmetry with older value-control plumbing.
+ *
+ * `light` is a configured device id; omitted = the first configured light.
+ */
+export interface LightBinding {
+  type: 'light'
+  target: LightTarget
+  light?: string
+}
+
+/** Read-only light status binding for a normal button. */
+export interface LightStateBinding {
+  type: 'light'
+  target: LightTarget
+  /** Configured device id; omitted = the first configured light. */
+  light?: string
+}
+
+/** State binding union; OBS, Twitch and light status tiles. */
+export type StateBinding = ObsStateBinding | TwitchStateBinding | LightStateBinding
 
 /**
  * A key wheel: one chord per dial detent or slider slice.
@@ -387,6 +442,7 @@ export type ControlBinding =
       mode: 'gain'
     }
   | ObsInputVolumeBinding
+  | LightBinding
   | ShortcutBinding
 
 /**
@@ -585,6 +641,10 @@ export type TwitchPlanStep =
   | { kind: 'twitch'; action: 'setTitle'; title: string }
   | { kind: 'twitch'; action: 'setGame'; game: string }
 
+export type LightPlanStep =
+  | { kind: 'light'; action: 'setPower'; light?: string; on: boolean }
+  | { kind: 'light'; action: 'togglePower'; light?: string }
+
 export type PlanStep =
   | KeyPlanStep
   | TextPlanStep
@@ -598,6 +658,7 @@ export type PlanStep =
   | MicPlanStep
   | ObsPlanStep
   | TwitchPlanStep
+  | LightPlanStep
 
 export type KeyboardPlanStep = KeyPlanStep | TextPlanStep | DelayPlanStep | MediaPlanStep | MousePlanStep
 
