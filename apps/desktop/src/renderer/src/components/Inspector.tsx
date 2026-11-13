@@ -15,6 +15,8 @@ import type {
   DeckProfile,
   MacroStep,
   MediaIcon,
+  ObsAction,
+  ObsStateBinding,
 } from '@phonedek/shared'
 import {
   buttonSpan,
@@ -33,7 +35,11 @@ import {
   updateTheme,
 } from '@phonedek/shared'
 import type { ServerInfoView } from '../../../shared/api'
-import { obsInputAvailability } from '../lib/obs'
+import {
+  obsInputAvailability,
+  obsStateBadge,
+  obsStateBindingSummary,
+} from '../lib/obs'
 import { useObsInputs } from '../lib/useObsInputs'
 import { backgroundStyle, buttonBackground, textColorFor } from '../lib/ui'
 import { ActionEditor } from './ActionEditor'
@@ -44,6 +50,7 @@ import { Icon } from './Icons'
 import { IconPicker } from './IconPicker'
 import { PopMenu } from './Menu'
 import { MoveToDialog } from './MoveToDialog'
+import { ObsStatusEditor } from './ObsStatusEditor'
 import { PresetPicker } from './PresetPicker'
 import { ColorField, NumberField, Toggle, useConfirm } from './Primitives'
 import { ShortcutDialog } from './ShortcutDialog'
@@ -133,7 +140,12 @@ export function Inspector({
     button?.control && button.control.kind !== 'trackpad' && button.control.binding.type === 'obs'
       ? button.control.binding
       : null
-  const obsInputsState = useObsInputs(initialObsBinding !== null)
+  const statusBinding = button?.state?.type === 'obs' ? button.state : null
+  const obsInputsState = useObsInputs(
+    initialObsBinding !== null ||
+      statusBinding?.target === 'inputMute' ||
+      statusBinding?.target === 'inputVolume',
+  )
 
   const makeAction = (type: Action['type']): Action => defaultAction(type, platform)
 
@@ -717,6 +729,16 @@ export function Inspector({
     onToast(`${pack.name} · ${preset.name} added`, 'success')
   }
 
+  const addObsAction = (action: ObsAction, label: string, icon: string): void => {
+    const current = button.label.trim().toLowerCase()
+    const untitled =
+      current === '' || current === 'untitled' || current === 'untitled button' || current === 'new button'
+    update({
+      actions: [...button.actions, action],
+      ...(untitled ? { label, icon } : {}),
+    })
+  }
+
   const chooseIconMedia = async (kind: 'image' | 'video'): Promise<void> => {
     setIconBusy(kind)
     try {
@@ -817,6 +839,12 @@ export function Inspector({
               <Icon name="layers" size={14} /> Move to…
             </button>
           </div>
+          {button.state?.type === 'obs' && (
+            <div className="obs-state-summary">
+              <span className="obs-state-pill">{obsStateBadge(button.state.target)}</span>
+              <span>{obsStateBindingSummary(button.state)}</span>
+            </div>
+          )}
           <p className="hint">
             {primaryKey}+C copy · {primaryKey}+X cut · {primaryKey}+V paste on the active page.
             {clipboardLabel ? ` Clipboard: “${clipboardLabel}”.` : ' Clipboard empty.'}
@@ -1010,6 +1038,50 @@ export function Inspector({
             </div>
           )}
         </section>
+
+        {!button.control && (
+          <section className="inspector-section">
+            <div className="section-heading">
+              <h3>Status</h3>
+              <span className="inspector-badge mono">
+                {statusBinding ? obsStateBadge(statusBinding.target) : 'OFF'}
+              </span>
+            </div>
+            <p className="hint">
+              Add a live OBS readout to this button without replacing its tap actions. Status uses
+              the desktop&apos;s OBS connection and control-state-v1.
+            </p>
+            <div className="section-title">
+              <span>Show OBS status</span>
+              <Toggle
+                label=""
+                checked={statusBinding !== null}
+                onChange={(enabled) =>
+                  update({
+                    state: enabled ? { type: 'obs', target: 'streaming' } : undefined,
+                  })
+                }
+              />
+            </div>
+            {statusBinding && (
+              <>
+                <ObsStatusEditor
+                  key={button.id}
+                  binding={statusBinding}
+                  server={server}
+                  onUpdate={(state: ObsStateBinding) => update({ state })}
+                />
+                <button
+                  type="button"
+                  className="button danger ghost full"
+                  onClick={() => update({ state: undefined })}
+                >
+                  <Icon name="trash" size={15} /> Remove status
+                </button>
+              </>
+            )}
+          </section>
+        )}
 
         {trackpad && (
           <section className="inspector-section">
@@ -1601,7 +1673,16 @@ export function Inspector({
                   { label: 'Open URL', icon: 'link', description: 'Open a web page', onClick: () => update({ actions: [...button.actions, makeAction('url')] }) },
                   { label: 'Run command', icon: 'terminal', description: 'Run a shell command', onClick: () => update({ actions: [...button.actions, makeAction('command')] }) },
                   { label: 'Media key', icon: 'music', description: 'Play, pause, volume…', onClick: () => update({ actions: [...button.actions, makeAction('media')] }) },
-                  { label: 'OBS mute', section: 'Integrations', icon: 'microphone', description: 'Toggle mute on an OBS input', onClick: () => update({ actions: [...button.actions, makeAction('obs')] }) },
+                  { label: 'OBS scene switcher', section: 'Integrations', icon: 'layers', description: 'Switch the program scene by name', onClick: () => addObsAction({ type: 'obs', action: 'setScene' }, 'Scene', '🎬') },
+                  { label: 'OBS toggle stream', icon: 'wifi', description: 'Start or stop streaming', onClick: () => addObsAction({ type: 'obs', action: 'toggleStream' }, 'Stream', '📡') },
+                  { label: 'OBS toggle recording', icon: 'record', description: 'Start or stop recording', onClick: () => addObsAction({ type: 'obs', action: 'toggleRecord' }, 'Record', '⏺️') },
+                  { label: 'OBS start recording', icon: 'record', description: 'Start recording only', onClick: () => addObsAction({ type: 'obs', action: 'startRecord' }, 'Record', '⏺️') },
+                  { label: 'OBS stop recording', icon: 'stop', description: 'Stop recording only', onClick: () => addObsAction({ type: 'obs', action: 'stopRecord' }, 'Record', '⏺️') },
+                  { label: 'OBS save replay', icon: 'refresh', description: 'Flush the replay buffer', onClick: () => addObsAction({ type: 'obs', action: 'saveReplay' }, 'Replay', '🔁') },
+                  { label: 'OBS toggle virtual cam', icon: 'video', description: 'Start or stop the virtual camera', onClick: () => addObsAction({ type: 'obs', action: 'toggleVirtualCam' }, 'VCam', '🎥') },
+                  { label: 'OBS source visibility', icon: 'image', description: 'Show or hide a source', onClick: () => addObsAction({ type: 'obs', action: 'toggleSourceVisibility', source: 'Camera' }, 'Source', '👁️') },
+                  { label: 'OBS add marker', icon: 'clock', description: 'Drop a chapter marker', onClick: () => addObsAction({ type: 'obs', action: 'addMarker' }, 'Marker', '🔖') },
+                  { label: 'OBS mute', icon: 'microphone', description: 'Toggle mute on an OBS input', onClick: () => addObsAction({ type: 'obs', action: 'toggleMute' }, 'Mic', '🎙️') },
                   { label: 'Delay', icon: 'clock', description: 'Wait before the next action', onClick: () => update({ actions: [...button.actions, makeAction('delay')] }) },
                   { label: 'Change page', icon: 'layers', description: 'Navigate to another deck page', onClick: () => update({ actions: [...button.actions, makeAction('page')] }) },
                 ]}

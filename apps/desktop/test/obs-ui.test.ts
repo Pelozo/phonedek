@@ -66,3 +66,126 @@ describe('obsInputAvailability', () => {
     )
   })
 })
+
+import {
+  obsActionTitle,
+  obsActionVariant,
+  obsNameError,
+  obsNameOrUndefined,
+  obsStateBadge,
+  obsStateBindingSummary,
+  obsStateTargetInfo,
+} from '../src/renderer/src/lib/obs'
+import {
+  OBS_STATUS_TILES,
+  createObsStatusButton,
+} from '../src/renderer/src/lib/obsStatus'
+
+describe('OBS phase 2 action helpers', () => {
+  it('titles every action variant', () => {
+    expect(obsActionTitle({ type: 'obs', action: 'setScene' })).toBe('OBS scene')
+    expect(obsActionTitle({ type: 'obs', action: 'startStream' })).toBe('OBS stream')
+    expect(obsActionTitle({ type: 'obs', action: 'saveReplay' })).toBe('OBS replay')
+    expect(obsActionTitle({ type: 'obs', action: 'toggleSourceVisibility', source: 'Cam' })).toBe(
+      'OBS source',
+    )
+    expect(obsActionTitle({ type: 'obs', action: 'addMarker' })).toBe('OBS marker')
+  })
+
+  it('changes operation while keeping still-applicable fields', () => {
+    expect(
+      obsActionVariant({ type: 'obs', action: 'setScene', scene: 'Gaming' }, 'toggleStream'),
+    ).toEqual({ type: 'obs', action: 'toggleStream' })
+    expect(
+      obsActionVariant(
+        { type: 'obs', action: 'toggleSourceVisibility', scene: 'Main', source: 'Alerts' },
+        'setSourceVisibility',
+      ),
+    ).toEqual({
+      type: 'obs',
+      action: 'setSourceVisibility',
+      scene: 'Main',
+      source: 'Alerts',
+      visible: true,
+    })
+    expect(
+      obsActionVariant({ type: 'obs', action: 'toggleMute', input: 'Mic/Aux' }, 'startRecord'),
+    ).toEqual({ type: 'obs', action: 'startRecord' })
+    expect(
+      obsActionVariant(
+        { type: 'obs', action: 'toggleSourceVisibility', source: '' },
+        'setSourceVisibility',
+      ),
+    ).toEqual({
+      type: 'obs',
+      action: 'setSourceVisibility',
+      source: 'Camera',
+      visible: true,
+    })
+  })
+
+  it('validates required names at 1..128 characters', () => {
+    expect(obsNameError('', true)).toContain('Required')
+    expect(obsNameError('  ', true)).toContain('Required')
+    expect(obsNameError('', false)).toBeNull()
+    expect(obsNameError('x'.repeat(128), true)).toBeNull()
+    expect(obsNameError('x'.repeat(129), true)).toContain('128')
+    expect(obsNameOrUndefined('  Camera  ')).toBe('Camera')
+    expect(obsNameOrUndefined('   ')).toBeUndefined()
+  })
+})
+
+describe('OBS status helpers', () => {
+  it('renders static editor badges without pretending to be live', () => {
+    expect(obsStateBadge('streaming')).toBe('OBS · LIVE')
+    expect(obsStateBadge('recording')).toBe('OBS · REC')
+    expect(obsStateBadge('replay')).toBe('OBS · REPLAY')
+    expect(obsStateBadge('virtualCam')).toBe('OBS · VCAM')
+    expect(obsStateBadge('scene')).toBe('OBS · SCENE')
+    expect(obsStateBadge('inputMute')).toBe('OBS · MUTE')
+    expect(obsStateBadge('inputVolume')).toBe('OBS · VOL')
+  })
+
+  it('summarizes scene and input bindings', () => {
+    expect(obsStateBindingSummary({ type: 'obs', target: 'scene', scene: 'Gaming' })).toBe(
+      'Scene status · Gaming',
+    )
+    expect(obsStateBindingSummary({ type: 'obs', target: 'scene' })).toContain('current program')
+    expect(
+      obsStateBindingSummary({ type: 'obs', target: 'inputMute', input: 'Mic/Aux' }),
+    ).toBe('Input mute status · Mic/Aux')
+    expect(obsStateBindingSummary(undefined)).toBeNull()
+  })
+
+  it('marks which targets need extra fields', () => {
+    expect(obsStateTargetInfo('scene').needsScene).toBe(true)
+    expect(obsStateTargetInfo('inputVolume').needsInput).toBe(true)
+    expect(obsStateTargetInfo('streaming').needsInput).toBe(false)
+    expect(obsStateTargetInfo('streaming').needsScene).toBe(false)
+  })
+
+  it('creates 1x1 status tiles with state plus a matching tap action', () => {
+    expect(OBS_STATUS_TILES.map((tile) => tile.target)).toEqual([
+      'streaming',
+      'recording',
+      'replay',
+      'virtualCam',
+    ])
+    const stream = OBS_STATUS_TILES[0]!
+    const button = createObsStatusButton(stream, 4)
+    expect(button.slot).toBe(4)
+    expect(button.label).toBe('Stream')
+    expect(button.icon).toBe('📡')
+    expect(button.state).toEqual({ type: 'obs', target: 'streaming' })
+    expect(button.actions).toEqual([{ type: 'obs', action: 'toggleStream' }])
+    expect(button.span).toBeUndefined()
+  })
+
+  it('replay status saves the buffer and VCam toggles the camera', () => {
+    const replay = createObsStatusButton(OBS_STATUS_TILES[2]!, 0)
+    expect(replay.state?.target).toBe('replay')
+    expect(replay.actions).toEqual([{ type: 'obs', action: 'saveReplay' }])
+    const vcam = createObsStatusButton(OBS_STATUS_TILES[3]!, 1)
+    expect(vcam.actions).toEqual([{ type: 'obs', action: 'toggleVirtualCam' }])
+  })
+})

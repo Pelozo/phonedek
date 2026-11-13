@@ -1,3 +1,4 @@
+import type { ObsAction, ObsStateBinding, ObsStateTarget } from '@phonedek/shared'
 import type { ObsInputView, ObsStateView, ObsStatusView } from '../../../shared/api'
 
 export type ObsTone = 'ok' | 'warn' | 'error' | 'muted'
@@ -124,4 +125,187 @@ export function obsInputAvailability({
     detail: fallback ? `Uses ${fallback.name}` : 'Uses the first OBS input.',
     tone: 'ok',
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* OBS phase 2: action + status helpers (pure, renderer-only)          */
+/* ------------------------------------------------------------------ */
+
+export interface ObsStateTargetInfo {
+  value: ObsStateTarget
+  label: string
+  /** Short editor badge, without the OBS prefix. */
+  badge: string
+  hint: string
+  needsInput: boolean
+  needsScene: boolean
+}
+
+const STATE_TARGET_INFO: Record<ObsStateTarget, ObsStateTargetInfo> = {
+  streaming: {
+    value: 'streaming',
+    label: 'Stream status',
+    badge: 'LIVE',
+    hint: 'The phone shows LIVE while OBS is streaming, OFF otherwise.',
+    needsInput: false,
+    needsScene: false,
+  },
+  recording: {
+    value: 'recording',
+    label: 'Recording status',
+    badge: 'REC',
+    hint: 'The phone shows REC while OBS is recording, OFF otherwise.',
+    needsInput: false,
+    needsScene: false,
+  },
+  replay: {
+    value: 'replay',
+    label: 'Replay buffer status',
+    badge: 'REPLAY',
+    hint: 'The phone shows REPLAY while the replay buffer is active, OFF otherwise.',
+    needsInput: false,
+    needsScene: false,
+  },
+  virtualCam: {
+    value: 'virtualCam',
+    label: 'Virtual camera status',
+    badge: 'VCAM',
+    hint: 'The phone shows VCAM while the OBS virtual camera is on, OFF otherwise.',
+    needsInput: false,
+    needsScene: false,
+  },
+  scene: {
+    value: 'scene',
+    label: 'Scene status',
+    badge: 'SCENE',
+    hint: 'The phone shows the current program scene. Set a scene name to mark this tile active only while that scene is live.',
+    needsInput: false,
+    needsScene: true,
+  },
+  inputMute: {
+    value: 'inputMute',
+    label: 'Input mute status',
+    badge: 'MUTE',
+    hint: 'The phone shows MUTED or ON for the selected OBS input.',
+    needsInput: true,
+    needsScene: false,
+  },
+  inputVolume: {
+    value: 'inputVolume',
+    label: 'Input volume status',
+    badge: 'VOL',
+    hint: 'The phone shows the selected OBS input level and its mute state.',
+    needsInput: true,
+    needsScene: false,
+  },
+}
+
+/** Stable order for the Inspector status target picker. */
+export const OBS_STATE_TARGETS: readonly ObsStateTargetInfo[] = [
+  STATE_TARGET_INFO.streaming,
+  STATE_TARGET_INFO.recording,
+  STATE_TARGET_INFO.replay,
+  STATE_TARGET_INFO.virtualCam,
+  STATE_TARGET_INFO.scene,
+  STATE_TARGET_INFO.inputMute,
+  STATE_TARGET_INFO.inputVolume,
+]
+
+export function obsStateTargetInfo(target: ObsStateTarget): ObsStateTargetInfo {
+  return STATE_TARGET_INFO[target]
+}
+
+/** Editor-only static badge. Live values only exist on the phone. */
+export function obsStateBadge(target: ObsStateTarget): string {
+  return `OBS · ${obsStateTargetInfo(target).badge}`
+}
+
+/** One-line inspector summary; deliberately avoids pretending to be live. */
+export function obsStateBindingSummary(binding: ObsStateBinding | null | undefined): string | null {
+  if (!binding) return null
+  const info = obsStateTargetInfo(binding.target)
+  if (binding.target === 'scene') {
+    return binding.scene ? `${info.label} · ${binding.scene}` : `${info.label} · current program scene`
+  }
+  if (info.needsInput && binding.input) return `${info.label} · ${binding.input}`
+  return info.label
+}
+
+const OBS_ACTION_TITLES: Record<ObsAction['action'], string> = {
+  toggleMute: 'OBS mute',
+  setScene: 'OBS scene',
+  toggleStream: 'OBS stream',
+  startStream: 'OBS stream',
+  stopStream: 'OBS stream',
+  toggleRecord: 'OBS recording',
+  startRecord: 'OBS recording',
+  stopRecord: 'OBS recording',
+  startReplay: 'OBS replay',
+  stopReplay: 'OBS replay',
+  saveReplay: 'OBS replay',
+  toggleVirtualCam: 'OBS virtual cam',
+  setSourceVisibility: 'OBS source',
+  toggleSourceVisibility: 'OBS source',
+  addMarker: 'OBS marker',
+}
+
+export function obsActionTitle(action: ObsAction): string {
+  return OBS_ACTION_TITLES[action.action]
+}
+
+/**
+ * Change an OBS action's operation while keeping fields that still apply.
+ * Required fields (source) may be empty while the user fills the form; the
+ * config schema rejects it on save and the field shows a REQUIRED state.
+ */
+export function obsActionVariant(action: ObsAction, next: ObsAction['action']): ObsAction {
+  const scene = 'scene' in action ? action.scene : undefined
+  const input = action.action === 'toggleMute' ? action.input : undefined
+  const source = 'source' in action ? action.source : ''
+  const sourceName = source.trim() || 'Camera'
+  const visible = action.action === 'setSourceVisibility' ? action.visible : true
+  const marker = action.action === 'addMarker' ? action.name : undefined
+
+  switch (next) {
+    case 'toggleMute':
+      return { type: 'obs', action: next, ...(input ? { input } : {}) }
+    case 'setScene':
+      return { type: 'obs', action: next, ...(scene ? { scene } : {}) }
+    case 'toggleStream':
+    case 'startStream':
+    case 'stopStream':
+    case 'toggleRecord':
+    case 'startRecord':
+    case 'stopRecord':
+    case 'startReplay':
+    case 'stopReplay':
+    case 'saveReplay':
+    case 'toggleVirtualCam':
+      return { type: 'obs', action: next }
+    case 'setSourceVisibility':
+      return {
+        type: 'obs',
+        action: next,
+        ...(scene ? { scene } : {}),
+        source: sourceName,
+        visible,
+      }
+    case 'toggleSourceVisibility':
+      return { type: 'obs', action: next, ...(scene ? { scene } : {}), source: sourceName }
+    case 'addMarker':
+      return { type: 'obs', action: next, ...(marker ? { name: marker } : {}) }
+  }
+}
+
+/** Required OBS names are 1..128 chars after trimming. */
+export function obsNameError(value: string | undefined, required: boolean): string | null {
+  const name = value?.trim() ?? ''
+  if (name.length === 0) return required ? 'Required — 1 to 128 characters' : null
+  if (name.length > 128) return 'Use 128 characters or fewer'
+  return null
+}
+
+export function obsNameOrUndefined(value: string): string | undefined {
+  const name = value.trim()
+  return name.length > 0 ? name : undefined
 }

@@ -1,10 +1,12 @@
 import { useEffect, useId, useState } from 'react'
 import { describeAction, formatCombo } from '@phonedek/shared'
-import type { DeckPage, ExecutableAction, MacroAction, MacroStep, MediaKey } from '@phonedek/shared'
+import type { DeckPage, ExecutableAction, MacroAction, MacroStep, MediaKey, ObsAction } from '@phonedek/shared'
 import { Icon, type IconName } from './Icons'
 import { NumberField } from './Primitives'
 import { Keycaps, ShortcutDialog } from './ShortcutDialog'
 import { MacroEditor } from './MacroEditor'
+import { ObsActionEditor } from './ObsActionEditor'
+import { obsActionTitle } from '../lib/obs'
 import { useHostPlatform } from '../lib/platform'
 import type { ServerInfoView } from '../../../shared/api'
 
@@ -44,6 +46,34 @@ const ACTION_TITLES: Record<ExecutableAction['type'], string> = {
   page: 'Change page',
   mic: 'Mic mute',
   obs: 'OBS mute',
+}
+
+function obsIconName(action: ObsAction): IconName {
+  switch (action.action) {
+    case 'setScene':
+      return 'layers'
+    case 'toggleStream':
+    case 'startStream':
+    case 'stopStream':
+      return 'wifi'
+    case 'toggleRecord':
+    case 'startRecord':
+    case 'stopRecord':
+      return 'record'
+    case 'startReplay':
+    case 'stopReplay':
+    case 'saveReplay':
+      return 'refresh'
+    case 'toggleVirtualCam':
+      return 'video'
+    case 'setSourceVisibility':
+    case 'toggleSourceVisibility':
+      return 'image'
+    case 'addMarker':
+      return 'clock'
+    case 'toggleMute':
+      return 'microphone'
+  }
 }
 
 function argsToString(args: string[] | undefined): string {
@@ -116,7 +146,7 @@ export function ActionEditor({
   index,
   total,
   pages,
-  server: _server,
+  server,
   onUpdate,
   onDelete,
   onMove,
@@ -166,7 +196,10 @@ export function ActionEditor({
     <div className={`action-card action-type-${action.type}`}>
       <header className="action-header">
         <span className="action-icon">
-          <Icon name={ACTION_ICONS[action.type]} size={16} />
+          <Icon
+            name={action.type === 'obs' ? obsIconName(action) : ACTION_ICONS[action.type]}
+            size={16}
+          />
         </span>
         {action.type === 'macro' ? (
           <button
@@ -186,7 +219,9 @@ export function ActionEditor({
           </button>
         ) : (
           <div className="action-title">
-            <strong>{ACTION_TITLES[action.type]}</strong>
+            <strong>
+              {action.type === 'obs' ? obsActionTitle(action) : ACTION_TITLES[action.type]}
+            </strong>
             <small>{describeAction(action, platform)}</small>
           </div>
         )}
@@ -371,25 +406,8 @@ export function ActionEditor({
           </p>
         )}
 
-        {action.type === 'obs' && action.action === 'toggleMute' && (
-          <div className="stack">
-            <label className="field">
-              <span>OBS input</span>
-              <input
-                value={action.input ?? ''}
-                maxLength={128}
-                spellCheck={false}
-                placeholder="Default — first audio input"
-                onChange={(event) =>
-                  onUpdate({ ...action, input: event.target.value || undefined })
-                }
-              />
-            </label>
-            <p className="hint">
-              Toggles mute through OBS WebSocket. Leave the field blank to use the first OBS audio
-              input. Names belong to the current scene collection.
-            </p>
-          </div>
+        {action.type === 'obs' && (
+          <ObsActionEditor action={action} server={server} onUpdate={onUpdate} />
         )}
 
         {action.type === 'page' && (

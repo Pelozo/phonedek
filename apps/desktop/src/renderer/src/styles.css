@@ -4778,3 +4778,86 @@ input[type="range"]:disabled {
   color: var(--danger) !important;
 }
 
+
+/* OBS phase 2: status bindings and editor-only badges. */
+.obs-state-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-deep);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.obs-state-summary > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.obs-state-pill {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  background: var(--surface-2);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.obs-state-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  background: var(--surface-2);
+}
+
+.obs-state-hint .obs-state-pill {
+  margin-top: 1px;
+}
+
+.obs-state-hint p {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.deck-status-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  padding: 1px 4px;
+  border: 1px solid rgba(241, 236, 226, 0.24);
+  border-radius: 2px;
+  background: rgba(13, 12, 11, 0.72);
+  color: rgba(241, 236, 226, 0.92);
+  font-family: var(--mono);
+  font-size: 7.5px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  line-height: 1.35;
+  white-space: nowrap;
+  text-shadow: none;
+}
+
+.deck-slot.has-state .deck-warning {
+  top: 22px;
+}
+
+input[aria-invalid="true"],
+select[aria-invalid="true"] {
+  border-color: var(--danger) !important;
+}

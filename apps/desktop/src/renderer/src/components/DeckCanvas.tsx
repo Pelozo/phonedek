@@ -11,6 +11,7 @@ import {
 } from '@phonedek/shared'
 import type { DeckConfig, DeckPage, DeckProfile } from '@phonedek/shared'
 import type { ServerInfoView } from '../../../shared/api'
+import { obsStateBadge, obsStateBindingSummary } from '../lib/obs'
 import { backgroundStyle, buttonBackground, isVideoBackground, textColorFor } from '../lib/ui'
 import { ControlPreview } from './ControlPreview'
 import { DeckMedia } from './DeckMedia'
@@ -145,7 +146,7 @@ export function DeckCanvas({
               return (
                 <div
                   key={button.id}
-                  className={`deck-slot${isSelected ? ' selected' : ''}${dragging === button.id ? ' dragging' : ''}${overSlot === slot ? ' drag-over' : ''}${spanning ? ' spanning' : ''}${button.control ? ' has-control' : ''}`}
+                  className={`deck-slot${isSelected ? ' selected' : ''}${dragging === button.id ? ' dragging' : ''}${overSlot === slot ? ' drag-over' : ''}${spanning ? ' spanning' : ''}${button.control ? ' has-control' : ''}${button.state ? ' has-state' : ''}`}
                   style={{
                     gridColumn: `${column + 1} / span ${spanColumns}`,
                     gridRow: `${row + 1} / span ${spanRows}`,
@@ -196,6 +197,14 @@ export function DeckCanvas({
                       <span className="deck-label">{button.label || 'Untitled'}</span>
                       {button.sublabel && <span className="deck-sublabel">{button.sublabel}</span>}
                     </div>
+                  )}
+                  {button.state?.type === 'obs' && (
+                    <span
+                      className="deck-status-badge"
+                      title={obsStateBindingSummary(button.state) ?? undefined}
+                    >
+                      {obsStateBadge(button.state.target)}
+                    </span>
                   )}
                   {!button.control && button.actions.length === 0 && (
                     <span className="deck-warning" title="This button has no actions">
