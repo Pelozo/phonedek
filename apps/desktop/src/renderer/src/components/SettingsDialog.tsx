@@ -280,6 +280,17 @@ export function SettingsDialog({
     }
   }
 
+  const toggleKeyboardControl = async (enabled: boolean): Promise<void> => {
+    setBusy(true)
+    try {
+      const result = await window.phonedek.setAllowKeyboardControl(enabled)
+      if (result.state) onServerUpdate(result.state.server)
+      if (!result.ok) onToast(result.error ?? 'Could not update keyboard control', 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const pushObsSettings = async (input: ObsSettingsInput) => {
     const result = await window.phonedek.setObsSettings(input)
     if (result.state) onServerUpdate(result.state.server)
@@ -552,6 +563,13 @@ export function SettingsDialog({
           description="A paired phone can move the mouse and click. Turn this off to suspend all pointer input."
           checked={settings.allowPointerControl}
           onChange={(enabled) => void togglePointerControl(enabled)}
+          disabled={busy}
+        />
+        <Toggle
+          label="Allow keyboard control"
+          description="A paired phone can type into the active PC window. Turn this off to suspend all phone typing."
+          checked={settings.allowKeyboardControl}
+          onChange={(enabled) => void toggleKeyboardControl(enabled)}
           disabled={busy}
         />
       </div>

@@ -3,6 +3,7 @@ import type {
   Action,
   ActionPack,
   ActionPreset,
+  ConfigAction,
   DeckButton,
   MicAction,
   PointerBinding,
@@ -20,7 +21,6 @@ import type {
   MediaIcon,
   ObsAction,
   ObsStateBinding,
-  PlannableAction,
   StateBinding,
   TwitchAction,
   TwitchStateBinding,
@@ -30,6 +30,7 @@ import {
   canPlaceButton,
   compactPage,
   describeAction,
+  hasHostActions,
   occupiedCells,
   pageCapacity,
   pageGrid,
@@ -66,6 +67,7 @@ import {
 } from '../lib/lights'
 import { useObsInputs } from '../lib/useObsInputs'
 import { backgroundStyle, buttonBackground, textColorFor } from '../lib/ui'
+import { KEYBOARD_ACTION_TITLE, keyboardAction } from '../lib/keyboard'
 import { ActionEditor } from './ActionEditor'
 import { BackgroundEditor } from './BackgroundEditor'
 import { ControlPreview } from './ControlPreview'
@@ -91,7 +93,7 @@ const DEFAULT_MACRO_STEP: MacroStep = { type: 'hotkey', keys: ['CTRL', 'C'], hol
 
 /** Mic actions are valid in configs but not yet part of the legacy Action union. */
 const MIC_TOGGLE_ACTION: MicAction = { type: 'mic', action: 'toggleMute' }
-const asLegacyAction = (action: PlannableAction): Action => action as unknown as Action
+const asLegacyAction = (action: ConfigAction): Action => action as unknown as Action
 
 /** Static status labels for the binding families the editor can hold. */
 function stateBadge(state: StateBinding): string {
@@ -211,13 +213,14 @@ export function Inspector({
   const buttonDefaultBackground = profile.theme.buttonBackground
   const primaryKey = platform === 'darwin' ? '⌘' : 'Ctrl'
 
-  const testActions = async (actions: readonly PlannableAction[], label: string): Promise<void> => {
+  const testActions = async (actions: readonly ConfigAction[], label: string): Promise<void> => {
     if (!actions.length) {
       onToast('This button has no actions yet', 'info')
       return
     }
-    // The preload API predates MicAction/TwitchAction/LightAction; the config
-    // schema and main process accept them.
+    // The preload API predates MicAction/TwitchAction/LightAction/KeyboardAction;
+    // the config schema and main process accept them, and the executor ignores
+    // phone-local keyboard actions.
     const result = await window.phonedek.testActions(actions as unknown as Action[], label)
     onToast(result.ok ? `Executed “${label}” on this PC` : (result.error ?? 'Action failed'), result.ok ? 'success' : 'error')
   }
@@ -796,7 +799,7 @@ export function Inspector({
     )
   }
 
-  const updateAction = (index: number, action: PlannableAction): void => {
+  const updateAction = (index: number, action: ConfigAction): void => {
     update({
       actions: button.actions.map((item, current) => (current === index ? asLegacyAction(action) : item)),
     })
@@ -867,6 +870,17 @@ export function Inspector({
     )
   }
 
+  const addKeyboardAction = (): void => {
+    const current = button.label.trim().toLowerCase()
+    const untitled =
+      current === '' || current === 'untitled' || current === 'untitled button' || current === 'new button'
+    update({
+      actions: [...button.actions, keyboardAction() as unknown as Action],
+      ...(untitled ? { label: 'Keyboard', icon: '⌨️', sublabel: 'Tap to type' } : {}),
+    })
+    onToast('Phone keyboard action added — it opens on the phone, not on this PC', 'success')
+  }
+
   const chooseIconMedia = async (kind: 'image' | 'video'): Promise<void> => {
     setIconBusy(kind)
     try {
@@ -932,9 +946,11 @@ export function Inspector({
           </div>
         </div>
         <div className="row gap">
-          <button type="button" className="button secondary small" onClick={() => void testActions(button.actions, button.label)}>
-            <Icon name="play" size={14} /> Test
-          </button>
+          {hasHostActions(button.actions) && (
+            <button type="button" className="button secondary small" onClick={() => void testActions(button.actions, button.label)}>
+              <Icon name="play" size={14} /> Test
+            </button>
+          )}
           <button type="button" className="icon-button bordered danger" onClick={() => void deleteButton()} aria-label="Delete button">
             <Icon name="trash" size={16} />
           </button>
@@ -1947,6 +1963,7 @@ export function Inspector({
                   { label: 'Open URL', icon: 'link', description: 'Open a web page', onClick: () => update({ actions: [...button.actions, makeAction('url')] }) },
                   { label: 'Run command', icon: 'terminal', description: 'Run a shell command', onClick: () => update({ actions: [...button.actions, makeAction('command')] }) },
                   { label: 'Media key', icon: 'music', description: 'Play, pause, volume…', onClick: () => update({ actions: [...button.actions, makeAction('media')] }) },
+                  { label: 'Open phone keyboard', section: 'Integrations', icon: 'keyboard', description: 'Phone keyboard types into the active PC window', onClick: addKeyboardAction },
                   { label: 'OBS scene switcher', section: 'Integrations', icon: 'layers', description: 'Switch the program scene by name', onClick: () => addObsAction({ type: 'obs', action: 'setScene' }, 'Scene', '🎬') },
                   { label: 'OBS toggle stream', icon: 'wifi', description: 'Start or stop streaming', onClick: () => addObsAction({ type: 'obs', action: 'toggleStream' }, 'Stream', '📡') },
                   { label: 'OBS toggle recording', icon: 'record', description: 'Start or stop recording', onClick: () => addObsAction({ type: 'obs', action: 'toggleRecord' }, 'Record', '⏺️') },
@@ -2007,16 +2024,23 @@ export function Inspector({
                   onUpdate={(next) => updateAction(index, next)}
                   onDelete={() => deleteAction(index)}
                   onMove={(direction) => moveAction(index, direction)}
-                  onTest={(candidate) => void testActions([candidate], describeAction(candidate, platform))}
+                  onTest={(candidate) => void testActions(
+                    [candidate],
+                    candidate.type === 'keyboard'
+                      ? KEYBOARD_ACTION_TITLE
+                      : describeAction(candidate, platform),
+                  )}
                 />
               ))}
-              <button
-                type="button"
-                className="button primary full"
-                onClick={() => void testActions(button.actions, button.label || 'button')}
-              >
-                <Icon name="play" size={15} /> Run all actions on this PC
-              </button>
+              {hasHostActions(button.actions) && (
+                <button
+                  type="button"
+                  className="button primary full"
+                  onClick={() => void testActions(button.actions, button.label || 'button')}
+                >
+                  <Icon name="play" size={15} /> Run all actions on this PC
+                </button>
+              )}
             </div>
           )}
         </section>

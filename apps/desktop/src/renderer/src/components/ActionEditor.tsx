@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from 'react'
 import { describeAction, formatCombo } from '@phonedek/shared'
-import type { DeckPage, ExecutableAction, LightAction, MacroAction, MacroStep, MediaKey, ObsAction, PlannableAction, TwitchAction } from '@phonedek/shared'
+import type { ConfigAction, DeckPage, ExecutableAction, LightAction, MacroAction, MacroStep, MediaKey, ObsAction, TwitchAction } from '@phonedek/shared'
 import { Icon, type IconName } from './Icons'
 import { NumberField } from './Primitives'
 import { Keycaps, ShortcutDialog } from './ShortcutDialog'
@@ -11,6 +11,12 @@ import { TwitchActionEditor } from './TwitchActionEditor'
 import { lightActionTitle } from '../lib/lights'
 import { obsActionTitle } from '../lib/obs'
 import { twitchActionTitle } from '../lib/twitch'
+import {
+  KEYBOARD_ACTION_BODY,
+  KEYBOARD_ACTION_SUMMARY,
+  KEYBOARD_ACTION_TITLE,
+  isKeyboardAction,
+} from '../lib/keyboard'
 import { useHostPlatform } from '../lib/platform'
 import type { ServerInfoView } from '../../../shared/api'
 
@@ -99,18 +105,25 @@ function lightIconName(_action: LightAction): IconName {
   return 'light'
 }
 
-function actionIconName(action: PlannableAction): IconName {
+function actionIconName(action: ConfigAction): IconName {
+  if (isKeyboardAction(action)) return 'keyboard'
   if (action.type === 'obs') return obsIconName(action)
   if (action.type === 'twitch') return twitchIconName(action)
   if (action.type === 'light') return lightIconName(action)
   return ACTION_ICONS[action.type]
 }
 
-function actionTitle(action: PlannableAction): string {
+function actionTitle(action: ConfigAction): string {
+  if (isKeyboardAction(action)) return KEYBOARD_ACTION_TITLE
   if (action.type === 'obs') return obsActionTitle(action)
   if (action.type === 'twitch') return twitchActionTitle(action)
   if (action.type === 'light') return lightActionTitle(action)
   return ACTION_TITLES[action.type]
+}
+
+function actionSummary(action: ConfigAction, platform: string): string {
+  if (isKeyboardAction(action)) return KEYBOARD_ACTION_SUMMARY
+  return describeAction(action, platform)
 }
 
 function argsToString(args: string[] | undefined): string {
@@ -189,15 +202,15 @@ export function ActionEditor({
   onMove,
   onTest,
 }: {
-  action: PlannableAction
+  action: ConfigAction
   index: number
   total: number
   pages: DeckPage[]
   server: ServerInfoView | null
-  onUpdate: (action: PlannableAction) => void
+  onUpdate: (action: ConfigAction) => void
   onDelete: () => void
   onMove: (direction: -1 | 1) => void
-  onTest: (action: PlannableAction) => void
+  onTest: (action: ConfigAction) => void
 }) {
   const [shortcutOpen, setShortcutOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -254,18 +267,24 @@ export function ActionEditor({
         ) : (
           <div className="action-title">
             <strong>{actionTitle(action)}</strong>
-            <small>{describeAction(action, platform)}</small>
+            <small>{actionSummary(action, platform)}</small>
           </div>
         )}
         <div className="action-tools">
-          <button
-            type="button"
-            className="icon-button tiny"
-            title="Test this action on this PC"
-            onClick={() => onTest(action)}
-          >
-            <Icon name="play" size={14} />
-          </button>
+          {isKeyboardAction(action) ? (
+            <span className="action-phone-chip" title="Runs on your phone, not on this PC">
+              <Icon name="phone" size={12} /> Phone
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="icon-button tiny"
+              title="Test this action on this PC"
+              onClick={() => onTest(action)}
+            >
+              <Icon name="play" size={14} />
+            </button>
+          )}
           <button type="button" className="icon-button tiny" disabled={index === 0} onClick={() => onMove(-1)} aria-label="Move action up">
             <Icon name="arrow-up" size={14} />
           </button>
@@ -280,6 +299,13 @@ export function ActionEditor({
 
       {(action.type !== 'macro' || macroOpen) && (
         <div className="action-body" id={action.type === 'macro' ? macroBodyId : undefined}>
+          {isKeyboardAction(action) && (
+            <p className="hint keyboard-action-body">
+              <Icon name="phone" size={15} />
+              <span>{KEYBOARD_ACTION_BODY}</span>
+            </p>
+          )}
+
           {action.type === 'hotkey' && (
           <div className="stack">
             <div className="row between">

@@ -16,6 +16,7 @@ import { twitchStateBadge, twitchStateBindingSummary } from '../lib/twitch'
 import { lightStateBadge, lightStateBindingSummary } from '../lib/lights'
 import type { StateBinding } from '@phonedek/shared'
 import { backgroundStyle, buttonBackground, isVideoBackground, textColorFor } from '../lib/ui'
+import { KEYBOARD_BADGE, hasKeyboardAction, hasKeyboardLauncher } from '../lib/keyboard'
 import { ControlPreview } from './ControlPreview'
 import { DeckMedia } from './DeckMedia'
 import { Icon } from './Icons'
@@ -224,7 +225,15 @@ export function DeckCanvas({
                       {statusBadge(button.state)}
                     </span>
                   )}
-                  {!button.control && button.actions.length === 0 && !button.state && (
+                  {hasKeyboardLauncher(button) && (
+                    <span
+                      className="deck-status-badge keyboard"
+                      title="Opens the phone keyboard. Typing goes to the active PC window; nothing runs on this PC from this tile."
+                    >
+                      {KEYBOARD_BADGE}
+                    </span>
+                  )}
+                  {!button.control && !hasKeyboardAction(button.actions) && button.actions.length === 0 && !button.state && (
                     <span className="deck-warning" title="This button has no actions">
                       !
                     </span>

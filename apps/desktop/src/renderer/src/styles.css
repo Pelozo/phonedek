@@ -2950,6 +2950,38 @@ input[type="range"]:disabled {
   flex: 0 0 auto;
 }
 
+.action-phone-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  color: var(--text-soft);
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.keyboard-action-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+.keyboard-action-body svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--accent-hi);
+}
+
+.action-type-keyboard .action-icon {
+  color: var(--accent-hi);
+}
+
 .action-body {
   padding: 8px;
   display: flex;
@@ -4855,6 +4887,11 @@ input[type="range"]:disabled {
 
 .deck-slot.has-state .deck-warning {
   top: 22px;
+}
+
+.deck-status-badge.keyboard {
+  border-color: rgba(242, 106, 46, 0.5);
+  color: var(--accent-hi);
 }
 
 input[aria-invalid="true"],

@@ -25,6 +25,7 @@ import { ConfirmProvider } from './components/Primitives'
 import { SettingsDialog } from './components/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
 import { cutButtonFromPage, moveButtonToPage, pasteButtonIntoPage } from './lib/clipboard'
+import { createKeyboardLauncher, keyboardSpanCandidates } from './lib/keyboard'
 import { LIGHT_STATUS_TILES, createLightStatusButton, type LightStatusTilePreset } from './lib/lightStatus'
 import { lightControlSpec } from './lib/lights'
 import { OBS_STATUS_TILES, createObsStatusButton, type ObsStatusTilePreset } from './lib/obsStatus'
@@ -445,7 +446,7 @@ function AppContent() {
   }
 
   const addNewControl = (
-    kind: 'volume' | 'scroll' | 'volume-wheel' | 'mic' | 'trackpad' | 'obs' | 'shortcut',
+    kind: 'volume' | 'scroll' | 'volume-wheel' | 'mic' | 'trackpad' | 'obs' | 'shortcut' | 'keyboard',
     obsInput?: string,
     shortcutId?: ShortcutPresetId,
   ): void => {
@@ -457,7 +458,9 @@ function AppContent() {
     }
     const grid = pageGrid(profile, page)
     const spanCandidates: Array<{ columns: number; rows: number }> =
-      kind === 'trackpad'
+      kind === 'keyboard'
+        ? keyboardSpanCandidates()
+        : kind === 'trackpad'
         ? [
             { columns: 3, rows: 2 },
             { columns: 2, rows: 2 },
@@ -495,6 +498,24 @@ function AppContent() {
       return
     }
     const fallback = span.columns !== preferredSpan.columns || span.rows !== preferredSpan.rows
+
+    if (kind === 'keyboard') {
+      const button = createKeyboardLauncher(slot, span)
+      try {
+        const next = addButton(config, profile.id, page.id, button)
+        setConfig(next)
+        setSelectedButtonId(button.id)
+        showToast(
+          fallback
+            ? `Keyboard added as ${span.columns}×${span.rows} — no ${preferredSpan.columns}×${preferredSpan.rows} space was free`
+            : 'Keyboard launcher added',
+          'success',
+        )
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : String(error), 'error')
+      }
+      return
+    }
 
     const volumeControl = (volumeKind: 'slider' | 'dial'): ControlSpec =>
       (hostPlatform === 'darwin' || hostPlatform === 'win32')
@@ -981,6 +1002,13 @@ function AppContent() {
                   icon: 'trackpad',
                   description: '3 × 2 · inline cursor pad (full screen optional)',
                   onClick: () => addNewControl('trackpad'),
+                },
+                {
+                  label: 'Keyboard',
+                  section: 'Pointer',
+                  icon: 'keyboard',
+                  description: '2 × 1 · full-screen phone keyboard for the active PC window',
+                  onClick: () => addNewControl('keyboard'),
                 },
               ]}
             />
