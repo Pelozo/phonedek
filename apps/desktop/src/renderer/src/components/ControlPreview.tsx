@@ -1,4 +1,10 @@
 import type { ControlSpec, SliderOrDialControlSpec } from '@phonedek/shared'
+import {
+  MEDIA_PREVIEW_DURATION_MS,
+  MEDIA_PREVIEW_POSITION_MS,
+  MEDIA_SCRUB_BADGE,
+  formatMediaTime,
+} from '../lib/media'
 import { useHostPlatform } from '../lib/platform'
 import {
   formatKeysCompact,
@@ -27,6 +33,7 @@ export function controlBadge(control: SliderOrDialControlSpec): string {
     return 'LIGHT · BRIGHT'
   }
   if (control.binding.type === 'shortcut') return 'SHORTCUT'
+  if (control.binding.type === 'media') return MEDIA_SCRUB_BADGE
   return 'SCROLL'
 }
 
@@ -65,6 +72,27 @@ export function ControlPreview({
   const percent = initialPercent(control)
   const axis = control.axis ?? 'horizontal'
   const dialAngle = -135 + percent * 270
+
+  if (control.binding.type === 'media') {
+    return (
+      <div className={`control-preview media${className ? ` ${className}` : ''}`}>
+        <span className="control-media">
+          <span className="control-media-head">
+            <span className="control-name">{label || 'Now playing'}</span>
+            <span className="control-badge">{MEDIA_SCRUB_BADGE}</span>
+          </span>
+          <span className="control-sublabel">{sublabel || 'Title · Artist'}</span>
+          <span className="control-media-scrub" aria-hidden="true">
+            <span className="control-media-time">{formatMediaTime(MEDIA_PREVIEW_POSITION_MS)}</span>
+            <span className="control-media-rule">
+              <span className="control-media-thumb" />
+            </span>
+            <span className="control-media-time">{formatMediaTime(MEDIA_PREVIEW_DURATION_MS)}</span>
+          </span>
+        </span>
+      </div>
+    )
+  }
 
   if (control.binding.type === 'shortcut') {
     return (

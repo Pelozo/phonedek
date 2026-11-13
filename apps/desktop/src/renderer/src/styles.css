@@ -2102,6 +2102,127 @@ input[type="range"]:disabled {
   background: rgba(0, 0, 0, 0.48);
 }
 
+/* Media scrub preview: hairline seek track with mono clock placeholders. The
+   editor never stands in for a live player, so both times are static. */
+.control-preview.media {
+  padding: 8px 10px;
+}
+
+.control-media {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.control-media-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.control-media-head .control-name {
+  flex: 1 1 auto;
+}
+
+/* The badge joins the title row instead of covering the clock line. */
+.control-preview.media .control-badge {
+  position: static;
+  flex: 0 0 auto;
+  align-self: center;
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.control-media-scrub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  min-width: 0;
+}
+
+.control-media-time {
+  font-family: var(--mono);
+  font-size: 0.64em;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  opacity: 0.72;
+  white-space: nowrap;
+}
+
+.control-media-rule {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 20px;
+  height: 14px;
+}
+
+.control-media-rule::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  background: currentColor;
+  opacity: 0.26;
+}
+
+.control-media-thumb {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 4px;
+  height: 12px;
+  transform: translateY(-50%);
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.inspector-control-preview .control-media-time {
+  font-size: 10px;
+}
+
+.deck-control-preview.media {
+  padding: 6px 8px;
+}
+
+.deck-control-preview.media .control-badge {
+  padding: 0 3px;
+  font-size: 7px;
+}
+
+/* A 1x1 fallback has no room for the badge row; keep the label and clocks. */
+.deck-control-preview.media.span-1-1 {
+  padding: 5px 6px;
+}
+
+.deck-control-preview.media.span-1-1 .control-media-head {
+  gap: 4px;
+}
+
+.deck-control-preview.media.span-1-1 .control-name {
+  font-size: 0.82em;
+}
+
+.deck-control-preview.media.span-1-1 .control-badge,
+.deck-control-preview.media.span-1-1 .control-sublabel {
+  display: none;
+}
+
+.deck-control-preview.media.span-1-1 .control-media-time {
+  font-size: 0.56em;
+}
+
+.deck-control-preview.media.span-1-1 .control-media-scrub {
+  gap: 3px;
+  margin-top: 2px;
+}
+
 .control-preview-shell {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);

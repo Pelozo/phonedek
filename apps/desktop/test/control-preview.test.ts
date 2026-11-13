@@ -35,4 +35,8 @@ describe('controlBadge', () => {
   it('labels shortcut chords', () => {
     expect(controlBadge(control({ type: 'shortcut', keys: ['CTRL', 'TAB'] }))).toBe('SHORTCUT')
   })
+
+  it('labels media scrub', () => {
+    expect(controlBadge(control({ type: 'media', target: 'position' }))).toBe('MEDIA · SEEK')
+  })
 })

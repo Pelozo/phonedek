@@ -28,6 +28,7 @@ import { cutButtonFromPage, moveButtonToPage, pasteButtonIntoPage } from './lib/
 import { createKeyboardLauncher, keyboardSpanCandidates } from './lib/keyboard'
 import { LIGHT_STATUS_TILES, createLightStatusButton, type LightStatusTilePreset } from './lib/lightStatus'
 import { lightControlSpec } from './lib/lights'
+import { MEDIA_SCRUB_SPANS, mediaScrubControl } from './lib/media'
 import { OBS_STATUS_TILES, createObsStatusButton, type ObsStatusTilePreset } from './lib/obsStatus'
 import {
   TWITCH_STATUS_TILES,
@@ -446,7 +447,16 @@ function AppContent() {
   }
 
   const addNewControl = (
-    kind: 'volume' | 'scroll' | 'volume-wheel' | 'mic' | 'trackpad' | 'obs' | 'shortcut' | 'keyboard',
+    kind:
+      | 'volume'
+      | 'scroll'
+      | 'volume-wheel'
+      | 'mic'
+      | 'trackpad'
+      | 'obs'
+      | 'shortcut'
+      | 'keyboard'
+      | 'media',
     obsInput?: string,
     shortcutId?: ShortcutPresetId,
   ): void => {
@@ -460,6 +470,8 @@ function AppContent() {
     const spanCandidates: Array<{ columns: number; rows: number }> =
       kind === 'keyboard'
         ? keyboardSpanCandidates()
+        : kind === 'media'
+        ? [...MEDIA_SCRUB_SPANS]
         : kind === 'trackpad'
         ? [
             { columns: 3, rows: 2 },
@@ -561,6 +573,8 @@ function AppContent() {
           }
         : preset
           ? shortcutPresetControl(preset, hostPlatform)
+          : kind === 'media'
+          ? mediaScrubControl()
           : kind === 'scroll'
           ? {
               kind: 'dial',
@@ -605,13 +619,15 @@ function AppContent() {
         ? preset.label(hostPlatform)
         : kind === 'volume' || kind === 'volume-wheel'
           ? 'Volume'
-          : kind === 'mic'
-            ? 'Mic'
-            : kind === 'obs'
-              ? obsInput?.trim() || 'OBS input'
-              : kind === 'scroll'
-                ? 'Scroll'
-                : 'Trackpad'
+          : kind === 'media'
+            ? 'Now playing'
+            : kind === 'mic'
+              ? 'Mic'
+              : kind === 'obs'
+                ? obsInput?.trim() || 'OBS input'
+                : kind === 'scroll'
+                  ? 'Scroll'
+                  : 'Trackpad'
     // `DeckButton.actions` is still typed as the legacy `Action` union while the
     // config schema accepts `MicAction`; keep the cast local to this builder.
     const micAction: MicAction = { type: 'mic', action: 'toggleMute' }
@@ -627,11 +643,14 @@ function AppContent() {
           ? preset.tileIcon
           : kind === 'scroll' || kind === 'trackpad'
             ? '🖱️'
-            : kind === 'mic'
-              ? '🎙️'
-              : kind === 'obs'
-                ? '🎚️'
-                : '🔊',
+            : kind === 'media'
+              ? '🎵'
+              : kind === 'mic'
+                ? '🎙️'
+                : kind === 'obs'
+                  ? '🎚️'
+                  : '🔊',
+      ...(kind === 'media' ? { sublabel: 'Media' } : {}),
       span,
       control,
       ...(kind === 'mic'
@@ -651,13 +670,15 @@ function AppContent() {
             ? 'Volume slider'
             : kind === 'volume-wheel'
               ? 'Volume wheel'
-              : kind === 'mic'
-                ? 'Mic gain'
-                : kind === 'obs'
-                  ? 'OBS input'
-                  : kind === 'scroll'
-                    ? 'Scroll wheel'
-                    : 'Trackpad'
+              : kind === 'media'
+                ? 'Media scrub'
+                : kind === 'mic'
+                  ? 'Mic gain'
+                  : kind === 'obs'
+                    ? 'OBS input'
+                    : kind === 'scroll'
+                      ? 'Scroll wheel'
+                      : 'Trackpad'
       showToast(
         fallback
           ? `${name} added as ${span.columns}×${span.rows} — no ${preferredSpan.columns}×${preferredSpan.rows} space was free`
@@ -932,6 +953,13 @@ function AppContent() {
                   icon: 'sliders',
                   description: '2 × 1 · turn or drag for small ± steps',
                   onClick: () => addNewControl('volume-wheel'),
+                },
+                {
+                  label: 'Media scrub',
+                  section: 'Media',
+                  icon: 'music',
+                  description: '4 × 1 · drag to seek, sends on release',
+                  onClick: () => addNewControl('media'),
                 },
                 {
                   label: 'OBS input',

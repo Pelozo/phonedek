@@ -202,7 +202,7 @@ export function DeckCanvas({
                       control={button.control}
                       label={button.label}
                       sublabel={button.sublabel}
-                      className="deck-control-preview"
+                      className={`deck-control-preview span-${spanColumns}-${spanRows}`}
                     />
                   ) : (
                     <div className="deck-button-content">

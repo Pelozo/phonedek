@@ -65,6 +65,7 @@ import {
   lightTestValue,
   type LightActionOperation,
 } from '../lib/lights'
+import { MEDIA_SCRUB_HINT } from '../lib/media'
 import { useObsInputs } from '../lib/useObsInputs'
 import { backgroundStyle, buttonBackground, textColorFor } from '../lib/ui'
 import { KEYBOARD_ACTION_TITLE, keyboardAction } from '../lib/keyboard'
@@ -451,7 +452,9 @@ export function Inspector({
     })
   }
 
-  const setControlBinding = (type: 'volume' | 'scroll' | 'mic' | 'obs' | 'shortcut' | 'light'): void => {
+  const setControlBinding = (
+    type: 'volume' | 'scroll' | 'mic' | 'obs' | 'shortcut' | 'light' | 'media',
+  ): void => {
     if (!button.control || button.control.kind === 'trackpad') return
     if (button.control.binding.type === type) return
     if (type === 'shortcut') {
@@ -463,11 +466,18 @@ export function Inspector({
           reverseKeys: ['CTRL', 'SHIFT', 'TAB'],
           ...(button.control.kind === 'slider' ? { travelSteps: 20 } : {}),
         },
+        commit: undefined,
+        display: undefined,
       })
       return
     }
     if (type === 'scroll') {
-      updateControl({ emit: 'delta', binding: { type: 'scroll', axis: 'vertical' } })
+      updateControl({
+        emit: 'delta',
+        binding: { type: 'scroll', axis: 'vertical' },
+        commit: undefined,
+        display: undefined,
+      })
       return
     }
     if (type === 'mic') {
@@ -479,6 +489,8 @@ export function Inspector({
         step: 1,
         initial: 50,
         unit: '%',
+        commit: undefined,
+        display: undefined,
       })
       return
     }
@@ -491,11 +503,34 @@ export function Inspector({
         step: 1,
         initial: 100,
         unit: '%',
+        commit: undefined,
+        display: undefined,
       })
       return
     }
     if (type === 'light') {
-      updateControl(lightControlSpec('brightness'))
+      updateControl({
+        ...lightControlSpec('brightness'),
+        commit: undefined,
+        display: undefined,
+      })
+      return
+    }
+    if (type === 'media') {
+      updateControl({
+        kind: 'slider',
+        axis: 'horizontal',
+        emit: 'value',
+        binding: { type: 'media', target: 'position' },
+        min: 0,
+        max: 1,
+        step: 0.001,
+        initial: 0,
+        unit: undefined,
+        commit: 'end',
+        display: 'time',
+        haptics: true,
+      })
       return
     }
     updateControl(
@@ -508,6 +543,8 @@ export function Inspector({
             step: 1,
             initial: 50,
             unit: '%',
+            commit: undefined,
+            display: undefined,
           }
         : {
             emit: 'delta',
@@ -517,6 +554,8 @@ export function Inspector({
             step: 2,
             initial: 50,
             unit: '%',
+            commit: undefined,
+            display: undefined,
           },
     )
   }
@@ -1377,18 +1416,21 @@ export function Inspector({
             <div className="section-heading">
               <h3>Control</h3>
               <span className="inspector-badge mono">
-                {control.kind === 'slider' ? 'SLIDER' : 'DIAL'} ·{' '}
-                {control.binding.type === 'volume'
-                  ? `VOL · ${control.binding.mode === 'absolute' ? 'ABS' : 'REL'}`
-                  : control.binding.type === 'mic'
-                    ? 'MIC · GAIN'
-                    : control.binding.type === 'obs'
-                      ? 'OBS · VOL'
-                      : control.binding.type === 'light'
-                        ? `LIGHT · ${lightTargetInfo(control.binding.target).badge}`
-                        : control.binding.type === 'shortcut'
-                          ? 'SHORTCUT'
-                          : 'SCROLL'}
+                {control.binding.type === 'media'
+                  ? 'MEDIA · SEEK'
+                  : `${control.kind === 'slider' ? 'SLIDER' : 'DIAL'} · ${
+                      control.binding.type === 'volume'
+                        ? `VOL · ${control.binding.mode === 'absolute' ? 'ABS' : 'REL'}`
+                        : control.binding.type === 'mic'
+                          ? 'MIC · GAIN'
+                          : control.binding.type === 'obs'
+                            ? 'OBS · VOL'
+                            : control.binding.type === 'light'
+                              ? `LIGHT · ${lightTargetInfo(control.binding.target).badge}`
+                              : control.binding.type === 'shortcut'
+                                ? 'SHORTCUT'
+                                : 'SCROLL'
+                    }`}
               </span>
             </div>
 
@@ -1425,6 +1467,10 @@ export function Inspector({
                     {control.binding.holdKeys?.length ? ' · hold keys apply on the phone' : ''}
                   </span>
                 </>
+              ) : control.binding.type === 'media' ? (
+                <span className="hint">
+                  Seeks from a paired phone only · the editor never stands in for a live player
+                </span>
               ) : control.binding.type === 'mic' ? (
                 <>
                   <button
@@ -1541,13 +1587,15 @@ export function Inspector({
                         | 'mic'
                         | 'obs'
                         | 'shortcut'
-                        | 'light',
+                        | 'light'
+                        | 'media',
                     )
                   }
                 >
                   <option value="volume">Volume</option>
                   <option value="mic">Mic</option>
                   <option value="obs">OBS input volume</option>
+                  <option value="media">Media position (scrub)</option>
                   <option value="light">Local light</option>
                   <option value="scroll">Scroll</option>
                   <option value="shortcut">Shortcut chord</option>
@@ -1681,6 +1729,29 @@ export function Inspector({
               </>
             )}
 
+            {control.binding.type === 'media' && (
+              <>
+                <div className="two-col">
+                  <label className="field">
+                    <span>Display</span>
+                    <input value="time" readOnly />
+                  </label>
+                  <label className="field">
+                    <span>Commit</span>
+                    <input value="end" readOnly />
+                  </label>
+                </div>
+                <div className="preview-strip">
+                  <Icon name="sliders" size={15} />
+                  <span>
+                    <strong className="mono">0:00 / 3:45</strong> · elapsed and duration come from
+                    the active player, never from the editor.
+                  </span>
+                </div>
+                <p className="hint">{MEDIA_SCRUB_HINT}</p>
+              </>
+            )}
+
             {control.binding.type === 'obs' && (
               <>
                 <label className="field">
@@ -1793,7 +1864,9 @@ export function Inspector({
               </>
             )}
 
-            {control.kind === 'slider' && control.binding.type !== 'shortcut' && (
+            {control.kind === 'slider' &&
+              control.binding.type !== 'shortcut' &&
+              control.binding.type !== 'media' && (
               <label className="field">
                 <span>Slider axis</span>
                 <select
@@ -1840,7 +1913,9 @@ export function Inspector({
               </div>
             )}
 
-            {control.binding.type !== 'shortcut' && control.binding.type !== 'light' && (
+            {control.binding.type !== 'shortcut' &&
+              control.binding.type !== 'light' &&
+              control.binding.type !== 'media' && (
               <div className="control-range">
                 <div className="two-col">
                 <NumberField
@@ -1914,7 +1989,9 @@ export function Inspector({
             <p className="hint">
               {control.binding.type === 'shortcut'
                 ? 'Editor preview only. Drag on the phone to send one chord per step; Test − / Test + send a chord on this PC. Hold keys live only for the phone gesture.'
-                : control.binding.type === 'mic'
+                : control.binding.type === 'media'
+                  ? 'Editor preview only. Drag on the phone to scrub; only the released position is sent. Add a play/pause action if you want a tap action.'
+                  : control.binding.type === 'mic'
                   ? 'Editor preview only. Drag on the phone to set mic gain; tap the label or mic glyph to mute. The mic action below stays as the fallback.'
                   : control.binding.type === 'obs'
                     ? 'Editor preview only. Drag on the phone to set the OBS input level; Test −, Test + and Test mute talk to OBS directly. Input names are scene-collection scoped.'
@@ -1995,6 +2072,8 @@ export function Inspector({
                 {button.control
                   ? button.control.kind === 'trackpad'
                     ? 'No tap action needed. Tapping this tile on the phone opens the full-screen pointer pad.'
+                    : button.control.binding.type === 'media'
+                      ? 'No tap action needed. Drag this control on the phone to seek; only the released position is sent. The phone shows the player title, artist and time.'
                     : button.control.binding.type === 'mic'
                       ? 'No tap action needed. Drag this control on the phone to set mic gain; use Test mute above to verify the mic on this PC.'
                       : button.control.binding.type === 'obs'
