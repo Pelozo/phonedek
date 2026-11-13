@@ -18,6 +18,7 @@ import {
 } from '../../../shared/update-status'
 import { obsEndpoint, obsStatusSummary } from '../lib/obs'
 import { Icon } from './Icons'
+import { LightsSettings } from './LightsSettings'
 import { Modal, Slider, Toggle, useConfirm } from './Primitives'
 import { TwitchSettings } from './TwitchSettings'
 
@@ -702,6 +703,12 @@ export function SettingsDialog({
 
       <TwitchSettings
         server={server}
+        settings={settings}
+        onServerUpdate={onServerUpdate}
+        onToast={onToast}
+      />
+
+      <LightsSettings
         settings={settings}
         onServerUpdate={onServerUpdate}
         onToast={onToast}

@@ -26,6 +26,12 @@ describe('controlBadge', () => {
     )
   })
 
+  it('labels local light targets', () => {
+    expect(controlBadge(control({ type: 'light', target: 'brightness' }))).toBe('LIGHT · BRIGHT')
+    expect(controlBadge(control({ type: 'light', target: 'temperature' }))).toBe('LIGHT · TEMP')
+    expect(controlBadge(control({ type: 'light', target: 'power' }))).toBe('LIGHT · POWER')
+  })
+
   it('labels shortcut chords', () => {
     expect(controlBadge(control({ type: 'shortcut', keys: ['CTRL', 'TAB'] }))).toBe('SHORTCUT')
   })

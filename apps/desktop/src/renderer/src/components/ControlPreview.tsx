@@ -21,6 +21,11 @@ export function controlBadge(control: SliderOrDialControlSpec): string {
   }
   if (control.binding.type === 'mic') return 'MIC · GAIN'
   if (control.binding.type === 'obs') return 'OBS · VOL'
+  if (control.binding.type === 'light') {
+    if (control.binding.target === 'temperature') return 'LIGHT · TEMP'
+    if (control.binding.target === 'power') return 'LIGHT · POWER'
+    return 'LIGHT · BRIGHT'
+  }
   if (control.binding.type === 'shortcut') return 'SHORTCUT'
   return 'SCROLL'
 }

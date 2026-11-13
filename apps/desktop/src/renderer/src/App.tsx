@@ -10,12 +10,13 @@ import {
   pageCapacity,
   pageGrid,
 } from '@phonedek/shared'
-import type { Action, ControlSpec, DeckButton, DeckConfig, MicAction, ObsAction } from '@phonedek/shared'
+import type { Action, ControlSpec, DeckButton, DeckConfig, LightTarget, MicAction, ObsAction } from '@phonedek/shared'
 import type { AppState, ObsInputView, ServerInfoView, UpdateStatus, PermissionStatus } from '../../shared/api'
 import { isUpdateNoticeVisible, updateIndicatorLabel } from '../../shared/update-status'
 import { DeckCanvas } from './components/DeckCanvas'
 import { DeckMark, Icon } from './components/Icons'
 import { Inspector } from './components/Inspector'
+import { LightPickerDialog } from './components/LightPickerDialog'
 import { PopMenu } from './components/Menu'
 import { ObsInputDialog } from './components/ObsInputDialog'
 import { PairDialog } from './components/PairDialog'
@@ -24,6 +25,8 @@ import { ConfirmProvider } from './components/Primitives'
 import { SettingsDialog } from './components/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
 import { cutButtonFromPage, moveButtonToPage, pasteButtonIntoPage } from './lib/clipboard'
+import { LIGHT_STATUS_TILES, createLightStatusButton, type LightStatusTilePreset } from './lib/lightStatus'
+import { lightControlSpec } from './lib/lights'
 import { OBS_STATUS_TILES, createObsStatusButton, type ObsStatusTilePreset } from './lib/obsStatus'
 import {
   TWITCH_STATUS_TILES,
@@ -45,6 +48,10 @@ interface ToastState {
 }
 
 type SaveStatus = 'saved' | 'saving' | 'error'
+
+type LightPickerRequest =
+  | { kind: 'control'; target: LightTarget }
+  | { kind: 'status'; preset: LightStatusTilePreset }
 
 /** Clipboard shortcuts must never steal native text editing. */
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -68,6 +75,7 @@ function AppContent() {
   const [pairOpen, setPairOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [obsPickerOpen, setObsPickerOpen] = useState(false)
+  const [lightPicker, setLightPicker] = useState<LightPickerRequest | null>(null)
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
   const [permission, setPermission] = useState<PermissionStatus | null>(null)
   const [permissionBusy, setPermissionBusy] = useState(false)
@@ -679,6 +687,100 @@ function AppContent() {
     }
   }
 
+  const addLightControl = (target: LightTarget, light?: string): void => {
+    if (!config || !profile || !page) return
+    const grid = pageGrid(profile, page)
+    const spanCandidates = [
+      { columns: 3, rows: 1 },
+      { columns: 1, rows: 1 },
+    ]
+    const findSlot = (span: { columns: number; rows: number }): number | null => {
+      for (let candidate = 0; candidate < grid.columns * grid.rows; candidate += 1) {
+        if (canPlaceButton(page.buttons, candidate, span, grid)) return candidate
+      }
+      return null
+    }
+
+    let span: { columns: number; rows: number } | null = null
+    let slot: number | null = null
+    for (const candidate of spanCandidates) {
+      const found = findSlot(candidate)
+      if (found !== null) {
+        span = candidate
+        slot = found
+        break
+      }
+    }
+    if (slot === null || span === null) {
+      showToast('No free cell left on this page. Resize the grid or remove a button first.', 'error')
+      return
+    }
+    const fallback = span.columns !== 3 || span.rows !== 1
+    const name = target === 'temperature' ? 'Light temperature' : 'Light brightness'
+    const button: DeckButton = {
+      ...createEmptyButton(slot, name),
+      icon: target === 'temperature' ? '🌡️' : '🔆',
+      span,
+      control: lightControlSpec(target, light),
+    }
+    try {
+      const next = addButton(config, profile.id, page.id, button)
+      setConfig(next)
+      setSelectedButtonId(button.id)
+      showToast(
+        fallback
+          ? `${name} added as ${span.columns}×${span.rows} — no 3×1 space was free`
+          : `${name} added`,
+        'success',
+      )
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error')
+    }
+  }
+
+  const addLightStatusTile = (preset: LightStatusTilePreset, light?: string): void => {
+    if (!config || !profile || !page) return
+    const slot = nextFreeSlotForPage(profile, page)
+    if (slot === null) {
+      showToast('This page is full. Add rows/columns or delete a button first.', 'error')
+      return
+    }
+    const button = createLightStatusButton(preset, slot, light)
+    try {
+      const next = addButton(config, profile.id, page.id, button)
+      setConfig(next)
+      setSelectedButtonId(button.id)
+      showToast(
+        `${preset.menuLabel} added${
+          preset.action ? ' — tap toggles the light' : ' — read-only, tapping does nothing'
+        }`,
+        'success',
+      )
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error')
+    }
+  }
+
+  const openLightPicker = (request: LightPickerRequest): void => {
+    if (!server) return
+    if (server.settings.lights.length === 0) {
+      showToast('No lights configured — add an Elgato light in Settings → Lights first.', 'info')
+      return
+    }
+    if (!server.settings.lightsEnabled) {
+      showToast('Local light control is off — enable it in Settings → Lights to use this tile.', 'info')
+    }
+    setLightPicker(request)
+  }
+
+  const pickLight = (light?: string): void => {
+    const request = lightPicker
+    setLightPicker(null)
+    if (!request) return
+    if (request.kind === 'control') addLightControl(request.target, light)
+    else addLightStatusTile(request.preset, light)
+  }
+
   const openObsInputPicker = (): void => {
     if (!server) return
     if (server.obsStatus.state !== 'connected') {
@@ -837,6 +939,29 @@ function AppContent() {
                   onClick: () => addTwitchStatusTile(preset),
                 })),
                 {
+                  label: 'Light brightness',
+                  section: 'Lighting',
+                  icon: 'light',
+                  description: '3 × 1 · 0–100% for a configured Key Light',
+                  onClick: () => openLightPicker({ kind: 'control', target: 'brightness' }),
+                },
+                {
+                  label: 'Light temperature',
+                  icon: 'temperature',
+                  description: '3 × 1 · 143–344 mired, warm to cool',
+                  onClick: () => openLightPicker({ kind: 'control', target: 'temperature' }),
+                },
+                ...LIGHT_STATUS_TILES.map((preset) => ({
+                  label: preset.menuLabel,
+                  section: 'Light status',
+                  icon: preset.menuIcon,
+                  description:
+                    server.settings.lightsEnabled && server.settings.lights.length > 0
+                      ? preset.menuDescription
+                      : `${preset.menuDescription} · add a light in Settings`,
+                  onClick: () => openLightPicker({ kind: 'status', preset }),
+                })),
+                {
                   label: 'Scroll wheel',
                   section: 'Navigation',
                   icon: 'mouse',
@@ -927,6 +1052,29 @@ function AppContent() {
 
       {obsPickerOpen && (
         <ObsInputDialog onPick={addObsInput} onClose={() => setObsPickerOpen(false)} />
+      )}
+      {lightPicker && (
+        <LightPickerDialog
+          title={
+            lightPicker.kind === 'control'
+              ? lightPicker.target === 'temperature'
+                ? 'Add light temperature'
+                : 'Add light brightness'
+              : lightPicker.preset.menuLabel
+          }
+          description={
+            lightPicker.kind === 'control'
+              ? 'Choose which configured light this slider drives. You can change it later in the Inspector.'
+              : 'Choose which configured light this status tile reads. You can change it later in the Inspector.'
+          }
+          lights={server.settings.lights}
+          onPick={pickLight}
+          onOpenSettings={() => {
+            setLightPicker(null)
+            setSettingsOpen(true)
+          }}
+          onClose={() => setLightPicker(null)}
+        />
       )}
       {pairOpen && (
         <PairDialog

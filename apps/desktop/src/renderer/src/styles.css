@@ -5130,3 +5130,266 @@ select[aria-invalid="true"] {
   font-size: 11px;
   line-height: 1.45;
 }
+
+/* ------------------------------------------------------------------ */
+/* Local lights (Elgato)                                              */
+/* ------------------------------------------------------------------ */
+
+.light-device-toolbar {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.light-device-count {
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+}
+
+.light-dirty-tag {
+  color: var(--warn);
+  border-color: rgba(217, 164, 65, 0.45);
+}
+
+.light-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 14px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.light-empty svg {
+  color: var(--accent);
+}
+
+.light-empty strong {
+  font-size: 12px;
+}
+
+.light-empty p {
+  margin: 0;
+  max-width: 560px;
+  color: var(--text-soft);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.light-empty p.hint {
+  color: var(--muted);
+}
+
+.light-device-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.light-device {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  background: var(--surface-2);
+}
+
+.light-device-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.light-device-index {
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+}
+
+.light-device-head strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.light-device-id {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 8.5px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.light-device-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.35fr) 86px;
+  gap: 8px;
+}
+
+.light-port-field input {
+  font-family: var(--mono);
+}
+
+.light-device-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line);
+}
+
+.light-status-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.light-status-line strong {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.07em;
+}
+
+.light-status-line.ok strong {
+  color: var(--ok);
+}
+
+.light-status-line.error strong {
+  color: var(--danger);
+}
+
+.light-status-line.muted strong {
+  color: var(--muted);
+}
+
+.light-status-line small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.light-telemetry {
+  color: var(--ok);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.light-telemetry.muted {
+  color: var(--muted);
+}
+
+.light-endpoint {
+  color: var(--faint);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.light-actions {
+  flex-wrap: wrap;
+}
+
+.light-mired-hint {
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+.light-state-hint {
+  border-left-color: var(--warn);
+}
+
+.light-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.light-pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  background: var(--surface-2);
+  text-align: left;
+}
+
+.light-pick:hover,
+.light-pick:focus-visible {
+  border-left-color: var(--accent);
+  background: var(--surface-3);
+}
+
+.light-pick-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  color: var(--accent);
+  background: var(--bg-deep);
+}
+
+.light-pick > span:nth-child(2) {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.light-pick strong {
+  font-size: 12px;
+}
+
+.light-pick small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.light-pick-tag {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 8.5px;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.light-picker-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 2px;
+}
+
+.light-picker-empty svg {
+  color: var(--accent);
+}
+
+.light-picker-empty p {
+  margin: 0;
+  max-width: 420px;
+  color: var(--text-soft);
+  font-size: 11.5px;
+  line-height: 1.5;
+}

@@ -1,12 +1,14 @@
 import { useEffect, useId, useState } from 'react'
 import { describeAction, formatCombo } from '@phonedek/shared'
-import type { DeckPage, ExecutableAction, MacroAction, MacroStep, MediaKey, ObsAction, TwitchAction } from '@phonedek/shared'
+import type { DeckPage, ExecutableAction, LightAction, MacroAction, MacroStep, MediaKey, ObsAction, PlannableAction, TwitchAction } from '@phonedek/shared'
 import { Icon, type IconName } from './Icons'
 import { NumberField } from './Primitives'
 import { Keycaps, ShortcutDialog } from './ShortcutDialog'
 import { MacroEditor } from './MacroEditor'
+import { LightActionEditor } from './LightActionEditor'
 import { ObsActionEditor } from './ObsActionEditor'
 import { TwitchActionEditor } from './TwitchActionEditor'
+import { lightActionTitle } from '../lib/lights'
 import { obsActionTitle } from '../lib/obs'
 import { twitchActionTitle } from '../lib/twitch'
 import { useHostPlatform } from '../lib/platform'
@@ -93,6 +95,24 @@ function twitchIconName(action: TwitchAction): IconName {
   }
 }
 
+function lightIconName(_action: LightAction): IconName {
+  return 'light'
+}
+
+function actionIconName(action: PlannableAction): IconName {
+  if (action.type === 'obs') return obsIconName(action)
+  if (action.type === 'twitch') return twitchIconName(action)
+  if (action.type === 'light') return lightIconName(action)
+  return ACTION_ICONS[action.type]
+}
+
+function actionTitle(action: PlannableAction): string {
+  if (action.type === 'obs') return obsActionTitle(action)
+  if (action.type === 'twitch') return twitchActionTitle(action)
+  if (action.type === 'light') return lightActionTitle(action)
+  return ACTION_TITLES[action.type]
+}
+
 function argsToString(args: string[] | undefined): string {
   if (!args?.length) return ''
   return args
@@ -169,15 +189,15 @@ export function ActionEditor({
   onMove,
   onTest,
 }: {
-  action: ExecutableAction
+  action: PlannableAction
   index: number
   total: number
   pages: DeckPage[]
   server: ServerInfoView | null
-  onUpdate: (action: ExecutableAction) => void
+  onUpdate: (action: PlannableAction) => void
   onDelete: () => void
   onMove: (direction: -1 | 1) => void
-  onTest: (action: ExecutableAction) => void
+  onTest: (action: PlannableAction) => void
 }) {
   const [shortcutOpen, setShortcutOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -213,16 +233,7 @@ export function ActionEditor({
     <div className={`action-card action-type-${action.type}`}>
       <header className="action-header">
         <span className="action-icon">
-          <Icon
-            name={
-              action.type === 'obs'
-                ? obsIconName(action)
-                : action.type === 'twitch'
-                  ? twitchIconName(action)
-                  : ACTION_ICONS[action.type]
-            }
-            size={16}
-          />
+          <Icon name={actionIconName(action)} size={16} />
         </span>
         {action.type === 'macro' ? (
           <button
@@ -242,13 +253,7 @@ export function ActionEditor({
           </button>
         ) : (
           <div className="action-title">
-            <strong>
-              {action.type === 'obs'
-                ? obsActionTitle(action)
-                : action.type === 'twitch'
-                  ? twitchActionTitle(action)
-                  : ACTION_TITLES[action.type]}
-            </strong>
+            <strong>{actionTitle(action)}</strong>
             <small>{describeAction(action, platform)}</small>
           </div>
         )}
@@ -439,6 +444,10 @@ export function ActionEditor({
 
         {action.type === 'twitch' && (
           <TwitchActionEditor action={action} server={server} onUpdate={onUpdate} />
+        )}
+
+        {action.type === 'light' && (
+          <LightActionEditor action={action} server={server} onUpdate={onUpdate} />
         )}
 
         {action.type === 'page' && (

@@ -4,7 +4,6 @@ import type {
   ActionPack,
   ActionPreset,
   DeckButton,
-  ExecutableAction,
   MicAction,
   PointerBinding,
   ShortcutBinding,
@@ -13,10 +12,15 @@ import type {
   DeckConfig,
   DeckPage,
   DeckProfile,
+  LightAction,
+  LightBinding,
+  LightStateBinding,
+  LightTarget,
   MacroStep,
   MediaIcon,
   ObsAction,
   ObsStateBinding,
+  PlannableAction,
   StateBinding,
   TwitchAction,
   TwitchStateBinding,
@@ -47,6 +51,19 @@ import {
   twitchStateBadge,
   twitchStateBindingSummary,
 } from '../lib/twitch'
+import {
+  LIGHT_TARGETS,
+  LIGHT_TEMPERATURE_HINT,
+  lightActionWithOperation,
+  lightAvailability,
+  lightControlSpec,
+  lightStateBadge,
+  lightStateBindingSummary,
+  lightTargetControlPatch,
+  lightTargetInfo,
+  lightTestValue,
+  type LightActionOperation,
+} from '../lib/lights'
 import { useObsInputs } from '../lib/useObsInputs'
 import { backgroundStyle, buttonBackground, textColorFor } from '../lib/ui'
 import { ActionEditor } from './ActionEditor'
@@ -55,6 +72,7 @@ import { ControlPreview } from './ControlPreview'
 import { DeckMedia } from './DeckMedia'
 import { Icon } from './Icons'
 import { IconPicker } from './IconPicker'
+import { LightStatusEditor } from './LightStatusEditor'
 import { PopMenu } from './Menu'
 import { MoveToDialog } from './MoveToDialog'
 import { ObsStatusEditor } from './ObsStatusEditor'
@@ -73,21 +91,22 @@ const DEFAULT_MACRO_STEP: MacroStep = { type: 'hotkey', keys: ['CTRL', 'C'], hol
 
 /** Mic actions are valid in configs but not yet part of the legacy Action union. */
 const MIC_TOGGLE_ACTION: MicAction = { type: 'mic', action: 'toggleMute' }
-const asLegacyAction = (action: ExecutableAction): Action => action as unknown as Action
+const asLegacyAction = (action: PlannableAction): Action => action as unknown as Action
 
-/** Static status labels for the three binding families the editor can hold. */
+/** Static status labels for the binding families the editor can hold. */
 function stateBadge(state: StateBinding): string {
   if (state.type === 'obs') return obsStateBadge(state.target)
   if (state.type === 'twitch') return twitchStateBadge(state.target)
-  return `LIGHT · ${state.target.toUpperCase()}`
+  return lightStateBadge(state.target)
 }
 
-function stateSummary(state: StateBinding): string {
+function stateSummary(
+  state: StateBinding,
+  lights: ServerInfoView['settings']['lights'] = [],
+): string {
   if (state.type === 'obs') return obsStateBindingSummary(state) ?? 'OBS status'
   if (state.type === 'twitch') return twitchStateBindingSummary(state) ?? 'Twitch status'
-  if (state.target === 'power') return 'Light power status'
-  if (state.target === 'brightness') return 'Light brightness status'
-  return 'Light temperature status'
+  return lightStateBindingSummary(state, lights) ?? lightTargetInfo(state.target).label
 }
 
 function defaultAction(type: Action['type'], platform: string): Action {
@@ -192,12 +211,13 @@ export function Inspector({
   const buttonDefaultBackground = profile.theme.buttonBackground
   const primaryKey = platform === 'darwin' ? '⌘' : 'Ctrl'
 
-  const testActions = async (actions: readonly ExecutableAction[], label: string): Promise<void> => {
+  const testActions = async (actions: readonly PlannableAction[], label: string): Promise<void> => {
     if (!actions.length) {
       onToast('This button has no actions yet', 'info')
       return
     }
-    // The preload API predates MicAction; the config schema and main process accept it.
+    // The preload API predates MicAction/TwitchAction/LightAction; the config
+    // schema and main process accept them.
     const result = await window.phonedek.testActions(actions as unknown as Action[], label)
     onToast(result.ok ? `Executed “${label}” on this PC` : (result.error ?? 'Action failed'), result.ok ? 'success' : 'error')
   }
@@ -428,7 +448,7 @@ export function Inspector({
     })
   }
 
-  const setControlBinding = (type: 'volume' | 'scroll' | 'mic' | 'obs' | 'shortcut'): void => {
+  const setControlBinding = (type: 'volume' | 'scroll' | 'mic' | 'obs' | 'shortcut' | 'light'): void => {
     if (!button.control || button.control.kind === 'trackpad') return
     if (button.control.binding.type === type) return
     if (type === 'shortcut') {
@@ -469,6 +489,10 @@ export function Inspector({
         initial: 100,
         unit: '%',
       })
+      return
+    }
+    if (type === 'light') {
+      updateControl(lightControlSpec('brightness'))
       return
     }
     updateControl(
@@ -534,6 +558,28 @@ export function Inspector({
     updateControl({ binding: { ...button.control.binding, ...patch } })
   }
 
+  const updateLightBinding = (patch: Partial<Omit<LightBinding, 'type'>>): void => {
+    if (!button.control || button.control.kind === 'trackpad') return
+    const binding = button.control.binding
+    if (binding.type !== 'light') return
+    updateControl({ binding: { ...binding, ...structuredClone(patch) } })
+  }
+
+  const setLightTarget = (target: LightTarget): void => {
+    if (!button.control || button.control.kind === 'trackpad') return
+    const binding = button.control.binding
+    if (binding.type !== 'light' || binding.target === target) return
+    updateControl({
+      emit: 'value',
+      binding: { type: 'light', target, ...(binding.light ? { light: binding.light } : {}) },
+      ...lightTargetControlPatch(target),
+    })
+  }
+
+  const setLightDevice = (light: string | undefined): void => {
+    updateLightBinding({ light })
+  }
+
   const setControlMin = (value: number): void => {
     const min = Math.max(0, Math.min(Math.round(value), controlMax - 1))
     updateControl({ min, initial: Math.min(Math.max(controlInitial, min), controlMax) })
@@ -587,6 +633,16 @@ export function Inspector({
     obsSelectedInput.length > 0 &&
     obsInputsState.loaded &&
     !obsInputsState.inputs.some((input) => input.name === obsSelectedInput)
+  const lightControlBinding = control?.binding.type === 'light' ? control.binding : null
+  const lights = server?.settings.lights ?? []
+  const lightSelected = lightControlBinding?.light?.trim() ?? ''
+  const lightSelectedDevice = lights.find((light) => light.id === lightSelected)
+  const lightSelectedIsMissing = lightSelected.length > 0 && !lightSelectedDevice
+  const lightsAvailability = lightAvailability({
+    enabled: server?.settings.lightsEnabled ?? false,
+    lights,
+    selected: lightSelected,
+  })
   const controlMin = control?.min ?? 0
   const controlMax = control?.max ?? 100
   const controlStep = Math.max(1, control?.step ?? 1)
@@ -720,7 +776,27 @@ export function Inspector({
     )
   }
 
-  const updateAction = (index: number, action: ExecutableAction): void => {
+  const testLight = async (direction: -1 | 1): Promise<void> => {
+    if (!lightControlBinding) return
+    const target = lightControlBinding.target
+    const test = lightTestValue(target, direction)
+    const name = lightSelectedDevice?.name ?? (lightSelected || 'first light')
+    const result = await window.phonedek.testControlInput(
+      profile.id,
+      page.id,
+      button.id,
+      0,
+      test.value,
+    )
+    onToast(
+      result.ok
+        ? `Set “${name}” ${target} to ${test.label}`
+        : (result.error ?? 'Light test failed'),
+      result.ok ? 'success' : 'error',
+    )
+  }
+
+  const updateAction = (index: number, action: PlannableAction): void => {
     update({
       actions: button.actions.map((item, current) => (current === index ? asLegacyAction(action) : item)),
     })
@@ -773,6 +849,22 @@ export function Inspector({
     if (action.action !== 'createMarker') {
       onToast(`${label} action added — fill in the required Twitch text to save`, 'info')
     }
+  }
+
+  const addLightAction = (operation: LightActionOperation): void => {
+    const action = lightActionWithOperation({ type: 'light', action: 'togglePower' }, operation)
+    const current = button.label.trim().toLowerCase()
+    const untitled =
+      current === '' || current === 'untitled' || current === 'untitled button' || current === 'new button'
+    const label = operation === 'toggle' ? 'Light' : operation === 'on' ? 'Light on' : 'Light off'
+    update({
+      actions: [...button.actions, action as unknown as Action],
+      ...(untitled ? { label, icon: '💡' } : {}),
+    })
+    onToast(
+      `${label} action added — pick its light in the action card`,
+      server?.settings.lightsEnabled && (server.settings.lights.length ?? 0) > 0 ? 'success' : 'info',
+    )
   }
 
   const chooseIconMedia = async (kind: 'image' | 'video'): Promise<void> => {
@@ -878,7 +970,7 @@ export function Inspector({
           {button.state && (
             <div className="obs-state-summary">
               <span className="obs-state-pill">{stateBadge(button.state)}</span>
-              <span>{stateSummary(button.state)}</span>
+              <span>{stateSummary(button.state, lights)}</span>
             </div>
           )}
           <p className="hint">
@@ -1085,8 +1177,8 @@ export function Inspector({
             </div>
             <p className="hint">
               Add a live readout to this button without replacing its tap actions. OBS uses its
-              WebSocket connection; Twitch uses the Helix account from Settings → Twitch. Both feed
-              the phone through control-state-v1.
+              WebSocket connection, Twitch uses the Helix account, and lights use the Elgato HTTP
+              devices from Settings → Lights. All feed the phone through control-state-v1.
             </p>
             <label className="field">
               <span>Status source</span>
@@ -1099,23 +1191,17 @@ export function Inspector({
                     update({ state: { type: 'twitch', target: 'live' } })
                   } else if (value === 'obs') {
                     update({ state: { type: 'obs', target: 'streaming' } })
+                  } else if (value === 'light') {
+                    update({ state: { type: 'light', target: 'power' } })
                   }
                 }}
               >
                 <option value="off">Off</option>
                 <option value="obs">OBS Studio</option>
                 <option value="twitch">Twitch</option>
-                {statusBinding?.type === 'light' && (
-                  <option value="light">Light (existing tile)</option>
-                )}
+                <option value="light">Local light</option>
               </select>
             </label>
-            {statusBinding?.type === 'light' && (
-              <p className="hint">
-                This button shows a light status tile. Its device and target stay with the light
-                controls; choose Off, OBS Studio or Twitch to replace the readout here.
-              </p>
-            )}
             {statusBinding?.type === 'obs' && (
               <>
                 <ObsStatusEditor
@@ -1140,6 +1226,23 @@ export function Inspector({
                   binding={statusBinding}
                   server={server}
                   onUpdate={(state: TwitchStateBinding) => update({ state })}
+                />
+                <button
+                  type="button"
+                  className="button danger ghost full"
+                  onClick={() => update({ state: undefined })}
+                >
+                  <Icon name="trash" size={15} /> Remove status
+                </button>
+              </>
+            )}
+            {statusBinding?.type === 'light' && (
+              <>
+                <LightStatusEditor
+                  key={`light-${button.id}`}
+                  binding={statusBinding}
+                  server={server}
+                  onUpdate={(state: LightStateBinding) => update({ state })}
                 />
                 <button
                   type="button"
@@ -1265,9 +1368,11 @@ export function Inspector({
                     ? 'MIC · GAIN'
                     : control.binding.type === 'obs'
                       ? 'OBS · VOL'
-                      : control.binding.type === 'shortcut'
-                        ? 'SHORTCUT'
-                        : 'SCROLL'}
+                      : control.binding.type === 'light'
+                        ? `LIGHT · ${lightTargetInfo(control.binding.target).badge}`
+                        : control.binding.type === 'shortcut'
+                          ? 'SHORTCUT'
+                          : 'SCROLL'}
               </span>
             </div>
 
@@ -1344,6 +1449,32 @@ export function Inspector({
                   </button>
                   <span className="hint">Talks to OBS directly · sets 45% / 55%</span>
                 </>
+              ) : control.binding.type === 'light' ? (
+                <>
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    title={`Set this light to 45% or the lower test value`}
+                    onClick={() => void testLight(-1)}
+                  >
+                    Test −
+                  </button>
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    title={`Set this light to 55% or the higher test value`}
+                    onClick={() => void testLight(1)}
+                  >
+                    Test +
+                  </button>
+                  <span className="hint">
+                    Talks to the light directly · {control.binding.target === 'power'
+                      ? 'OFF / ON'
+                      : control.binding.target === 'temperature'
+                        ? '200 / 300 mired'
+                        : '45% / 55%'}
+                  </span>
+                </>
               ) : (
                 <>
                   <button
@@ -1388,13 +1519,20 @@ export function Inspector({
                   value={control.binding.type}
                   onChange={(event) =>
                     setControlBinding(
-                      event.target.value as 'volume' | 'scroll' | 'mic' | 'obs' | 'shortcut',
+                      event.target.value as
+                        | 'volume'
+                        | 'scroll'
+                        | 'mic'
+                        | 'obs'
+                        | 'shortcut'
+                        | 'light',
                     )
                   }
                 >
                   <option value="volume">Volume</option>
                   <option value="mic">Mic</option>
                   <option value="obs">OBS input volume</option>
+                  <option value="light">Local light</option>
                   <option value="scroll">Scroll</option>
                   <option value="shortcut">Shortcut chord</option>
                 </select>
@@ -1575,6 +1713,70 @@ export function Inspector({
               </>
             )}
 
+            {control.binding.type === 'light' && (
+              <>
+                <div className="two-col">
+                  <label className="field">
+                    <span>Light</span>
+                    <select
+                      value={lightSelected}
+                      onChange={(event) => setLightDevice(event.target.value || undefined)}
+                      disabled={!server?.settings.lightsEnabled || lights.length === 0}
+                    >
+                      <option value="">First configured light</option>
+                      {lightSelectedIsMissing && (
+                        <option value={lightSelected}>{lightSelected} (missing — pick again)</option>
+                      )}
+                      {lights.map((light) => (
+                        <option key={light.id} value={light.id}>
+                          {light.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Target</span>
+                    <select
+                      value={control.binding.target}
+                      onChange={(event) => setLightTarget(event.target.value as LightTarget)}
+                    >
+                      {LIGHT_TARGETS.map((target) => (
+                        <option key={target.value} value={target.value}>
+                          {target.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <div className={`obs-availability ${lightsAvailability.tone}`}>
+                  <strong>{lightsAvailability.label}</strong>
+                  <small>{lightsAvailability.detail}</small>
+                </div>
+
+                <div className="preview-strip">
+                  <Icon name="sliders" size={15} />
+                  <span>
+                    <strong className="mono">
+                      {controlMin}–{controlMax} {control.unit ?? ''}
+                    </strong>{' '}
+                    · device range; the target sets it automatically.
+                  </span>
+                </div>
+
+                <p className="hint">{lightTargetInfo(control.binding.target).hint}</p>
+                {control.binding.target === 'temperature' && (
+                  <p className="hint mono light-mired-hint">{LIGHT_TEMPERATURE_HINT}</p>
+                )}
+                {lights.length === 0 && (
+                  <p className="hint">
+                    Add an Elgato light in Settings → Lights. The control stays saved and fails
+                    clearly until a light is configured.
+                  </p>
+                )}
+              </>
+            )}
+
             {control.kind === 'slider' && control.binding.type !== 'shortcut' && (
               <label className="field">
                 <span>Slider axis</span>
@@ -1622,7 +1824,7 @@ export function Inspector({
               </div>
             )}
 
-            {control.binding.type !== 'shortcut' && (
+            {control.binding.type !== 'shortcut' && control.binding.type !== 'light' && (
               <div className="control-range">
                 <div className="two-col">
                 <NumberField
@@ -1700,7 +1902,9 @@ export function Inspector({
                   ? 'Editor preview only. Drag on the phone to set mic gain; tap the label or mic glyph to mute. The mic action below stays as the fallback.'
                   : control.binding.type === 'obs'
                     ? 'Editor preview only. Drag on the phone to set the OBS input level; Test −, Test + and Test mute talk to OBS directly. Input names are scene-collection scoped.'
-                    : control.binding.type === 'volume' && control.binding.mode === 'absolute'
+                    : control.binding.type === 'light'
+                      ? 'Editor preview only. Drag on the phone to set the light value; Test − / Test + talk to the selected light directly. The phone shows the live value on the tile.'
+                      : control.binding.type === 'volume' && control.binding.mode === 'absolute'
                       ? 'Editor preview only. The phone sends an absolute value; tap actions stay as the fallback.'
                       : 'Editor preview only. The phone renders this control and sends relative deltas; tap actions stay as the fallback.'}
             </p>
@@ -1757,6 +1961,9 @@ export function Inspector({
                   { label: 'Twitch create marker', icon: 'clock', description: 'Drop a marker on the live stream', onClick: () => addTwitchAction({ type: 'twitch', action: 'createMarker' }, 'Marker', '🔖') },
                   { label: 'Twitch set title', icon: 'monitor', description: 'Replace the live stream title', onClick: () => addTwitchAction({ type: 'twitch', action: 'setTitle', title: '' }, 'Title', '📝') },
                   { label: 'Twitch set game / category', icon: 'grid', description: 'Change the Twitch category by name', onClick: () => addTwitchAction({ type: 'twitch', action: 'setGame', game: '' }, 'Game', '🎮') },
+                  { label: 'Light power on', section: 'Lighting', icon: 'light', description: 'Turn a configured Elgato light on', onClick: () => addLightAction('on') },
+                  { label: 'Light power off', icon: 'light', description: 'Turn a configured Elgato light off', onClick: () => addLightAction('off') },
+                  { label: 'Toggle light power', icon: 'light', description: 'Switch a configured light on or off', onClick: () => addLightAction('toggle') },
                   { label: 'Delay', icon: 'clock', description: 'Wait before the next action', onClick: () => update({ actions: [...button.actions, makeAction('delay')] }) },
                   { label: 'Change page', icon: 'layers', description: 'Navigate to another deck page', onClick: () => update({ actions: [...button.actions, makeAction('page')] }) },
                 ]}
@@ -1775,12 +1982,16 @@ export function Inspector({
                       ? 'No tap action needed. Drag this control on the phone to set mic gain; use Test mute above to verify the mic on this PC.'
                       : button.control.binding.type === 'obs'
                         ? 'No tap action needed. Drag this control on the phone to set the OBS input level; add an OBS mute action if you want a tap action.'
-                        : button.control.binding.type === 'shortcut'
+                        : button.control.binding.type === 'light'
+                          ? 'No tap action needed. Drag this control on the phone to set the light; use Test − / Test + above to verify it on this PC.'
+                          : button.control.binding.type === 'shortcut'
                           ? 'No tap action needed. Turn or drag this control on the phone to send chords; use Test − / Test + above to verify them on this PC.'
                           : 'No tap action needed. Drag this control on the phone to send volume or scroll steps; use Test − / Test + above to verify it on this PC.'
                   : button.state?.type === 'twitch'
                     ? 'Read-only Twitch status tile. Tapping it does nothing; the phone shows the live value while the tile is visible.'
-                    : 'No actions yet. This button will do nothing when pressed.'}
+                    : button.state?.type === 'light'
+                      ? 'Read-only light status tile. Tapping it does nothing; the phone shows the live light value while the tile is visible.'
+                      : 'No actions yet. This button will do nothing when pressed.'}
               </p>
             </div>
           ) : (

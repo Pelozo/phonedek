@@ -13,6 +13,7 @@ import type { DeckConfig, DeckPage, DeckProfile } from '@phonedek/shared'
 import type { ServerInfoView } from '../../../shared/api'
 import { obsStateBadge, obsStateBindingSummary } from '../lib/obs'
 import { twitchStateBadge, twitchStateBindingSummary } from '../lib/twitch'
+import { lightStateBadge, lightStateBindingSummary } from '../lib/lights'
 import type { StateBinding } from '@phonedek/shared'
 import { backgroundStyle, buttonBackground, isVideoBackground, textColorFor } from '../lib/ui'
 import { ControlPreview } from './ControlPreview'
@@ -22,13 +23,16 @@ import { Icon } from './Icons'
 function statusBadge(state: StateBinding): string {
   if (state.type === 'obs') return obsStateBadge(state.target)
   if (state.type === 'twitch') return twitchStateBadge(state.target)
-  return `LIGHT · ${state.target.toUpperCase()}`
+  return lightStateBadge(state.target)
 }
 
-function statusSummary(state: StateBinding): string | null {
+function statusSummary(
+  state: StateBinding,
+  lights: ServerInfoView['settings']['lights'],
+): string | null {
   if (state.type === 'obs') return obsStateBindingSummary(state)
   if (state.type === 'twitch') return twitchStateBindingSummary(state)
-  return `Light ${state.target}`
+  return lightStateBindingSummary(state, lights)
 }
 
 export function DeckCanvas({
@@ -215,7 +219,7 @@ export function DeckCanvas({
                   {button.state && (
                     <span
                       className="deck-status-badge"
-                      title={statusSummary(button.state) ?? undefined}
+                      title={statusSummary(button.state, server?.settings.lights ?? []) ?? undefined}
                     >
                       {statusBadge(button.state)}
                     </span>

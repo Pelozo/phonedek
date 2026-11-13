@@ -46,6 +46,8 @@ export type IconName =
   | 'undo'
   | 'stop'
   | 'sliders'
+  | 'light'
+  | 'temperature'
 
 const paths: Record<IconName, string> = {
   plus: 'M12 5v14M5 12h14',
@@ -94,6 +96,8 @@ const paths: Record<IconName, string> = {
   undo: 'M9 7H4v5M4 12a8 8 0 1 0 2.3-5.7L4 9',
   stop: 'M7 7h10v10H7z',
   sliders: 'M4 7h16M4 12h16M4 17h16M8 4v6M16 9v6M10 14v6',
+  light: 'M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5V15h8v-1.5A6 6 0 0 0 12 3z',
+  temperature: 'M12 3a2 2 0 0 0-2 2v8.3a4 4 0 1 0 4 0V5a2 2 0 0 0-2-2zM12 9v7',
 }
 
 export function Icon({
