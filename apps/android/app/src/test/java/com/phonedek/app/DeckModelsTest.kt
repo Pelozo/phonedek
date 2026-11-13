@@ -333,6 +333,187 @@ class DeckModelsTest {
     }
 
     @Test
+    fun parsesShortcutWheelWithChordsAndDefaults() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "grid": { "columns": 5, "rows": 3, "gap": 8, "padding": 10 },
+                "pages": [{
+                  "id": "page",
+                  "buttons": [{
+                    "id": "tabs",
+                    "slot": 0,
+                    "label": "Tabs",
+                    "control": {
+                      "kind": "slider",
+                      "axis": "horizontal",
+                      "emit": "delta",
+                      "binding": {
+                        "type": "shortcut",
+                        "keys": ["TAB", "control"],
+                        "reverseKeys": ["shift", "TAB"],
+                        "holdKeys": ["option"],
+                        "repeat": 2,
+                        "travelSteps": 12
+                      },
+                      "unit": "%"
+                    },
+                    "span": { "columns": 3, "rows": 1 }
+                  }]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val button = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons.single()
+        val control = button.control!!
+        assertEquals("slider", control.kind)
+        assertEquals("delta", control.emit)
+        assertEquals("shortcut", control.binding.type)
+        assertEquals(listOf("CTRL", "TAB"), control.binding.keys)
+        assertEquals(listOf("SHIFT", "TAB"), control.binding.reverseKeys)
+        assertEquals(listOf("ALT"), control.binding.holdKeys)
+        assertEquals(2, control.binding.repeat)
+        assertEquals(12, control.binding.travelSteps)
+        assertEquals(0f, control.min!!, 0.001f)
+        assertEquals(100f, control.max!!, 0.001f)
+        assertEquals(1f, control.step!!, 0.001f)
+        assertEquals(50f, control.initial!!, 0.001f)
+        assertNull(control.unit)
+        // A key wheel keeps its authored footprint; it must not collapse to 1x1.
+        assertEquals(3, button.span!!.columns)
+        assertEquals(1, button.span!!.rows)
+    }
+
+    @Test
+    fun shortcutDialFillsOptionalDefaults() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [{
+                    "id": "switcher",
+                    "slot": 0,
+                    "control": {
+                      "kind": "dial",
+                      "emit": "delta",
+                      "binding": {
+                        "type": "shortcut",
+                        "keys": ["win", "TAB"]
+                      }
+                    }
+                  }]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val control = DeckJson.parse(raw)!!.profiles.single().pages.single()
+            .buttons.single().control!!
+        assertEquals("dial", control.kind)
+        assertEquals("shortcut", control.binding.type)
+        assertEquals(listOf("WIN", "TAB"), control.binding.keys)
+        assertTrue(control.binding.reverseKeys.isEmpty())
+        assertTrue(control.binding.holdKeys.isEmpty())
+        assertEquals(1, control.binding.repeat)
+        assertEquals(20, control.binding.travelSteps)
+        assertEquals(0f, control.min!!, 0.001f)
+        assertEquals(100f, control.max!!, 0.001f)
+        assertEquals(1f, control.step!!, 0.001f)
+        assertEquals(50f, control.initial!!, 0.001f)
+        assertEquals("", control.unit.orEmpty())
+    }
+
+    @Test
+    fun shortcutRequiresDeltaEmitAndValidKeys() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [
+                    {
+                      "id": "bad-emit",
+                      "slot": 0,
+                      "control": {
+                        "kind": "slider",
+                        "emit": "value",
+                        "binding": { "type": "shortcut", "keys": ["CTRL", "TAB"] }
+                      }
+                    },
+                    {
+                      "id": "missing-keys",
+                      "slot": 1,
+                      "control": {
+                        "kind": "slider",
+                        "emit": "delta",
+                        "binding": { "type": "shortcut" }
+                      }
+                    },
+                    {
+                      "id": "bad-key",
+                      "slot": 2,
+                      "control": {
+                        "kind": "dial",
+                        "emit": "delta",
+                        "binding": { "type": "shortcut", "keys": ["CTRL", "NOPE"] }
+                      }
+                    },
+                    {
+                      "id": "bad-reverse",
+                      "slot": 3,
+                      "control": {
+                        "kind": "dial",
+                        "emit": "delta",
+                        "binding": {
+                          "type": "shortcut",
+                          "keys": ["CTRL", "TAB"],
+                          "reverseKeys": ["BOGUS"]
+                        }
+                      }
+                    },
+                    {
+                      "id": "bad-hold",
+                      "slot": 4,
+                      "control": {
+                        "kind": "dial",
+                        "emit": "delta",
+                        "binding": {
+                          "type": "shortcut",
+                          "keys": ["CTRL", "TAB"],
+                          "holdKeys": [""]
+                        }
+                      }
+                    },
+                    {
+                      "id": "too-many-keys",
+                      "slot": 5,
+                      "control": {
+                        "kind": "dial",
+                        "emit": "delta",
+                        "binding": {
+                          "type": "shortcut",
+                          "keys": ["A", "B", "C", "D", "E", "F", "G", "H", "I"]
+                        }
+                      }
+                    }
+                  ]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val buttons = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons
+        buttons.forEach { button ->
+            assertNull("expected ${button.id} to be dropped", button.control)
+        }
+    }
+
+    @Test
     fun parsesObsInputVolumeControl() {
         val raw = """
             {

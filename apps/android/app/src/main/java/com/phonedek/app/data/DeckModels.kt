@@ -8,6 +8,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
+import com.phonedek.app.util.ShortcutChord
 
 const val DEFAULT_HTTP_PORT = 47654
 const val DISCOVERY_PORT = 47655
@@ -129,6 +130,13 @@ data class ControlBindingDto(
     val naturalScroll: Boolean? = null,
     val tapToClick: Boolean? = null,
     val dragLock: Boolean? = null,
+    // Shortcut/key-wheel binding (`type == "shortcut"`). The desktop maps
+    // deltas to key chords; the phone only renders what one detent sends.
+    val keys: List<String> = emptyList(),
+    val reverseKeys: List<String> = emptyList(),
+    val holdKeys: List<String> = emptyList(),
+    val repeat: Int? = null,
+    val travelSteps: Int? = null,
 )
 
 /** Ordered pointer button transition carried by a `pointer` move/end message. */
@@ -508,6 +516,31 @@ private fun ControlBindingDto.normalized(): ControlBindingDto? {
             dragLock = dragLock ?: true,
         )
 
+        "shortcut" -> {
+            // At least one valid key is required; an unknown name anywhere in
+            // the binding means the desktop schema would reject it too, so the
+            // control must not silently become a misleading wheel.
+            val forward = ShortcutChord.normalizeKeys(keys) ?: return null
+            val reverse = if (reverseKeys.isEmpty()) {
+                null
+            } else {
+                ShortcutChord.normalizeKeys(reverseKeys) ?: return null
+            }
+            val hold = if (holdKeys.isEmpty()) {
+                null
+            } else {
+                ShortcutChord.normalizeKeys(holdKeys) ?: return null
+            }
+            ControlBindingDto(
+                type = "shortcut",
+                keys = forward,
+                reverseKeys = reverse ?: emptyList(),
+                holdKeys = hold ?: emptyList(),
+                repeat = (repeat ?: 1).coerceIn(1, 5),
+                travelSteps = (travelSteps ?: 20).coerceIn(4, 100),
+            )
+        }
+
         else -> null
     }
 }
@@ -541,6 +574,7 @@ private fun ControlDto.normalized(): ControlDto? {
         safeBinding.type == "scroll" -> controlEmit == "delta"
         safeBinding.type == "mic" -> controlEmit == "value"
         safeBinding.type == "obs" -> controlEmit == "value"
+        safeBinding.type == "shortcut" -> controlEmit == "delta"
         else -> false
     }
     if (!emitMatchesBinding) return null
@@ -565,16 +599,21 @@ private fun ControlDto.normalized(): ControlDto? {
     val safeInitial = (initial?.takeIf { it.isFinite() } ?: defaultInitial)
         .coerceIn(safeMin, safeMax)
     val safeAxis = if (axis?.trim()?.lowercase() == "vertical") "vertical" else "horizontal"
-    val safeUnit = (unit?.trim()?.takeIf { it.isNotEmpty() }?.take(16))
-        ?: if (
-            safeBinding.type == "volume" ||
-            safeBinding.type == "mic" ||
-            safeBinding.type == "obs"
-        ) {
-            "%"
-        } else {
-            null
-        }
+    val safeUnit = if (safeBinding.type == "shortcut") {
+        // A key wheel has no numeric readout, so any unit is meaningless.
+        null
+    } else {
+        (unit?.trim()?.takeIf { it.isNotEmpty() }?.take(16))
+            ?: if (
+                safeBinding.type == "volume" ||
+                safeBinding.type == "mic" ||
+                safeBinding.type == "obs"
+            ) {
+                "%"
+            } else {
+                null
+            }
+    }
 
     return copy(
         kind = controlKind,

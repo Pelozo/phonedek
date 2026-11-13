@@ -3,6 +3,7 @@ package com.phonedek.app.ui
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -48,6 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.phonedek.app.data.ControlDto
+import com.phonedek.app.util.ShortcutChord
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -93,6 +95,15 @@ fun DeckControlView(
     val isMic = control.binding.type == "mic"
     val isObs = control.binding.type == "obs"
     val scrollControl = control.binding.type == "scroll"
+    // Shortcut wheels are delta-only: the readout is a chord badge, not a
+    // numeric value, and there is no live desktop state to follow.
+    val isShortcut = control.binding.type == "shortcut"
+    val shortcutChord = if (isShortcut) ShortcutChord.format(control.binding.keys) else ""
+    val shortcutHold = if (isShortcut) {
+        ShortcutChord.holdIndicator(control.binding.holdKeys)
+    } else {
+        ""
+    }
     val volumeStepPercent = control.binding.stepPercent?.coerceIn(1, 25) ?: 2
     val sliderWireScale = if (isVolume) 100f / volumeStepPercent else 100f
     val displayUnit = control.unit ?: if (isVolume || isMic || isObs) "%" else ""
@@ -197,16 +208,27 @@ fun DeckControlView(
         }
     }
 
-    val valueText = ValueEntry.formatValue(value, displayUnit)
-    val displayText = ControlStateStore.displayText(
-        localText = valueText,
-        statePresent = statePresent,
-        stateAvailable = stateAvailable,
-        stateMuted = stateMuted,
-        stateDetail = stateDetail,
-        interacting = interacting,
-    )
-    val muted = statePresent && stateAvailable &&
+    val valueText = if (isShortcut) {
+        // Chord + optional hold indicator, e.g. `⌃⇥ +ALT`.
+        listOf(shortcutChord, shortcutHold)
+            .filter { it.isNotEmpty() }
+            .joinToString(" ")
+    } else {
+        ValueEntry.formatValue(value, displayUnit)
+    }
+    val displayText = if (isShortcut) {
+        valueText
+    } else {
+        ControlStateStore.displayText(
+            localText = valueText,
+            statePresent = statePresent,
+            stateAvailable = stateAvailable,
+            stateMuted = stateMuted,
+            stateDetail = stateDetail,
+            interacting = interacting,
+        )
+    }
+    val muted = !isShortcut && statePresent && stateAvailable &&
         (stateMuted || stateDetail?.trim() == ControlStateStore.MUTED) &&
         !interacting
     val stateBadge = if (stateCapable && stateAvailable && externalValue != null) {
@@ -215,8 +237,9 @@ fun DeckControlView(
         "LOCAL"
     }
     // An unavailable mic/OBS input still knows the desktop supports live state;
-    // showing LOCAL beside NO INPUT/NO OBS would be misleading.
-    val showStateBadge = !statePresent && (tileHeightPx == 0 ||
+    // showing LOCAL beside NO INPUT/NO OBS would be misleading. Key wheels are
+    // delta-only and never have a live value to fall back from.
+    val showStateBadge = !isShortcut && !statePresent && (tileHeightPx == 0 ||
         with(density) { tileHeightPx.toDp() } >= 48.dp)
 
     Column(
@@ -259,26 +282,38 @@ fun DeckControlView(
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
-                modifier = if (canEnterValue) {
-                    // The readout opens exact entry; it takes priority over the
-                    // label row's tap action. Relative controls keep the row tap.
-                    Modifier
-                        .clip(RoundedCornerShape(3.dp))
-                        .clickable(
-                            role = Role.Button,
-                            onClickLabel = "Set exact value",
-                        ) {
-                            entryStart = value
-                            entryOpen = true
-                            if (control.haptics) {
-                                haptics.performHapticFeedback(
-                                    HapticFeedbackType.TextHandleMove,
-                                )
+                modifier = when {
+                    canEnterValue -> {
+                        // The readout opens exact entry; it takes priority over
+                        // the label row's tap action. Relative controls keep the
+                        // row tap.
+                        Modifier
+                            .clip(RoundedCornerShape(3.dp))
+                            .clickable(
+                                role = Role.Button,
+                                onClickLabel = "Set exact value",
+                            ) {
+                                entryStart = value
+                                entryOpen = true
+                                if (control.haptics) {
+                                    haptics.performHapticFeedback(
+                                        HapticFeedbackType.TextHandleMove,
+                                    )
+                                }
                             }
-                        }
-                        .padding(horizontal = 5.dp, vertical = 4.dp)
-                } else {
-                    Modifier
+                            .padding(horizontal = 5.dp, vertical = 4.dp)
+                    }
+
+                    isShortcut -> {
+                        // Compact chord badge; the hold indicator is part of the
+                        // same readout, e.g. `⌃⇥ +ALT`.
+                        Modifier
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(textColor.copy(alpha = 0.12f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    }
+
+                    else -> Modifier
                 },
             )
             // LIVE is implicit once the value follows the PC; only the LOCAL
@@ -466,7 +501,8 @@ fun DeckControlView(
                                     if (mode == 0) {
                                         // A tap never reaches the 8dp mode
                                         // threshold: jump to the tapped arc
-                                        // position, or nudge one step.
+                                        // position, or nudge one step. A
+                                        // shortcut wheel stays silent on tap.
                                         val tapAngle = angleAt(change.position)
                                         val tapRadius = hypot(
                                             change.position.x - centerX,
@@ -474,6 +510,7 @@ fun DeckControlView(
                                         )
                                         val tappedFraction = dialArcFraction(tapAngle)
                                         if (
+                                            !isShortcut &&
                                             tapRadius >= hubDeadZone &&
                                             tappedFraction != null
                                         ) {
@@ -546,7 +583,20 @@ fun DeckControlView(
                             }
                         } else {
                             val vertical = control.axis == "vertical"
-                            var lastFraction = fractionOf(value)
+                            fun trackFraction(position: Offset): Float = if (vertical) {
+                                1f - (position.y / size.height.toFloat()).coerceIn(0f, 1f)
+                            } else {
+                                (position.x / size.width.toFloat()).coerceIn(0f, 1f)
+                            }
+                            // A key wheel is a pure relative control: touching
+                            // the track must not jump the value (and emit a
+                            // chord burst). Its baseline is the touch-down point,
+                            // so only finger travel turns into deltas.
+                            var lastFraction = if (isShortcut) {
+                                trackFraction(down.position)
+                            } else {
+                                fractionOf(value)
+                            }
                             var pendingWireDelta = 0f
 
                             fun flushWholeWire(force: Boolean) {
@@ -564,10 +614,19 @@ fun DeckControlView(
                             }
 
                             fun updateFrom(position: Offset) {
-                                val fraction = if (vertical) {
-                                    1f - (position.y / size.height.toFloat()).coerceIn(0f, 1f)
-                                } else {
-                                    (position.x / size.width.toFloat()).coerceIn(0f, 1f)
+                                val fraction = trackFraction(position)
+                                if (isShortcut) {
+                                    val fractionDelta = fraction - lastFraction
+                                    if (fractionDelta == 0f) return
+                                    lastFraction = fraction
+                                    // Keep a local position for gesture
+                                    // continuity, but the chord count follows
+                                    // finger travel, not the track position.
+                                    value = (value + fractionDelta * range)
+                                        .coerceIn(minValue, maxValue)
+                                    pendingWireDelta += fractionDelta * sliderWireScale
+                                    flushWholeWire(force = false)
+                                    return
                                 }
                                 val snapped = snap(minValue + fraction * range)
                                 val newFraction = fractionOf(snapped)
@@ -626,25 +685,29 @@ fun DeckControlView(
                         size = arcSize,
                         style = Stroke(width = stroke, cap = StrokeCap.Round),
                     )
-                    drawArc(
-                        color = Accent,
-                        startAngle = DIAL_ARC_START,
-                        sweepAngle = DIAL_ARC_SWEEP * fraction,
-                        useCenter = false,
-                        topLeft = topLeft,
-                        size = arcSize,
-                        style = Stroke(width = stroke, cap = StrokeCap.Round),
-                    )
-                    val radians =
-                        Math.toRadians(dialKnobDegrees(fraction).toDouble())
-                    val radius = diameter / 2f
-                    val center = Offset(size.width / 2f, size.height / 2f)
-                    val knob = Offset(
-                        center.x + cos(radians).toFloat() * radius,
-                        center.y + sin(radians).toFloat() * radius,
-                    )
-                    drawCircle(Color.Black.copy(alpha = 0.35f), 7.dp.toPx(), knob)
-                    drawCircle(Accent, 5.dp.toPx(), knob)
+                    // The travelled-value arc and knob are meaningless for a
+                    // key wheel; only the static track frames the chord.
+                    if (!isShortcut) {
+                        drawArc(
+                            color = Accent,
+                            startAngle = DIAL_ARC_START,
+                            sweepAngle = DIAL_ARC_SWEEP * fraction,
+                            useCenter = false,
+                            topLeft = topLeft,
+                            size = arcSize,
+                            style = Stroke(width = stroke, cap = StrokeCap.Round),
+                        )
+                        val radians =
+                            Math.toRadians(dialKnobDegrees(fraction).toDouble())
+                        val radius = diameter / 2f
+                        val center = Offset(size.width / 2f, size.height / 2f)
+                        val knob = Offset(
+                            center.x + cos(radians).toFloat() * radius,
+                            center.y + sin(radians).toFloat() * radius,
+                        )
+                        drawCircle(Color.Black.copy(alpha = 0.35f), 7.dp.toPx(), knob)
+                        drawCircle(Accent, 5.dp.toPx(), knob)
+                    }
                 }
             } else {
                 Canvas(Modifier.fillMaxSize()) {
@@ -663,19 +726,21 @@ fun DeckControlView(
                             strokeWidth = stroke,
                             cap = StrokeCap.Round,
                         )
-                        drawLine(
-                            color = Accent,
-                            start = Offset(x, bottom),
-                            end = Offset(x, thumbY),
-                            strokeWidth = stroke,
-                            cap = StrokeCap.Round,
-                        )
-                        drawCircle(
-                            Color.Black.copy(alpha = 0.35f),
-                            7.dp.toPx(),
-                            Offset(x, thumbY),
-                        )
-                        drawCircle(Accent, 5.dp.toPx(), Offset(x, thumbY))
+                        if (!isShortcut) {
+                            drawLine(
+                                color = Accent,
+                                start = Offset(x, bottom),
+                                end = Offset(x, thumbY),
+                                strokeWidth = stroke,
+                                cap = StrokeCap.Round,
+                            )
+                            drawCircle(
+                                Color.Black.copy(alpha = 0.35f),
+                                7.dp.toPx(),
+                                Offset(x, thumbY),
+                            )
+                            drawCircle(Accent, 5.dp.toPx(), Offset(x, thumbY))
+                        }
                     } else {
                         val y = size.height / 2f
                         val left = inset
@@ -688,19 +753,53 @@ fun DeckControlView(
                             strokeWidth = stroke,
                             cap = StrokeCap.Round,
                         )
-                        drawLine(
-                            color = Accent,
-                            start = Offset(left, y),
-                            end = Offset(thumbX, y),
-                            strokeWidth = stroke,
-                            cap = StrokeCap.Round,
+                        if (!isShortcut) {
+                            drawLine(
+                                color = Accent,
+                                start = Offset(left, y),
+                                end = Offset(thumbX, y),
+                                strokeWidth = stroke,
+                                cap = StrokeCap.Round,
+                            )
+                            drawCircle(
+                                Color.Black.copy(alpha = 0.35f),
+                                7.dp.toPx(),
+                                Offset(thumbX, y),
+                            )
+                            drawCircle(Accent, 5.dp.toPx(), Offset(thumbX, y))
+                        }
+                    }
+                }
+            }
+
+            if (isShortcut) {
+                // The value indicator is gone; the body carries the chord so
+                // the tile still reads as an input at a glance.
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(textColor.copy(alpha = 0.10f))
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                ) {
+                    Text(
+                        text = shortcutChord,
+                        color = textColor,
+                        fontFamily = ConsoleMono,
+                        fontSize = if (control.kind == "dial") 13.sp else 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (shortcutHold.isNotEmpty()) {
+                        Text(
+                            text = shortcutHold,
+                            color = textColor.copy(alpha = 0.65f),
+                            fontFamily = ConsoleMono,
+                            fontSize = 8.sp,
+                            letterSpacing = 0.8.sp,
+                            maxLines = 1,
                         )
-                        drawCircle(
-                            Color.Black.copy(alpha = 0.35f),
-                            7.dp.toPx(),
-                            Offset(thumbX, y),
-                        )
-                        drawCircle(Accent, 5.dp.toPx(), Offset(thumbX, y))
                     }
                 }
             }

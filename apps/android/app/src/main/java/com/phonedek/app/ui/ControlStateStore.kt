@@ -68,6 +68,9 @@ object ControlStateStore {
                 if (control.kind == "trackpad" || control.emit != "value") {
                     return@filter false
                 }
+                // Shortcut wheels are delta-only; the desktop has no live value
+                // to report for them.
+                if (control.binding.type == "shortcut") return@filter false
                 when (control.binding.type) {
                     "volume" -> control.binding.mode == "absolute"
                     "mic" -> control.binding.mode == "gain"

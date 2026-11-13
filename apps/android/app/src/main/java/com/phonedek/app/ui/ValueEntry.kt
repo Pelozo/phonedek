@@ -32,10 +32,11 @@ object ValueEntry {
             }
     }
 
-    /** Numeric entry applies to any absolute slider/dial, never a trackpad. */
+    /** Numeric entry applies to any absolute slider/dial, never a trackpad or key wheel. */
     fun supports(control: ControlDto?): Boolean =
         control != null &&
             control.kind != "trackpad" &&
+            control.binding.type != "shortcut" &&
             control.emit == "value"
 
     /**

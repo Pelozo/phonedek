@@ -64,6 +64,20 @@ class ControlStateStoreTest {
                 button("obs", type = "obs", mode = null, target = "inputVolume"),
                 button("relative", mode = "relative", emit = "delta"),
                 button("scroll", type = "scroll", mode = null, emit = "delta"),
+                button(
+                    "shortcut",
+                    type = "shortcut",
+                    mode = null,
+                    emit = "delta",
+                ),
+                // Defensive: even a malformed value-emitting shortcut must not
+                // enter the live-state watch (shortcuts have no desktop value).
+                button(
+                    "shortcut-value",
+                    type = "shortcut",
+                    mode = null,
+                    emit = "value",
+                ),
                 button("pad", kind = "trackpad", type = "pointer", mode = null, emit = "delta"),
                 button("bad-mic-mode", type = "mic", mode = "relative"),
                 button("bad-obs-target", type = "obs", mode = null, target = "inputMute"),

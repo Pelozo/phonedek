@@ -21,6 +21,31 @@ class ValueEntryTest {
                 ControlDto(kind = "trackpad", emit = "value"),
             ),
         )
+        // Key wheels are delta-only and never open exact value entry.
+        assertFalse(
+            ValueEntry.supports(
+                ControlDto(
+                    kind = "slider",
+                    emit = "delta",
+                    binding = ControlBindingDto(
+                        type = "shortcut",
+                        keys = listOf("CTRL", "TAB"),
+                    ),
+                ),
+            ),
+        )
+        assertFalse(
+            ValueEntry.supports(
+                ControlDto(
+                    kind = "dial",
+                    emit = "delta",
+                    binding = ControlBindingDto(
+                        type = "shortcut",
+                        keys = listOf("WIN", "TAB"),
+                    ),
+                ),
+            ),
+        )
         assertFalse(ValueEntry.supports(null))
     }
 
