@@ -311,7 +311,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (!ok) {
                     val failure = error?.takeIf { it.isNotBlank() }
                         ?: "The desktop could not run that control."
-                    if (isObsControl(controlId) || isLightControl(controlId)) {
+                    if (isObsControl(controlId) || isLightControl(controlId) ||
+                        isMediaControl(controlId)
+                    ) {
                         Diag.w("State input rejected control=$controlId error=\"$failure\"")
                     } else {
                         emit(failure)
@@ -1647,6 +1649,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun isLightControl(controlId: String): Boolean =
         ControlStateStore.isLightValueControl(activeButton(controlId)?.control)
+
+    private fun isMediaControl(controlId: String): Boolean =
+        ControlStateStore.isMediaValueControl(activeButton(controlId)?.control)
 
     private fun isObsButton(buttonId: String): Boolean {
         val button = activeButton(buttonId) ?: return false

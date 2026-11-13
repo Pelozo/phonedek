@@ -228,6 +228,90 @@ class DeckConnectionControlStateTest {
     }
 
     @Test
+    fun parsesMediaPlayheadTitleArtistAndPlaying() {
+        val message = DeckJson.parseControlState(
+            """
+                {
+                  "type": "controlState",
+                  "profileId": "p1",
+                  "pageId": "pg1",
+                  "states": [
+                    {
+                      "controlId": "media",
+                      "revision": 9,
+                      "value": 0.37,
+                      "available": true,
+                      "detail": "1:23 / 3:45",
+                      "positionMs": 83000,
+                      "durationMs": 225000,
+                      "playing": true,
+                      "title": "  Midnight City  ",
+                      "artist": "M83"
+                    },
+                    {
+                      "controlId": "media-idle",
+                      "revision": 4,
+                      "available": false,
+                      "detail": "NO PLAYER"
+                    }
+                  ]
+                }
+            """.trimIndent(),
+        )
+
+        assertNotNull(message)
+        val states = message!!.states.associateBy { it.controlId }
+        val media = states.getValue("media")
+        assertEquals(0.37f, media.value!!, 0.0001f)
+        assertEquals(83_000L, media.positionMs!!)
+        assertEquals(225_000L, media.durationMs!!)
+        assertTrue(media.playing!!)
+        assertEquals("Midnight City", media.title)
+        assertEquals("M83", media.artist)
+
+        val missing = states.getValue("media-idle")
+        assertFalse(missing.available)
+        assertEquals("NO PLAYER", missing.detail)
+        assertNull(missing.positionMs)
+        assertNull(missing.durationMs)
+        assertNull(missing.playing)
+        assertNull(missing.title)
+        assertNull(missing.artist)
+    }
+
+    @Test
+    fun malformedMediaTimesAreDroppedNotTheEntry() {
+        val message = DeckJson.parseControlState(
+            """
+                {
+                  "type": "controlState",
+                  "profileId": "p1",
+                  "pageId": "pg1",
+                  "states": [
+                    {
+                      "controlId": "media",
+                      "revision": 2,
+                      "value": 0.5,
+                      "available": true,
+                      "positionMs": -1,
+                      "durationMs": -5,
+                      "title": "   ",
+                      "artist": ""
+                    }
+                  ]
+                }
+            """.trimIndent(),
+        )
+
+        val media = message!!.states.single()
+        assertNull(media.positionMs)
+        assertNull(media.durationMs)
+        assertNull(media.title)
+        assertNull(media.artist)
+        assertEquals(0.5f, media.value!!, 0.0001f)
+    }
+
+    @Test
     fun malformedEntriesAreDroppedWithoutLosingTheBatch() {
         val message = DeckJson.parseControlState(
             """

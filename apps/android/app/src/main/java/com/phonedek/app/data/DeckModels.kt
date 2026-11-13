@@ -137,6 +137,10 @@ data class ControlDto(
     val initial: Float? = null,
     val unit: String? = null,
     val haptics: Boolean = true,
+    /** `live` applies every move; `end` only the final gesture value (media seek). */
+    val commit: String? = null,
+    /** Readout formatter: `raw`, `percent` or `time`. */
+    val display: String? = null,
 )
 
 @Serializable
@@ -189,6 +193,12 @@ data class ControlStateEntryDto(
     val detail: String? = null,
     // On/off cue for status targets (streaming, recording, replay, cam, mute).
     val active: Boolean? = null,
+    // Media scrub (`type == "media"`). Additive: older desktops omit them.
+    val positionMs: Long? = null,
+    val durationMs: Long? = null,
+    val playing: Boolean? = null,
+    val title: String? = null,
+    val artist: String? = null,
 )
 
 /** Alias used by the connection/UI API; the wire shape is [ControlStateEntryDto]. */
@@ -326,6 +336,10 @@ private fun ControlStateEntryDto.sanitized(): ControlStateEntryDto? {
         controlId = id,
         value = safeValue,
         detail = detail?.trim()?.take(64)?.takeIf { it.isNotEmpty() },
+        positionMs = positionMs?.takeIf { it >= 0L },
+        durationMs = durationMs?.takeIf { it >= 0L },
+        title = title?.trim()?.take(200)?.takeIf { it.isNotEmpty() },
+        artist = artist?.trim()?.take(200)?.takeIf { it.isNotEmpty() },
     )
 }
 
@@ -645,6 +659,14 @@ private fun ControlBindingDto.normalized(): ControlBindingDto? {
             )
         }
 
+        // Media scrub is always an absolute position binding. The desktop maps
+        // the normalized 0..1 value to the active player's position; an unknown
+        // target must not turn the tile into a misleading seek control.
+        "media" -> {
+            if (target?.trim()?.lowercase() != "position") return null
+            ControlBindingDto(type = "media", target = "position")
+        }
+
         else -> null
     }
 }
@@ -679,6 +701,7 @@ private fun ControlDto.normalized(): ControlDto? {
         safeBinding.type == "mic" -> controlEmit == "value"
         safeBinding.type == "obs" -> controlEmit == "value"
         safeBinding.type == "light" -> controlEmit == "value"
+        safeBinding.type == "media" -> controlEmit == "value"
         safeBinding.type == "shortcut" -> controlEmit == "delta"
         else -> false
     }
@@ -686,6 +709,7 @@ private fun ControlDto.normalized(): ControlDto? {
 
     val isObs = safeBinding.type == "obs"
     val isLight = safeBinding.type == "light"
+    val isMedia = safeBinding.type == "media"
     // Light ranges are device-native: brightness/power are 0..100 (power snaps
     // to the endpoints by step 100), while Elgato white balance is 143..344
     // mired. An explicit range is honored but clamped to the device limits.
@@ -719,11 +743,13 @@ private fun ControlDto.normalized(): ControlDto? {
     // future 0..2000 control still renders, but never a nonzero minimum: the
     // desktop maps the normalized value directly to inputVolumeMul.
     val defaultMax = when {
+        isMedia -> 1f
         isObs -> 200f
         isLight -> lightDefaults.max
         else -> 100f
     }
     var safeMin = when {
+        isMedia -> 0f
         isObs -> 0f
         isLight -> (min?.takeIf { it.isFinite() } ?: lightDefaults.min)
             .coerceIn(lightDefaults.min, lightDefaults.max)
@@ -731,6 +757,7 @@ private fun ControlDto.normalized(): ControlDto? {
         else -> min?.takeIf { it.isFinite() } ?: 0f
     }
     var safeMax = when {
+        isMedia -> 1f
         isLight -> (max?.takeIf { it.isFinite() } ?: lightDefaults.max)
             .coerceIn(lightDefaults.min, lightDefaults.max)
 
@@ -749,10 +776,12 @@ private fun ControlDto.normalized(): ControlDto? {
             safeBinding.type == "volume" && safeBinding.mode == "relative" ->
                 safeBinding.stepPercent!!.toFloat()
 
+            isMedia -> 0.001f
             isLight -> lightDefaults.step
             else -> 1f
         }
     val defaultInitial = when {
+        isMedia -> 0f
         isObs -> 100f
         isLight -> lightDefaults.initial
         else -> (safeMin + safeMax) / 2f
@@ -760,8 +789,9 @@ private fun ControlDto.normalized(): ControlDto? {
     val safeInitial = (initial?.takeIf { it.isFinite() } ?: defaultInitial)
         .coerceIn(safeMin, safeMax)
     val safeAxis = if (axis?.trim()?.lowercase() == "vertical") "vertical" else "horizontal"
-    val safeUnit = if (safeBinding.type == "shortcut") {
-        // A key wheel has no numeric readout, so any unit is meaningless.
+    val safeUnit = if (safeBinding.type == "shortcut" || isMedia) {
+        // A key wheel has no numeric readout, and a media scrub renders mono
+        // time instead of a unit; any configured unit is meaningless.
         null
     } else {
         (unit?.trim()?.takeIf { it.isNotEmpty() }?.take(16))
@@ -773,6 +803,19 @@ private fun ControlDto.normalized(): ControlDto? {
 
                 else -> null
             }
+    }
+    // Media seeks are expensive, so a missing commit means "end" for media.
+    // Other controls keep the shared default (`live` = null here).
+    val safeCommit = when (commit?.trim()?.lowercase()) {
+        "end" -> "end"
+        "live" -> "live"
+        else -> if (isMedia) "end" else null
+    }
+    val safeDisplay = when (display?.trim()?.lowercase()) {
+        "time" -> "time"
+        "percent" -> "percent"
+        "raw" -> "raw"
+        else -> if (isMedia) "time" else null
     }
 
     return copy(
@@ -786,6 +829,8 @@ private fun ControlDto.normalized(): ControlDto? {
         initial = safeInitial,
         unit = safeUnit,
         haptics = haptics,
+        commit = safeCommit,
+        display = safeDisplay,
     )
 }
 

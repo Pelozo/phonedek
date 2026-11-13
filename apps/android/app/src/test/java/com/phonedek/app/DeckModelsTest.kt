@@ -1486,6 +1486,94 @@ class DeckModelsTest {
     }
 
     @Test
+    fun parsesMediaScrubBindingAsAnAbsoluteValueControl() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "grid": { "columns": 5, "rows": 3, "gap": 8, "padding": 10 },
+                "pages": [{
+                  "id": "page",
+                  "buttons": [{
+                    "id": "media",
+                    "slot": 0,
+                    "label": "Now playing",
+                    "control": {
+                      "kind": "slider",
+                      "emit": "value",
+                      "binding": { "type": "media", "target": "position" },
+                      "min": 0,
+                      "max": 1,
+                      "step": 0.001,
+                      "commit": "end",
+                      "display": "time"
+                    },
+                    "span": { "columns": 3, "rows": 1 }
+                  }, {
+                    "id": "media-dial",
+                    "slot": 3,
+                    "label": "Scrub",
+                    "control": {
+                      "kind": "dial",
+                      "emit": "value",
+                      "binding": { "type": "media", "target": "position" }
+                    }
+                  }]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val buttons = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons
+        val media = buttons.first { it.id == "media" }.control!!
+        assertEquals("slider", media.kind)
+        assertEquals("value", media.emit)
+        assertEquals("media", media.binding.type)
+        assertEquals("position", media.binding.target)
+        assertEquals(0f, media.min!!, 0.0001f)
+        assertEquals(1f, media.max!!, 0.0001f)
+        assertEquals(0.001f, media.step!!, 0.000001f)
+        assertEquals(0f, media.initial!!, 0.0001f)
+        assertNull(media.unit)
+        assertEquals("end", media.commit)
+        assertEquals("time", media.display)
+        assertEquals(3, buttons.first { it.id == "media" }.span!!.columns)
+
+        // A bare media binding still gets the seek-safe defaults.
+        val dial = buttons.first { it.id == "media-dial" }.control!!
+        assertEquals("dial", dial.kind)
+        assertEquals(0f, dial.min!!, 0.0001f)
+        assertEquals(1f, dial.max!!, 0.0001f)
+        assertEquals(0.001f, dial.step!!, 0.000001f)
+        assertEquals("end", dial.commit)
+        assertEquals("time", dial.display)
+    }
+
+    @Test
+    fun rejectsMalformedMediaBindings() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [
+                    { "id": "bad-target", "slot": 0, "label": "Keep", "control": { "kind": "slider", "emit": "value", "binding": { "type": "media", "target": "volume" } } },
+                    { "id": "bad-emit", "slot": 1, "label": "Keep", "control": { "kind": "slider", "emit": "delta", "binding": { "type": "media", "target": "position" } } }
+                  ]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val buttons = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons
+        buttons.forEach { button ->
+            assertNull("expected ${button.id} control to be dropped", button.control)
+            assertEquals("Keep", button.label)
+        }
+    }
+
+    @Test
     fun endpointParserAcceptsCommonForms() {
         assertEquals(parseEndpoint("192.168.1.4")!!.port, 47654)
         assertEquals(parseEndpoint("192.168.1.4:5000")!!.port, 5000)

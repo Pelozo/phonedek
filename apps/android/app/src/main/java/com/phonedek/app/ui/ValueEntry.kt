@@ -37,6 +37,9 @@ object ValueEntry {
         control != null &&
             control.kind != "trackpad" &&
             control.binding.type != "shortcut" &&
+            // Media renders a time scrub; typing a raw normalized value is not
+            // useful, so the exact-value plate stays disabled.
+            control.binding.type != "media" &&
             control.emit == "value"
 
     /**

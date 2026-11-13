@@ -220,6 +220,7 @@ fun DeckButtonView(
                 stateDetail = controlState?.detail,
                 stateRevision = controlState?.revision ?: -1,
                 stateCapable = stateCapable,
+                mediaState = controlState,
                 onInput = { phase, delta, value ->
                     onControlInput(button.id, phase, delta, value)
                 },

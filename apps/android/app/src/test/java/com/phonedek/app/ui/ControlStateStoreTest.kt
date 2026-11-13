@@ -56,7 +56,7 @@ class ControlStateStoreTest {
     }
 
     @Test
-    fun onlyAbsoluteVolumeMicGainAndObsControlsAreWatchable() {
+    fun onlyAbsoluteVolumeMicGainObsAndMediaControlsAreWatchable() {
         val page = DeckPage(
             id = "pg1",
             buttons = listOf(
@@ -64,6 +64,8 @@ class ControlStateStoreTest {
                 button("abs-wheel", kind = "dial"),
                 button("mic", type = "mic", mode = "gain"),
                 button("obs", type = "obs", mode = null, target = "inputVolume"),
+                button("media", type = "media", mode = null, target = "position"),
+                button("media-wheel", kind = "dial", type = "media", mode = null, target = "position"),
                 button("relative", mode = "relative", emit = "delta"),
                 button("scroll", type = "scroll", mode = null, emit = "delta"),
                 button(
@@ -90,6 +92,14 @@ class ControlStateStoreTest {
                     target = "inputVolume",
                     emit = "delta",
                 ),
+                button("bad-media-target", type = "media", mode = null, target = "volume"),
+                button(
+                    "media-delta",
+                    type = "media",
+                    mode = null,
+                    target = "position",
+                    emit = "delta",
+                ),
                 button("plain", control = null),
                 button("", control = null),
                 button(
@@ -110,7 +120,16 @@ class ControlStateStoreTest {
         )
 
         assertEquals(
-            listOf("abs-slider", "abs-wheel", "mic", "obs", "status-stream", "status-scene"),
+            listOf(
+                "abs-slider",
+                "abs-wheel",
+                "mic",
+                "obs",
+                "media",
+                "media-wheel",
+                "status-stream",
+                "status-scene",
+            ),
             ControlStateStore.statefulControlIds(page),
         )
     }
@@ -164,6 +183,24 @@ class ControlStateStoreTest {
                 listOf(ActionDto(type = "mic", action = "toggleMute")),
             ),
         )
+    }
+
+    @Test
+    fun detectsMediaPositionValueControls() {
+        val media = ControlDto(
+            kind = "slider",
+            emit = "value",
+            binding = ControlBindingDto(type = "media", target = "position"),
+        )
+        assertTrue(ControlStateStore.isMediaValueControl(media))
+        assertTrue(ControlStateStore.isMediaValueControl(media.copy(kind = "dial")))
+        assertFalse(ControlStateStore.isMediaValueControl(media.copy(emit = "delta")))
+        assertFalse(
+            ControlStateStore.isMediaValueControl(
+                media.copy(binding = media.binding.copy(target = "volume")),
+            ),
+        )
+        assertFalse(ControlStateStore.isMediaValueControl(null))
     }
 
     @Test

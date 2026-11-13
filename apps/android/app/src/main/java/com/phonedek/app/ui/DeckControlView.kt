@@ -9,6 +9,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,6 +27,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +51,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.phonedek.app.data.ControlDto
+import com.phonedek.app.data.ControlStateDto
 import com.phonedek.app.util.ShortcutChord
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -85,7 +88,22 @@ fun DeckControlView(
     stateDetail: String? = null,
     stateRevision: Int = -1,
     stateCapable: Boolean = false,
+    mediaState: ControlStateDto? = null,
 ) {
+    if (control.binding.type == "media") {
+        MediaScrubControl(
+            control = control,
+            label = label,
+            textColor = textColor,
+            state = mediaState,
+            onInput = onInput,
+            onInteractingChange = onInteractingChange,
+            onTap = onTap,
+            modifier = modifier,
+        )
+        return
+    }
+
     val minValue = control.min ?: 0f
     val maxValue = control.max ?: 100f
     val stepValue = (control.step ?: 1f).takeIf { it > 0f } ?: 1f
@@ -834,5 +852,275 @@ fun DeckControlView(
                 }
             },
         )
+    }
+}
+
+/**
+ * Media scrub for the active player.
+ *
+ * A horizontal playhead with mono elapsed/total time, title/artist, and a
+ * play/pause cue. The track is the existing absolute slider surface: touching
+ * it previews locally (and ignores the next remote progress ticks), while
+ * lifting the finger is the only thing that sends a value. Media is
+ * `commit: 'end'`, so no intermediate seek leaves the phone.
+ *
+ * When the desktop has no player (`available == false`) the tile goes quiet:
+ * no accent, no thumb, just the short reason (`NO PLAYER` and friends).
+ */
+@Composable
+private fun MediaScrubControl(
+    control: ControlDto,
+    label: String,
+    textColor: Color,
+    state: ControlStateDto?,
+    onInput: (phase: String, delta: Float?, value: Float?) -> Unit,
+    onInteractingChange: (Boolean) -> Unit,
+    onTap: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val contentRotation = LocalButtonContentRotation.current
+    val haptics = LocalHapticFeedback.current
+    val durationMs = state?.durationMs?.coerceAtLeast(0L) ?: 0L
+    val available = MediaScrub.isAvailable(state)
+    val playing = MediaScrub.isPlaying(state)
+    var scrub by remember(control) {
+        mutableStateOf(
+            MediaScrubState().applyRemote(
+                positionMs = state?.positionMs
+                    ?: state?.value?.let {
+                        MediaScrub.previewFor(it, state?.durationMs ?: 0L)
+                    }
+                    ?: 0L,
+                durationMs = state?.durationMs ?: 0L,
+            ),
+        )
+    }
+    var appliedRevision by remember(control) { mutableIntStateOf(-1) }
+    val canScrub = rememberUpdatedState(available && durationMs > 0L)
+
+    // Remote playhead ticks are ignored while a finger is down. Revision
+    // bookkeeping mirrors the slider: the snapshot that was current when the
+    // gesture started must not snap the preview back on release.
+    LaunchedEffect(
+        control,
+        state?.revision,
+        state?.available,
+        state?.positionMs,
+        state?.durationMs,
+        scrub.dragging,
+    ) {
+        val revision = state?.revision ?: -1
+        if (scrub.dragging) {
+            if (revision > appliedRevision) appliedRevision = revision
+            // Keep the finger preview, but accept a new duration (the player
+            // may have changed track mid-gesture).
+            scrub = scrub.applyRemote(
+                positionMs = state?.positionMs ?: 0L,
+                durationMs = durationMs,
+            )
+            return@LaunchedEffect
+        }
+        if (!available) {
+            if (revision < 0) appliedRevision = -1
+            return@LaunchedEffect
+        }
+        if (revision <= appliedRevision) return@LaunchedEffect
+        appliedRevision = revision
+        val remotePosition = state?.positionMs
+            ?: state?.value?.let { MediaScrub.previewFor(it, durationMs) }
+            ?: 0L
+        scrub = scrub.applyRemote(remotePosition, durationMs)
+    }
+
+    val shownMs = if (available) scrub.shownMs else 0L
+    val fraction = if (available) scrub.fraction else 0f
+
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        // Short tiles keep the label/time/track and drop the title block.
+        val dense = maxHeight < 76.dp
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onTap)
+                    .graphicsLayer { rotationZ = contentRotation },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = label,
+                    color = textColor.copy(alpha = 0.62f),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.6.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (available) {
+                    Text(
+                        text = MediaScrub.glyph(playing),
+                        color = textColor.copy(alpha = 0.72f),
+                        fontFamily = ConsoleMono,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        modifier = Modifier.padding(horizontal = 5.dp),
+                    )
+                    Text(
+                        text = MediaScrub.timeText(state, shownMs),
+                        color = textColor,
+                        fontFamily = ConsoleMono,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                    )
+                } else {
+                    Text(
+                        text = MediaScrub.unavailableText(state),
+                        color = textColor.copy(alpha = 0.55f),
+                        fontFamily = ConsoleMono,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.8.sp,
+                        maxLines = 1,
+                    )
+                }
+            }
+
+            if (available && !dense) {
+                MediaScrub.titleText(state)?.let { title ->
+                    Text(
+                        text = title,
+                        color = textColor,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                MediaScrub.artistText(state)?.let { artist ->
+                    Text(
+                        text = artist,
+                        color = textColor.copy(alpha = 0.62f),
+                        fontSize = 9.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(if (dense) 2.dp else 4.dp))
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    // Consume the gesture in the Initial pass so the tile tap and
+                    // horizontal pager cannot steal a scrub.
+                    .pointerInput(control) {
+                        fun fractionAt(position: Offset): Float {
+                            if (size.width <= 0) return 0f
+                            return (position.x / size.width.toFloat()).coerceIn(0f, 1f)
+                        }
+
+                        awaitEachGesture {
+                            val down = awaitFirstDown(
+                                requireUnconsumed = false,
+                                pass = PointerEventPass.Initial,
+                            )
+                            down.consume()
+                            if (!canScrub.value) {
+                                // No player: swallow the sequence (no preview,
+                                // no seek, no pager swipe) and stay quiet.
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                        ?: break
+                                    change.consume()
+                                    if (!change.pressed) break
+                                }
+                                return@awaitEachGesture
+                            }
+
+                            onInteractingChange(true)
+                            var dragFraction = fractionAt(down.position)
+                            scrub = scrub.startDrag(dragFraction)
+                            // Open the gesture without a position: the seek is
+                            // only sent on release (commit end).
+                            onInput("start", null, null)
+                            if (control.haptics) {
+                                haptics.performHapticFeedback(
+                                    HapticFeedbackType.TextHandleMove,
+                                )
+                            }
+                            var completed = false
+                            try {
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                        ?: break
+                                    change.consume()
+                                    dragFraction = fractionAt(change.position)
+                                    scrub = scrub.drag(dragFraction)
+                                    if (!change.pressed) {
+                                        completed = true
+                                        break
+                                    }
+                                }
+                            } finally {
+                                val released = scrub.release(dragFraction)
+                                scrub = released
+                                onInteractingChange(false)
+                                if (completed) {
+                                    // Commit end: the existing absolute move+end
+                                    // path sends exactly one final normalized value.
+                                    onInput("end", null, released.fraction)
+                                }
+                            }
+                        }
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val inset = 4.dp.toPx()
+                    val left = inset
+                    val right = size.width - inset
+                    val y = size.height / 2f
+                    val stroke = 3.dp.toPx()
+                    val trackColor = textColor.copy(
+                        alpha = if (available) 0.24f else 0.10f,
+                    )
+                    drawLine(
+                        color = trackColor,
+                        start = Offset(left, y),
+                        end = Offset(right, y),
+                        strokeWidth = stroke,
+                        cap = StrokeCap.Round,
+                    )
+                    if (available && right > left) {
+                        val thumbX = left + fraction * (right - left)
+                        drawLine(
+                            color = Accent,
+                            start = Offset(left, y),
+                            end = Offset(thumbX, y),
+                            strokeWidth = stroke,
+                            cap = StrokeCap.Round,
+                        )
+                        drawCircle(
+                            Color.Black.copy(alpha = 0.35f),
+                            6.dp.toPx(),
+                            Offset(thumbX, y),
+                        )
+                        drawCircle(Accent, 4.dp.toPx(), Offset(thumbX, y))
+                    }
+                }
+            }
+        }
     }
 }

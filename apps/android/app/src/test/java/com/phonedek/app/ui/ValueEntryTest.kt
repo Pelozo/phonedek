@@ -46,6 +46,16 @@ class ValueEntryTest {
                 ),
             ),
         )
+        // A media scrub shows time, not a typed normalized value.
+        assertFalse(
+            ValueEntry.supports(
+                ControlDto(
+                    kind = "slider",
+                    emit = "value",
+                    binding = ControlBindingDto(type = "media", target = "position"),
+                ),
+            ),
+        )
         assertFalse(ValueEntry.supports(null))
     }
 

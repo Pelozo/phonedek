@@ -18,6 +18,7 @@ object ControlStateStore {
     const val NO_OBS = "NO OBS"
     const val NO_TWITCH = "NO TWITCH"
     const val NO_LIGHT = "NO LIGHT"
+    const val NO_PLAYER = "NO PLAYER"
     const val OFFLINE = "OFFLINE"
     const val MUTED = "MUTED"
     const val SWITCHING = "SWITCHING"
@@ -30,6 +31,7 @@ object ControlStateStore {
         NO_INPUT,
         NO_OBS,
         NO_LIGHT,
+        NO_PLAYER,
         OFFLINE,
         SWITCHING,
         "NO SCENE",
@@ -87,6 +89,14 @@ object ControlStateStore {
             control.emit == "value" &&
             control.binding.type == "obs" &&
             control.binding.target == "inputVolume"
+
+    /** True for a media position value control (slider or dial). */
+    fun isMediaValueControl(control: ControlDto?): Boolean =
+        control != null &&
+            control.kind != "trackpad" &&
+            control.emit == "value" &&
+            control.binding.type == "media" &&
+            control.binding.target == "position"
 
     /** True when a button carries an OBS action (e.g. tap-to-mute). */
     fun hasObsAction(actions: List<ActionDto>): Boolean =
@@ -235,9 +245,9 @@ object ControlStateStore {
 
     /**
      * Ids with a desktop live-state producer: absolute output volume,
-     * microphone gain, OBS input volume, local-light controls, and normal
-     * buttons with an OBS/Twitch/light read-only `state` binding. Relative
-     * volume, scroll and trackpads stay open-loop.
+     * microphone gain, OBS input volume, local-light controls, media position,
+     * and normal buttons with an OBS/Twitch/light read-only `state` binding.
+     * Relative volume, scroll and trackpads stay open-loop.
      */
     fun statefulControlIds(page: DeckPage): List<String> =
         page.buttons
@@ -260,6 +270,7 @@ object ControlStateStore {
                     "mic" -> control.binding.mode == "gain"
                     "obs" -> control.binding.target == "inputVolume"
                     "light" -> true
+                    "media" -> control.binding.target == "position"
                     else -> false
                 }
             }
