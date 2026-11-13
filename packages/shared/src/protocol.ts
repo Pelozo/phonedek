@@ -83,8 +83,15 @@ export const ControlStateEntrySchema = z.object({
   revision: z.number().int().min(0),
   value: z.number().finite().min(0).max(1).optional(),
   muted: z.boolean().optional(),
+  active: z.boolean().optional(),
   available: z.boolean(),
   detail: z.string().max(64).optional(),
+  error: z.string().max(200).optional(),
+  positionMs: z.number().int().min(0).optional(),
+  durationMs: z.number().int().min(0).optional(),
+  playing: z.boolean().optional(),
+  title: z.string().max(200).optional(),
+  artist: z.string().max(200).optional(),
 })
 
 export const ControlStateMessageSchema = z.object({

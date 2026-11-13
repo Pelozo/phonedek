@@ -51,6 +51,11 @@ import { UpdateService } from './updater'
 import { isRunningAppSigned, resolveUpdatePolicy } from './update-policy'
 import { createVolumeReader, HelperVolumeProbe, type VolumeReader } from './volume-source'
 import { createMicrophone, parseWindowsInputPayload, type Microphone } from './microphone-source'
+import {
+  createMediaController,
+  WindowsMediaProbe,
+  type MediaController,
+} from './media-source'
 import { ObsClient } from './obs-client'
 import { ObsStateSource, obsControlPercent } from './obs-source'
 import { SecretStore } from './secret-store'
@@ -94,6 +99,8 @@ let executor: ActionExecutor
 let inputRouter: ControlInputRouter | null = null
 let controlState: ControlStateService | null = null
 let volumeProbe: HelperVolumeProbe | null = null
+let mediaProbe: WindowsMediaProbe | null = null
+let mediaSource: MediaController | null = null
 let microphone: Microphone | null = null
 let obsClient: ObsClient | null = null
 let obsSource: ObsStateSource | null = null
@@ -1194,6 +1201,12 @@ async function bootstrap(): Promise<void> {
         }
       : undefined
   microphone = createMicrophone(process.platform, windowsMic ? { windows: windowsMic } : {})
+  if (process.platform === 'win32') {
+    mediaProbe = new WindowsMediaProbe(logger)
+    mediaSource = createMediaController('win32', { windowsBackend: mediaProbe })
+  } else {
+    mediaSource = createMediaController(process.platform)
+  }
   obsClient = new ObsClient({
     host: settings.get().obsHost,
     port: settings.get().obsPort,
@@ -1329,12 +1342,14 @@ async function bootstrap(): Promise<void> {
   controlState =
     volumeReader ||
     microphone ||
+    mediaSource ||
     settings.get().obsEnabled ||
     settings.get().twitchEnabled ||
     lightsActive(settings.get())
       ? new ControlStateService({
           ...(volumeReader ? { reader: volumeReader } : {}),
           ...(microphone ? { micReader: microphone } : {}),
+          ...(mediaSource ? { mediaReader: mediaSource } : {}),
           ...(obsSource ? { obsReader: obsSource } : {}),
           ...(twitchSource ? { twitchReader: twitchSource } : {}),
           ...(lightSource ? { lightReader: lightSource } : {}),
@@ -1345,6 +1360,7 @@ async function bootstrap(): Promise<void> {
     const sources = [
       volumeReader ? 'volume' : null,
       microphone ? 'microphone' : null,
+      mediaSource ? 'media' : null,
       obsSource ? 'OBS' : null,
       twitchSource ? 'Twitch' : null,
       lightSource && lightsActive(settings.get()) ? 'lights' : null,
@@ -1358,6 +1374,22 @@ async function bootstrap(): Promise<void> {
 
   const router = new ControlInputRouter({
     execute: (actions, label) => executor.execute(actions, label),
+    applyMedia: async (control, value, label) => {
+      if (!mediaSource || control.binding.type !== 'media') {
+        return { ok: false, error: 'Media seek is not available on this desktop.' }
+      }
+      try {
+        const positionMs = await mediaSource.seekFraction(value)
+        await controlState?.noteMediaChanged()
+        logger.info(
+          `Seeked media to ${positionMs} ms for "${label}"` +
+            ` (${control.kind !== 'trackpad' && control.commit === 'end' ? 'commit end' : 'live'})`,
+        )
+        return { ok: true }
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    },
     applyAbsolute: async (control, value, label) => {
       if (control.binding.type === 'mic') {
         return executor.executeInputGain(value * 100, label)
@@ -1683,6 +1715,7 @@ if (!gotLock) {
         obsClient?.dispose()
         lightSource?.dispose()
         volumeProbe?.dispose()
+        mediaProbe?.dispose()
         pointerRouter?.dispose()
         pointerSender?.dispose()
         keyboardRouter?.dispose()

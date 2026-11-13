@@ -327,6 +327,10 @@ export const ControlBindingSchema = z.union([
     light: id.optional(),
   }),
   shortcutBindingSchema,
+  z.object({
+    type: z.literal('media'),
+    target: z.literal('position'),
+  }),
 ])
 
 /** Pointer bindings are only valid on `trackpad` controls. */
@@ -349,6 +353,8 @@ const controlFields = {
   initial: z.number().finite().optional(),
   unit: z.string().min(1).max(16).optional(),
   haptics: z.boolean().optional(),
+  commit: z.enum(['live', 'end']).optional(),
+  display: z.enum(['raw', 'percent', 'time']).optional(),
 }
 
 const sliderOrDialControlSchema = z
@@ -383,6 +389,29 @@ const sliderOrDialControlSchema = z
         path: ['emit'],
         message: 'Shortcut controls require emit "delta"',
       })
+    }
+    if (control.binding.type === 'media') {
+      if (control.emit !== 'value') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['emit'],
+          message: 'Media position requires emit "value"',
+        })
+      }
+      if (control.min !== undefined && control.min !== 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['min'],
+          message: 'Media position requires min 0 (or omit it)',
+        })
+      }
+      if (control.max !== undefined && control.max !== 1) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['max'],
+          message: 'Media position requires max 1 (or omit it)',
+        })
+      }
     }
     if (control.binding.type === 'obs') {
       if (control.emit !== 'value') {

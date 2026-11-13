@@ -341,6 +341,100 @@ describe('ControlInputRouter', () => {
   })
 })
 
+describe('media scrub control input', () => {
+  const media: ControlSpec = {
+    kind: 'slider',
+    emit: 'value',
+    binding: { type: 'media', target: 'position' },
+    min: 0,
+    max: 1,
+    step: 0.001,
+    initial: 0,
+    commit: 'end',
+    display: 'time',
+  }
+
+  it('sends only the final value for commit:end', async () => {
+    vi.useFakeTimers()
+    const seeks: number[] = []
+    const router = new ControlInputRouter({
+      execute: async () => ({ ok: true }),
+      applyMedia: async (_control, value) => {
+        seeks.push(value)
+        return { ok: true }
+      },
+      flushMs: 50,
+    })
+
+    await router.handle(message('move', undefined, 'btn-media', 0.2), target(media, 'Scrub'))
+    await router.handle(message('move', undefined, 'btn-media', 0.6), target(media, 'Scrub'))
+    await router.handle(message('move', undefined, 'btn-media', 0.9), target(media, 'Scrub'))
+    await vi.advanceTimersByTimeAsync(500)
+    expect(seeks).toEqual([])
+
+    await expect(
+      router.handle(message('end', undefined, 'btn-media'), target(media, 'Scrub')),
+    ).resolves.toEqual({ ok: true })
+    expect(seeks).toEqual([0.9])
+    router.dispose()
+  })
+
+  it('accepts a final value carried on end for commit:end', async () => {
+    const seeks: number[] = []
+    const router = new ControlInputRouter({
+      execute: async () => ({ ok: true }),
+      applyMedia: async (_control, value) => {
+        seeks.push(value)
+        return { ok: true }
+      },
+    })
+
+    await router.handle(message('move', undefined, 'btn-media-end', 0.2), target(media, 'Scrub'))
+    await expect(
+      router.handle(message('end', undefined, 'btn-media-end', 0.8), target(media, 'Scrub')),
+    ).resolves.toEqual({ ok: true })
+    expect(seeks).toEqual([0.8])
+    router.dispose()
+  })
+
+  it('may send throttled seeks for commit:live', async () => {
+    vi.useFakeTimers()
+    const seeks: number[] = []
+    const live: ControlSpec = { ...media, commit: 'live' }
+    const router = new ControlInputRouter({
+      execute: async () => ({ ok: true }),
+      applyMedia: async (_control, value) => {
+        seeks.push(value)
+        return { ok: true }
+      },
+      flushMs: 50,
+    })
+
+    await router.handle(message('move', undefined, 'btn-live', 0.2), target(live, 'Scrub'))
+    await router.handle(message('move', undefined, 'btn-live', 0.7), target(live, 'Scrub'))
+    await vi.advanceTimersByTimeAsync(50)
+    expect(seeks).toEqual([])
+    await vi.advanceTimersByTimeAsync(200)
+    expect(seeks).toEqual([0.7])
+    await expect(
+      router.handle(message('end', undefined, 'btn-live'), target(live, 'Scrub')),
+    ).resolves.toEqual({ ok: true })
+    expect(seeks).toEqual([0.7])
+    router.dispose()
+  })
+
+  it('rejects media when no seek backend is wired', async () => {
+    const router = new ControlInputRouter({ execute: async () => ({ ok: true }) })
+    const result = await router.handle(
+      message('move', undefined, 'btn-media', 0.5),
+      target(media, 'Scrub'),
+    )
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/Media seek is not available/)
+    router.dispose()
+  })
+})
+
 describe('OBS control input', () => {  const obsVolume: ControlSpec = {
     kind: 'slider',
     emit: 'value',

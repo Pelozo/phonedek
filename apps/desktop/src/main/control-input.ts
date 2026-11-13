@@ -21,6 +21,11 @@ export interface ControlInputRouterOptions {
   execute: (actions: Action[], label: string) => Promise<PressResult>
   /** Absolute volume: value is normalized 0..1. Usually `executor.executeVolume(value*100)`. */
   applyAbsolute?: (control: ControlSpec, value: number, label: string) => Promise<PressResult>
+  /**
+   * Media scrub: value is normalized 0..1. Must seek directly (never through the
+   * keyboard executor queue) and should resolve with the applied position.
+   */
+  applyMedia?: (control: ControlSpec, value: number, label: string) => Promise<PressResult>
   logger?: Logger
   /** Coalescing window for move events. Default 50 ms. */
   flushMs?: number
@@ -47,6 +52,8 @@ interface PendingControl {
 
 const DEFAULT_FLUSH_MS = 50
 const DEFAULT_WATCHDOG_MS = 6_000
+/** Live media seeks are throttled to 4/s; commit:'end' sends one seek. */
+const MEDIA_LIVE_FLUSH_MS = 250
 const EPSILON = 1e-9
 
 function holdKeysOf(control: ControlSpec): string[] | null {
@@ -59,13 +66,19 @@ function holdKeysOf(control: ControlSpec): string[] | null {
   }
 }
 
+function isCommitEnd(control: ControlSpec): boolean {
+  if (control.kind === 'trackpad') return false
+  return control.commit === 'end'
+}
+
 /**
  * Coalesces high-frequency control moves into a small number of action batches.
  *
  * - One pending batch per profile/page/control; moves accumulate while a batch
  *   is in flight instead of queueing one execution per move.
  * - A 50 ms timer flushes accumulated deltas; `end` forces an immediate flush
- *   and waits for it so the matching `inputResult` is accurate.
+ *   and waits for it so the matching `inputResult` is accurate. Live media
+ *   seeks are throttled to 250 ms; commit:'end' seeks only on `end`.
  * - `start` resets any unflushed delta/value from an interrupted gesture but
  *   never releases held keys.
  * - Relative volume/scroll still use `execute`; absolute volume uses
@@ -78,6 +91,7 @@ export class ControlInputRouter {
   private readonly pending = new Map<string, PendingControl>()
   private readonly execute: ControlInputRouterOptions['execute']
   private readonly applyAbsolute?: ControlInputRouterOptions['applyAbsolute']
+  private readonly applyMedia?: ControlInputRouterOptions['applyMedia']
   private readonly logger?: Logger
   private readonly flushMs: number
   private readonly watchdogMs: number
@@ -88,6 +102,7 @@ export class ControlInputRouter {
   constructor(options: ControlInputRouterOptions) {
     this.execute = options.execute
     this.applyAbsolute = options.applyAbsolute
+    this.applyMedia = options.applyMedia
     this.logger = options.logger
     this.flushMs = Math.max(1, options.flushMs ?? DEFAULT_FLUSH_MS)
     this.watchdogMs = Math.max(1, options.watchdogMs ?? DEFAULT_WATCHDOG_MS)
@@ -158,6 +173,14 @@ export class ControlInputRouter {
       }
       case 'end': {
         this.cancelTimer(state)
+        // Some clients include the final value on `end` rather than the last
+        // `move`; accept it so a commit:'end' media scrub still seeks.
+        if (this.isValueControl(target.control)) {
+          const value = message.value
+          if (value !== undefined && Number.isFinite(value)) {
+            state.value = Math.max(0, Math.min(1, value))
+          }
+        }
         const current = state
         return this.flush(current, true).then(async (result) => {
           await this.releaseHold(current, 'gesture ended')
@@ -212,6 +235,7 @@ export class ControlInputRouter {
     if (control.binding.type === 'mic') return true
     if (control.binding.type === 'obs') return true
     if (control.binding.type === 'light') return true
+    if (control.binding.type === 'media') return true
     return control.binding.type === 'volume' && control.binding.mode === 'absolute'
   }
 
@@ -221,9 +245,13 @@ export class ControlInputRouter {
         if (control.binding.type === 'mic') return 'Mic gain requires a value control.'
         if (control.binding.type === 'obs') return 'OBS input volume requires a value control.'
         if (control.binding.type === 'light') return 'Light controls require a value control.'
+        if (control.binding.type === 'media') return 'Media position requires a value control.'
         return 'Absolute volume requires a value control.'
       }
-      if (!this.applyAbsolute) {
+      if (control.binding.type === 'media' && !this.applyMedia) {
+        return 'Media seek is not available on this desktop.'
+      }
+      if (control.binding.type !== 'media' && !this.applyAbsolute) {
         if (control.binding.type === 'mic') return 'Microphone gain is not available on this desktop.'
         if (control.binding.type === 'obs') return 'OBS input volume is not available on this desktop.'
         if (control.binding.type === 'light') return 'Local lights are not available on this desktop.'
@@ -246,7 +274,11 @@ export class ControlInputRouter {
 
   /** Whether accumulated movement is worth flushing now. */
   private ready(state: PendingControl): boolean {
-    if (state.value !== null) return true
+    if (state.value !== null) {
+      // commit:'end' controls (media seek) only apply the final gesture value.
+      if (isCommitEnd(state.control)) return false
+      return true
+    }
     if (state.delta === 0) return false
     if (state.control.binding.type !== 'shortcut') return true
     return Math.abs(state.delta) >= shortcutDeltaPerStep(state.control) - EPSILON
@@ -254,10 +286,14 @@ export class ControlInputRouter {
 
   private schedule(state: PendingControl): void {
     if (state.timer || state.running || !this.ready(state)) return
+    const mediaLive =
+      state.value !== null &&
+      state.control.binding.type === 'media' &&
+      !isCommitEnd(state.control)
     state.timer = setTimeout(() => {
       state.timer = null
       void this.flush(state, false)
-    }, this.flushMs)
+    }, mediaLive ? Math.max(this.flushMs, MEDIA_LIVE_FLUSH_MS) : this.flushMs)
     state.timer.unref?.()
   }
 
@@ -276,6 +312,11 @@ export class ControlInputRouter {
     if (state.value !== null) {
       const value = state.value
       state.value = null
+      if (state.control.binding.type === 'media') {
+        const applyMedia = this.applyMedia
+        if (!applyMedia) return { ok: false, error: 'Media seek is not available on this desktop.' }
+        return this.runExecution(state, () => applyMedia(state.control, value, state.label), force)
+      }
       const apply = this.applyAbsolute
       if (!apply) return { ok: false, error: 'Value controls are not available on this desktop.' }
       return this.runExecution(state, () => apply(state.control, value, state.label), force)

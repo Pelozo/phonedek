@@ -10,6 +10,8 @@ import type {
 import type { Logger } from './logger'
 import type { VolumeReader, VolumeReading } from './volume-source'
 import type { MicReader, MicReading } from './microphone-source'
+import type { MediaReader, MediaReading } from './media-source'
+import { formatMediaDetail } from './media-source'
 import type { ObsInputReading, ObsStateReader, ObsStatusReading } from './obs-source'
 import type { TwitchStateReader, TwitchStatusReading } from './twitch-source'
 import type { LightStateReader, LightStatusReading } from './light-source'
@@ -19,7 +21,7 @@ export const MIN_WATCH_INTERVAL_MS = 500
 export const DEFAULT_WATCH_INTERVAL_MS = 1000
 const WRITE_GRACE_MS = 1500
 
-export type ControlStateSource = 'volume' | 'mic' | 'obs' | 'twitch' | 'light'
+export type ControlStateSource = 'volume' | 'mic' | 'media' | 'obs' | 'twitch' | 'light'
 
 export interface StateControl {
   id: string
@@ -65,6 +67,18 @@ export function isMicGainControl(button: DeckButton): boolean {
     control.kind !== 'trackpad' &&
     control.binding.type === 'mic' &&
     control.binding.mode === 'gain' &&
+    control.emit === 'value'
+  )
+}
+
+/** A value-bearing slider/dial that scrubs the active media session. */
+export function isMediaControl(button: DeckButton): boolean {
+  const control = button.control
+  return (
+    control !== undefined &&
+    control.kind !== 'trackpad' &&
+    control.binding.type === 'media' &&
+    control.binding.target === 'position' &&
     control.emit === 'value'
   )
 }
@@ -183,11 +197,13 @@ export function resolveStateControls(
       ? 'volume'
       : isMicGainControl(button)
         ? 'mic'
-        : obs
-          ? 'obs'
-          : light
-            ? 'light'
-            : null
+        : isMediaControl(button)
+          ? 'media'
+          : obs
+            ? 'obs'
+            : light
+              ? 'light'
+              : null
     if (!source) continue
     if (requested !== null && !requested.has(button.id)) continue
     if (source === 'obs' && obs && obs.kind !== 'trackpad' && obs.binding.type === 'obs') {
@@ -228,6 +244,7 @@ export interface ControlStateSubscription {
 export interface ControlStateServiceOptions {
   reader?: VolumeReader
   micReader?: MicReader | null
+  mediaReader?: MediaReader | null
   obsReader?: ObsStateReader | null
   twitchReader?: TwitchStateReader | null
   lightReader?: LightStateReader | null
@@ -257,6 +274,11 @@ function stateSignature(entry: ControlStateEntry): string {
     entry.muted === undefined ? '' : entry.muted ? '1' : '0',
     entry.active === undefined ? '' : entry.active ? '1' : '0',
     entry.detail ?? '',
+    entry.positionMs?.toString() ?? '',
+    entry.durationMs?.toString() ?? '',
+    entry.playing === undefined ? '' : entry.playing ? '1' : '0',
+    entry.title ?? '',
+    entry.artist ?? '',
   ].join('|')
 }
 
@@ -264,12 +286,17 @@ function isStatusReading(
   reading:
     | VolumeReading
     | MicReading
+    | MediaReading
     | ObsInputReading
     | ObsStatusReading
     | TwitchStatusReading
     | LightStatusReading,
 ): reading is ObsStatusReading | TwitchStatusReading | LightStatusReading {
   return typeof (reading as ObsStatusReading).detail === 'string'
+}
+
+function isMediaReading(reading: object): reading is MediaReading {
+  return typeof (reading as MediaReading).positionMs === 'number'
 }
 
 function controlKey(profileId: string, pageId: string, controlId: string): string {
@@ -302,6 +329,7 @@ function unavailableDetail(source: ControlStateSource, error: string): string {
   if (source === 'obs') return obsUnavailableDetail(error)
   if (source === 'twitch') return twitchUnavailableDetail(error)
   if (source === 'light') return lightUnavailableDetail(error)
+  if (source === 'media') return mediaUnavailableDetail(error)
   return error.slice(0, 60)
 }
 
@@ -313,12 +341,23 @@ function lightUnavailableDetail(error: string): string {
   return error.slice(0, 60) || 'NO LIGHT'
 }
 
+function mediaUnavailableDetail(error: string): string {
+  if (/seek|position.*(unsupported|not supported)|rejected the seek/i.test(error)) {
+    return 'SEEK UNSUPPORTED'
+  }
+  if (/no active media player|no players? found|playerctl|osascript|automation|permission|not running|not available on this desktop/i.test(error)) {
+    return 'NO PLAYER'
+  }
+  return error.slice(0, 60) || 'NO PLAYER'
+}
+
 function readingEntry(
   controlId: string,
   source: ControlStateSource,
   reading:
     | VolumeReading
     | MicReading
+    | MediaReading
     | ObsInputReading
     | ObsStatusReading
     | TwitchStatusReading
@@ -327,6 +366,40 @@ function readingEntry(
   error: string | null,
   max?: number,
 ): ControlStateEntry {
+  if (source === 'media') {
+    if (error) {
+      return {
+        controlId,
+        revision: 0,
+        available: false,
+        detail: mediaUnavailableDetail(error),
+        error: error.slice(0, 200),
+      }
+    }
+    if (!reading || !isMediaReading(reading)) {
+      return { controlId, revision: 0, available: false, detail: 'NO PLAYER' }
+    }
+    const durationMs = Math.max(0, Math.round(reading.durationMs))
+    const positionMs = Math.min(
+      durationMs > 0 ? durationMs : Number.MAX_SAFE_INTEGER,
+      Math.max(0, Math.round(reading.positionMs)),
+    )
+    const value = durationMs > 0 ? Math.max(0, Math.min(1, positionMs / durationMs)) : undefined
+    const title = reading.title?.trim().slice(0, 200)
+    const artist = reading.artist?.trim().slice(0, 200)
+    return {
+      controlId,
+      revision: 0,
+      available: true,
+      ...(value === undefined ? {} : { value }),
+      positionMs,
+      durationMs,
+      playing: reading.playing === true,
+      ...(title ? { title } : {}),
+      ...(artist ? { artist } : {}),
+      detail: formatMediaDetail(positionMs, durationMs),
+    }
+  }
   if (!reading || error) {
     return {
       controlId,
@@ -355,6 +428,10 @@ function readingEntry(
       ...(reading.active === undefined ? {} : { active: reading.active }),
     }
   }
+  if (isMediaReading(reading)) {
+    // Media readings are handled above; keep the union narrowed for TS.
+    return { controlId, revision: 0, available: false, detail: 'NO PLAYER' }
+  }
   const level = Math.max(0, reading.level)
   const ceiling = max !== undefined && Number.isFinite(max) && max > 0 ? max : 100
   const value = Math.max(0, Math.min(1, level / ceiling))
@@ -381,6 +458,7 @@ function readingEntry(
 export class ControlStateService {
   private readonly reader?: VolumeReader
   private readonly micReader?: MicReader | null
+  private readonly mediaReader?: MediaReader | null
   private readonly obsReader?: ObsStateReader | null
   private readonly twitchReader?: TwitchStateReader | null
   private readonly lightReader?: LightStateReader | null
@@ -404,6 +482,7 @@ export class ControlStateService {
   constructor(options: ControlStateServiceOptions) {
     this.reader = options.reader
     this.micReader = options.micReader
+    this.mediaReader = options.mediaReader
     this.obsReader = options.obsReader
     this.twitchReader = options.twitchReader
     this.lightReader = options.lightReader
@@ -508,6 +587,19 @@ export class ControlStateService {
       this.micReader?.invalidate()
       this.suppressUntil = Math.max(this.suppressUntil, this.now() + this.writeGraceMs)
       await this.refresh(undefined, true)
+    })
+  }
+
+  /**
+   * Push the position a phone just seeked. The media source already holds the
+   * optimistic target; suppress the next poll briefly so the player's stale
+   * timestamp cannot bounce the scrub bar back.
+   */
+  noteMediaChanged(): Promise<void> {
+    if (this.disposed) return Promise.resolve()
+    return this.enqueue(async () => {
+      this.suppressUntil = Math.max(this.suppressUntil, this.now() + this.writeGraceMs)
+      await this.refresh(undefined, false, true)
     })
   }
 
@@ -625,6 +717,24 @@ export class ControlStateService {
       }
       for (const control of controls) {
         this.updateEntry(control.key, control.controlId, source, reading, error)
+      }
+    }
+
+    const mediaControls = watched.filter((control) => control.source === 'media')
+    if (mediaControls.length > 0) {
+      let reading: MediaReading | null = null
+      let error: string | null = null
+      if (!this.mediaReader) {
+        error = 'Media state is not available on this desktop.'
+      } else {
+        try {
+          reading = await this.mediaReader.read()
+        } catch (caught) {
+          error = caught instanceof Error ? caught.message : String(caught)
+        }
+      }
+      for (const control of mediaControls) {
+        this.updateEntry(control.key, control.controlId, 'media', reading, error)
       }
     }
 
@@ -847,6 +957,7 @@ export class ControlStateService {
     reading:
       | VolumeReading
       | MicReading
+      | MediaReading
       | ObsInputReading
       | ObsStatusReading
       | TwitchStatusReading

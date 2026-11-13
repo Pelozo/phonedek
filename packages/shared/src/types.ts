@@ -429,6 +429,18 @@ export interface ShortcutBinding {
 }
 
 /**
+ * A media scrub control for the active media session.
+ *
+ * The wire value is normalized 0..1. `commit: 'end'` (recommended) sends only
+ * the final position; `commit: 'live'` may send throttled updates while
+ * dragging. `display: 'time'` renders the mono `1:23 / 3:45` readout.
+ */
+export interface MediaBinding {
+  type: 'media'
+  target: 'position'
+}
+
+/**
  * What a continuous control drives.
  *
  * Relative volume emits deltas that become repeated media-volume keys. Absolute
@@ -461,6 +473,7 @@ export type ControlBinding =
   | ObsInputVolumeBinding
   | LightBinding
   | ShortcutBinding
+  | MediaBinding
 
 /**
  * Pointer binding used by a `trackpad` control.
@@ -501,6 +514,13 @@ export interface SliderOrDialControlSpec {
   unit?: string
   /** Defaults to true in renderers when omitted. */
   haptics?: boolean
+  /**
+   * Default 'live'. 'end' applies only the final value of a gesture; use it for
+   * expensive backends such as media seek.
+   */
+  commit?: 'live' | 'end'
+  /** Display formatter; default 'raw'. Media scrub usually uses 'time'. */
+  display?: 'raw' | 'percent' | 'time'
 }
 
 /**
@@ -875,6 +895,16 @@ export interface ControlStateEntry {
   detail?: string
   /** Diagnostic reason; `detail` stays the short display string (additive). */
   error?: string
+  /** Media only: elapsed position in milliseconds (additive). */
+  positionMs?: number
+  /** Media only: total duration in milliseconds (additive). */
+  durationMs?: number
+  /** Media only: whether the session is playing (additive). */
+  playing?: boolean
+  /** Media only: current track title (additive). */
+  title?: string
+  /** Media only: current track artist (additive). */
+  artist?: string
 }
 
 /** Batched state snapshot; sent immediately on watch and then on change/interval. */

@@ -831,6 +831,17 @@ describe('DeckServer control state', () => {
     binding: { type: 'volume', mode: 'absolute' },
   }
 
+  const mediaScrub: ControlSpec = {
+    kind: 'slider',
+    emit: 'value',
+    binding: { type: 'media', target: 'position' },
+    min: 0,
+    max: 1,
+    step: 0.001,
+    commit: 'end',
+    display: 'time',
+  }
+
   function fakeHub(): {
     hub: ControlStateHub
     subscriptions: Array<{ clientId: string; subscription: ControlStateSubscription }>
@@ -931,6 +942,52 @@ describe('DeckServer control state', () => {
       messages.find((message) => message.type === 'controlState'),
     )
     expect(state).toEqual(payload)
+
+    ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
+  it('resolves a media scrub control for watch', async () => {
+    const fake = fakeHub()
+    const h = await harness(
+      { ok: true },
+      { controlState: fake.hub, controlStateSupported: true },
+    )
+    attachControl(h, 'btn-vol-down', mediaScrub)
+    const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await waitFor(() => messages.find((message) => message.type === 'hello'))
+    await sendHello(ws, ['control-state-v1'])
+
+    ws.send(JSON.stringify(watch(h, ['btn-vol-down'], 500)))
+    const call = await waitFor(() => fake.subscriptions[0])
+    expect(call.subscription.intervalMs).toBe(500)
+    expect(call.subscription.controls).toEqual([
+      { id: 'btn-vol-down', label: 'Volume down', source: 'media' },
+    ])
+
+    call.subscription.send({
+      type: 'controlState',
+      profileId: call.subscription.profileId,
+      pageId: call.subscription.pageId,
+      states: [
+        {
+          controlId: 'btn-vol-down',
+          revision: 1,
+          available: true,
+          positionMs: 83_000,
+          durationMs: 213_000,
+          playing: true,
+          title: 'Song',
+          artist: 'Artist',
+          detail: '1:23 / 3:33',
+        },
+      ],
+    })
+    const state = await waitFor(() => messages.find((message) => message.type === 'controlState'))
+    expect(state).toMatchObject({
+      type: 'controlState',
+      states: [{ controlId: 'btn-vol-down', positionMs: 83_000, durationMs: 213_000 }],
+    })
 
     ws.close()
     await waitFor(() => h.server.getClients().length === 0)
