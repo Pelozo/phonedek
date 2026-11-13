@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket, WebSocketServer } from 'ws'
 import {
   ObsClient,
+  OBS_EVENT_SUBSCRIPTIONS,
   defaultObsBackoff,
   obsAuthString,
   obsWebSocketUrl,
@@ -223,7 +224,11 @@ describe('ObsClient handshake', () => {
     client.configure({ enabled: true })
 
     await waitFor(() => client.connected)
-    expect(fake.identifies[0]).toMatchObject({ rpcVersion: 1, eventSubscriptions: 11 })
+    // Includes input volume/mute plus OBS phase 2 stream/record/scene events.
+    expect(fake.identifies[0]).toMatchObject({
+      rpcVersion: 1,
+      eventSubscriptions: OBS_EVENT_SUBSCRIPTIONS,
+    })
     expect(fake.identifies[0]!['authentication']).toBeUndefined()
 
     await waitFor(() => client.status.obsVersion === '30.2.2')

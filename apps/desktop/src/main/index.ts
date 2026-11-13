@@ -1006,6 +1006,11 @@ async function bootstrap(): Promise<void> {
       const result = await obsSource.toggleMute(input)
       await controlState?.noteObsChanged(result.input)
     },
+    runObsAction: async (step) => {
+      if (!obsSource) throw new Error('OBS is not available on this desktop.')
+      await obsSource.execute(step)
+      await controlState?.noteObsChanged()
+    },
   })
   executor = new ActionExecutor(keySender, host, logger, {
     onScreenshot: (path) => {

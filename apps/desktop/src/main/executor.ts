@@ -143,10 +143,13 @@ export class ActionExecutor {
             await this.host.toggleInputMute()
             break
           case 'obs':
-            if (!this.host.toggleObsInputMute) {
+            if (this.host.runObsAction) {
+              await this.host.runObsAction(step)
+            } else if (step.action === 'toggleMute' && this.host.toggleObsInputMute) {
+              await this.host.toggleObsInputMute(step.input)
+            } else {
               throw new Error('OBS is not available on this desktop.')
             }
-            await this.host.toggleObsInputMute(step.input)
             break
           default:
             if (KEYBOARD_KINDS.has(step.kind)) {

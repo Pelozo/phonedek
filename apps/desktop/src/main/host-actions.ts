@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, statSync, accessSync, constants } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import type { ObsPlanStep } from '@phonedek/shared'
 import type { Logger } from './logger'
 import {
   LINUX_INPUT_COMMAND,
@@ -29,6 +30,8 @@ export interface HostActions {
   toggleInputMute(): Promise<void>
   /** Toggle mute on one OBS input (optional; absent when OBS is not wired). */
   toggleObsInputMute?(input?: string): Promise<void>
+  /** Run any OBS plan step (optional; absent when OBS is not wired). */
+  runObsAction?(step: ObsPlanStep): Promise<void>
 }
 
 export interface HostActionOptions {
@@ -49,6 +52,8 @@ export interface HostActionOptions {
   toggleSystemInputMute?: () => Promise<void>
   /** Test seam / shared controller for toggling an OBS input's mute. */
   toggleObsInputMute?: (input?: string) => Promise<void>
+  /** Test seam / shared controller for the full OBS action family. */
+  runObsAction?: (step: ObsPlanStep) => Promise<void>
   /** Overrides the user's home directory (used by tests to avoid touching ~/Desktop). */
   homeDir?: string
   logger?: Logger
@@ -411,6 +416,15 @@ export function createHostActions(options: HostActionOptions = {}): HostActions 
           async toggleObsInputMute(input?: string) {
             await options.toggleObsInputMute!(input)
             logger?.info(input ? `Toggled OBS input mute: ${input}` : 'Toggled OBS input mute')
+          },
+        }
+      : {}),
+
+    ...(options.runObsAction
+      ? {
+          async runObsAction(step: ObsPlanStep) {
+            await options.runObsAction!(step)
+            logger?.info(`Ran OBS action: ${step.action}`)
           },
         }
       : {}),

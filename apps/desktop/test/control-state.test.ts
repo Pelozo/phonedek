@@ -10,7 +10,13 @@ import {
   resolveStateControls,
 } from '../src/main/control-state'
 import type { MicReader, MicReading } from '../src/main/microphone-source'
-import type { ObsInputReading, ObsStateReader } from '../src/main/obs-source'
+import type { ObsStateTarget } from '@phonedek/shared'
+import type {
+  ObsInputReading,
+  ObsStateReader,
+  ObsStatusOptions,
+  ObsStatusReading,
+} from '../src/main/obs-source'
 import {
   CachedVolumeReader,
   parseMacVolumeOutput,
@@ -596,6 +602,17 @@ class FakeObsReader implements ObsStateReader {
 
   async listInputs(): Promise<Array<{ name: string; kind: string; audio: boolean }>> {
     return []
+  }
+
+  async readStatus(
+    _target: ObsStateTarget,
+    _options?: ObsStatusOptions,
+  ): Promise<ObsStatusReading> {
+    return { active: false, detail: 'OFF' }
+  }
+
+  invalidateStatus(_target?: ObsStateTarget): void {
+    // no cache in the fake
   }
 
   async setVolume(): Promise<string> {

@@ -2,8 +2,12 @@ import { createHash } from 'node:crypto'
 import { WebSocket, type RawData } from 'ws'
 import type { Logger } from './logger'
 
-/** OBS WebSocket v5 event subscription mask used by the MVP: General | Config | Inputs. */
-export const OBS_EVENT_SUBSCRIPTIONS = 1 | 2 | 8
+/**
+ * OBS WebSocket v5 event subscription mask:
+ * General | Config | Scenes | Inputs | Outputs | SceneItems.
+ * Never subscribe to InputVolumeMeters/high-volume events.
+ */
+export const OBS_EVENT_SUBSCRIPTIONS = 1 | 2 | 4 | 8 | 64 | 128
 
 /** Base64(SHA-256(secret)) challenge response used by obs-websocket v5. */
 export function obsAuthString(password: string, salt: string, challenge: string): string {

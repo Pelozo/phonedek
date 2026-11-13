@@ -218,16 +218,30 @@ export interface MicAction {
 }
 
 /**
- * Toggle mute on an OBS input.
+ * OBS actions. Names are user-defined OBS strings (scene-collection scoped),
+ * validated by the config schema and resolved on the desktop at execution time.
  *
- * `input` is an OBS input name (scene-collection scoped). Omitted = desktop
- * fallback: first audio-like input, then the first input.
+ * - `toggleMute` / input volume: `input` omitted = first audio-like input.
+ * - `setScene`: `scene` omitted = the first scene in OBS's scene list.
+ * - source visibility: `scene` omitted = the current program scene.
+ * - `addMarker`: stream/recording chapter marker, optional `name`.
  */
-export interface ObsAction {
-  type: 'obs'
-  action: 'toggleMute'
-  input?: string
-}
+export type ObsAction =
+  | { type: 'obs'; action: 'toggleMute'; input?: string }
+  | { type: 'obs'; action: 'setScene'; scene?: string }
+  | { type: 'obs'; action: 'toggleStream' | 'startStream' | 'stopStream' }
+  | { type: 'obs'; action: 'toggleRecord' | 'startRecord' | 'stopRecord' }
+  | { type: 'obs'; action: 'startReplay' | 'stopReplay' | 'saveReplay' }
+  | { type: 'obs'; action: 'toggleVirtualCam' }
+  | {
+      type: 'obs'
+      action: 'setSourceVisibility'
+      scene?: string
+      source: string
+      visible: boolean
+    }
+  | { type: 'obs'; action: 'toggleSourceVisibility'; scene?: string; source: string }
+  | { type: 'obs'; action: 'addMarker'; name?: string }
 
 /** A button executes its actions in order. */
 export type Action =
@@ -269,6 +283,35 @@ export interface ObsInputVolumeBinding {
   target: 'inputVolume'
   input?: string
 }
+
+/** Read-only OBS status a normal button tile can display. */
+export type ObsStateTarget =
+  | 'streaming'
+  | 'recording'
+  | 'replay'
+  | 'virtualCam'
+  | 'scene'
+  | 'inputMute'
+  | 'inputVolume'
+
+/**
+ * Read-only status binding for a normal button. The button's `actions` still
+ * perform the write; this only drives `control-state-v1` readback.
+ *
+ * - `scene` on a `scene` target marks the tile active when that scene is live.
+ * - `scene` on the source-visibility targets is informational only (state is
+ *   for one OBS input's mute/volume).
+ * - `input` selects the OBS input for `inputMute` / `inputVolume`.
+ */
+export interface ObsStateBinding {
+  type: 'obs'
+  target: ObsStateTarget
+  scene?: string
+  input?: string
+}
+
+/** State binding union; OBS is the only provider in this phase. */
+export type StateBinding = ObsStateBinding
 
 /**
  * A key wheel: one chord per dial detent or slider slice.
@@ -396,6 +439,8 @@ export interface DeckButton {
   actions: Action[]
   /** Optional continuous control rendered instead of a tap-only tile. */
   control?: ControlSpec
+  /** Optional read-only status shown on a normal tap tile (OBS phase 2). */
+  state?: StateBinding
   /** Optional footprint; omitted = 1x1. */
   span?: CellSpan
 }
@@ -495,11 +540,22 @@ export interface MicPlanStep {
   action: 'toggleMute'
 }
 
-export interface ObsPlanStep {
-  kind: 'obs'
-  action: 'toggleMute'
-  input?: string
-}
+export type ObsPlanStep =
+  | { kind: 'obs'; action: 'toggleMute'; input?: string }
+  | { kind: 'obs'; action: 'setScene'; scene?: string }
+  | { kind: 'obs'; action: 'toggleStream' | 'startStream' | 'stopStream' }
+  | { kind: 'obs'; action: 'toggleRecord' | 'startRecord' | 'stopRecord' }
+  | { kind: 'obs'; action: 'startReplay' | 'stopReplay' | 'saveReplay' }
+  | { kind: 'obs'; action: 'toggleVirtualCam' }
+  | {
+      kind: 'obs'
+      action: 'setSourceVisibility'
+      scene?: string
+      source: string
+      visible: boolean
+    }
+  | { kind: 'obs'; action: 'toggleSourceVisibility'; scene?: string; source: string }
+  | { kind: 'obs'; action: 'addMarker'; name?: string }
 
 export type PlanStep =
   | KeyPlanStep
@@ -704,10 +760,14 @@ export interface ControlStateEntry {
   /** Normalized 0..1 for value controls. */
   value?: number
   muted?: boolean
+  /** On/off/live/visible for status and toggle tiles (additive). */
+  active?: boolean
   /** False when the backend is missing or the value is unknown. */
   available: boolean
-  /** Optional short display string, e.g. "42%". */
+  /** Optional short display string, e.g. "42%", "LIVE", "REC", "GAME". */
   detail?: string
+  /** Diagnostic reason; `detail` stays the short display string (additive). */
+  error?: string
 }
 
 /** Batched state snapshot; sent immediately on watch and then on change/interval. */

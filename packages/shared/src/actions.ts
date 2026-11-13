@@ -4,6 +4,8 @@ import type {
   ExecutableAction,
   KeyboardPlanStep,
   MacroStep,
+  ObsAction,
+  ObsPlanStep,
   PagePlanStep,
   PlanStep,
 } from './types'
@@ -87,6 +89,44 @@ function stepToPlan(step: MacroStep, options: PlanOptions): PlanStep {
   }
 }
 
+/** Map every OBS action variant to its plan step, dropping absent optional fields. */
+function obsActionToPlan(action: ObsAction): ObsPlanStep {
+  switch (action.action) {
+    case 'toggleMute':
+      return { kind: 'obs', action: 'toggleMute', ...(action.input ? { input: action.input } : {}) }
+    case 'setScene':
+      return { kind: 'obs', action: 'setScene', ...(action.scene ? { scene: action.scene } : {}) }
+    case 'toggleStream':
+    case 'startStream':
+    case 'stopStream':
+    case 'toggleRecord':
+    case 'startRecord':
+    case 'stopRecord':
+    case 'startReplay':
+    case 'stopReplay':
+    case 'saveReplay':
+    case 'toggleVirtualCam':
+      return { kind: 'obs', action: action.action }
+    case 'setSourceVisibility':
+      return {
+        kind: 'obs',
+        action: 'setSourceVisibility',
+        ...(action.scene ? { scene: action.scene } : {}),
+        source: action.source,
+        visible: action.visible,
+      }
+    case 'toggleSourceVisibility':
+      return {
+        kind: 'obs',
+        action: 'toggleSourceVisibility',
+        ...(action.scene ? { scene: action.scene } : {}),
+        source: action.source,
+      }
+    case 'addMarker':
+      return { kind: 'obs', action: 'addMarker', ...(action.name ? { name: action.name } : {}) }
+  }
+}
+
 /**
  * Flatten a button's actions into an ordered execution plan.
  * Page actions are returned as units; the phone normally handles them locally,
@@ -136,11 +176,7 @@ export function actionsToPlan(actions: readonly ExecutableAction[], options: Pla
         plan.push({ kind: 'mic', action: action.action })
         break
       case 'obs':
-        plan.push({
-          kind: 'obs',
-          action: action.action,
-          ...(action.input ? { input: action.input } : {}),
-        })
+        plan.push(obsActionToPlan(action))
         break
     }
   }
@@ -496,6 +532,37 @@ export function describeAction(action: ExecutableAction, platform?: string): str
     case 'mic':
       return 'Toggle microphone mute'
     case 'obs':
-      return action.input ? `Mute OBS "${action.input}"` : 'Mute OBS input'
+      switch (action.action) {
+        case 'toggleMute':
+          return action.input ? `Mute OBS "${action.input}"` : 'Mute OBS input'
+        case 'setScene':
+          return action.scene ? `Switch OBS to "${action.scene}"` : 'Switch OBS scene'
+        case 'toggleStream':
+          return 'Toggle OBS stream'
+        case 'startStream':
+          return 'Start OBS stream'
+        case 'stopStream':
+          return 'Stop OBS stream'
+        case 'toggleRecord':
+          return 'Toggle OBS recording'
+        case 'startRecord':
+          return 'Start OBS recording'
+        case 'stopRecord':
+          return 'Stop OBS recording'
+        case 'startReplay':
+          return 'Start OBS replay buffer'
+        case 'stopReplay':
+          return 'Stop OBS replay buffer'
+        case 'saveReplay':
+          return 'Save OBS replay buffer'
+        case 'toggleVirtualCam':
+          return 'Toggle OBS virtual camera'
+        case 'setSourceVisibility':
+          return `${action.visible ? 'Show' : 'Hide'} OBS source "${action.source}"`
+        case 'toggleSourceVisibility':
+          return `Toggle OBS source "${action.source}"`
+        case 'addMarker':
+          return action.name ? `Add OBS marker "${action.name}"` : 'Add OBS chapter marker'
+      }
   }
 }

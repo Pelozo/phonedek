@@ -3,11 +3,12 @@ import type {
   ControlStateMessage,
   DeckButton,
   DeckConfig,
+  ObsStateTarget,
 } from '@phonedek/shared'
 import type { Logger } from './logger'
 import type { VolumeReader, VolumeReading } from './volume-source'
 import type { MicReader, MicReading } from './microphone-source'
-import type { ObsInputReading, ObsStateReader } from './obs-source'
+import type { ObsInputReading, ObsStateReader, ObsStatusReading } from './obs-source'
 
 /** Minimum allowed watch poll interval, matching the shared protocol schema. */
 export const MIN_WATCH_INTERVAL_MS = 500
@@ -24,6 +25,10 @@ export interface StateControl {
   input?: string
   /** Display maximum for OBS controls; defaults to 100 for volume/mic. */
   max?: number
+  /** Read-only status target from a button `state` binding. */
+  target?: ObsStateTarget
+  /** Scene name for the `scene` status target (also marks which scene is live). */
+  scene?: string
 }
 
 export interface AbsoluteVolumeControl {
@@ -52,6 +57,11 @@ export function isMicGainControl(button: DeckButton): boolean {
     control.binding.mode === 'gain' &&
     control.emit === 'value'
   )
+}
+
+/** A normal button with an OBS read-only `state` binding (status tile). */
+export function isObsStateButton(button: DeckButton): boolean {
+  return button.state?.type === 'obs'
 }
 
 /** A value-bearing slider/dial that reads and writes one OBS input. */
@@ -100,6 +110,21 @@ export function resolveStateControls(
   const requested = requestedIds ? new Set(requestedIds) : null
   const controls: StateControl[] = []
   for (const button of page.buttons) {
+    if (requested !== null && !requested.has(button.id)) continue
+    const state = button.state
+    if (state?.type === 'obs') {
+      controls.push({
+        id: button.id,
+        label: button.label,
+        source: 'obs',
+        target: state.target,
+        ...(state.input ? { input: state.input } : {}),
+        ...(state.scene ? { scene: state.scene } : {}),
+        ...(state.target === 'inputVolume' ? { max: 200 } : {}),
+      })
+      if (controls.length >= 32) break
+      continue
+    }
     const obs = isObsVolumeControl(button) ? button.control : null
     const source: ControlStateSource | null = isAbsoluteVolumeControl(button)
       ? 'volume'
@@ -160,8 +185,20 @@ function clampInterval(intervalMs: number | undefined, fallback: number): number
 }
 
 function stateSignature(entry: ControlStateEntry): string {
-  if (!entry.available) return `0|${entry.detail ?? ''}`
-  return `1|${entry.value?.toFixed(4) ?? ''}|${entry.muted === undefined ? '' : entry.muted ? '1' : '0'}`
+  if (!entry.available) return `0|${entry.detail ?? ''}|${entry.error ?? ''}`
+  return [
+    '1',
+    entry.value?.toFixed(4) ?? '',
+    entry.muted === undefined ? '' : entry.muted ? '1' : '0',
+    entry.active === undefined ? '' : entry.active ? '1' : '0',
+    entry.detail ?? '',
+  ].join('|')
+}
+
+function isStatusReading(
+  reading: VolumeReading | MicReading | ObsInputReading | ObsStatusReading,
+): reading is ObsStatusReading {
+  return typeof (reading as ObsStatusReading).detail === 'string'
 }
 
 function controlKey(profileId: string, pageId: string, controlId: string): string {
@@ -170,6 +207,8 @@ function controlKey(profileId: string, pageId: string, controlId: string): strin
 
 function obsUnavailableDetail(error: string): string {
   if (/switch/i.test(error)) return 'SWITCHING'
+  if (/scene/i.test(error) && /not found|no current/i.test(error)) return 'NO SCENE'
+  if (/source/i.test(error) && /not found/i.test(error)) return 'NO SOURCE'
   if (/not found|missing|no inputs?|not an audio input/i.test(error)) return 'NO INPUT'
   if (/not connected|not available|not identified|disabled|connection|timed out|closed/i.test(error)) {
     return 'NO OBS'
@@ -180,7 +219,7 @@ function obsUnavailableDetail(error: string): string {
 function readingEntry(
   controlId: string,
   source: ControlStateSource,
-  reading: VolumeReading | MicReading | ObsInputReading | null,
+  reading: VolumeReading | MicReading | ObsInputReading | ObsStatusReading | null,
   error: string | null,
   max?: number,
 ): ControlStateEntry {
@@ -194,6 +233,18 @@ function readingEntry(
           ? obsUnavailableDetail(error)
           : error.slice(0, 60)
         : 'Unavailable',
+      ...(error ? { error: error.slice(0, 200) } : {}),
+    }
+  }
+  if (isStatusReading(reading)) {
+    return {
+      controlId,
+      revision: 0,
+      available: true,
+      detail: reading.detail,
+      ...(reading.value === undefined ? {} : { value: reading.value }),
+      ...(reading.muted === undefined ? {} : { muted: reading.muted }),
+      ...(reading.active === undefined ? {} : { active: reading.active }),
     }
   }
   const level = Math.max(0, reading.level)
@@ -434,27 +485,70 @@ export class ControlStateService {
 
     const obsControls = watched.filter((control) => control.source === 'obs')
     if (obsControls.length > 0) {
-      const groups = new Map<string, typeof obsControls>()
-      for (const control of obsControls) {
+      // Continuous/volume reads group by input; status tiles group by target.
+      const volume = obsControls.filter((control) => !control.target || control.target === 'inputVolume')
+      const status = obsControls.filter(
+        (control) => control.target !== undefined && control.target !== 'inputVolume',
+      )
+
+      const volumeGroups = new Map<string, typeof volume>()
+      for (const control of volume) {
         const key = control.input ?? ''
-        const group = groups.get(key)
+        const group = volumeGroups.get(key)
         if (group) group.push(control)
-        else groups.set(key, [control])
+        else volumeGroups.set(key, [control])
       }
-      for (const [input, controls] of groups) {
-        let reading: ObsInputReading | null = null
+      for (const [input, controls] of volumeGroups) {
+        let reading: ObsInputReading | ObsStatusReading | null = null
         let error: string | null = null
         if (!this.obsReader) {
           error = 'OBS state is not available on this desktop.'
         } else {
           try {
-            reading = await this.obsReader.read(input || undefined)
+            reading = controls.some((control) => control.target === 'inputVolume')
+              ? await this.obsReader.readStatus('inputVolume', { input: input || undefined })
+              : await this.obsReader.read(input || undefined)
           } catch (caught) {
             error = caught instanceof Error ? caught.message : String(caught)
           }
         }
         for (const control of controls) {
-          this.updateEntry(control.key, control.controlId, 'obs', reading, error, control.max)
+          this.updateEntry(
+            control.key,
+            control.controlId,
+            'obs',
+            reading,
+            error,
+            control.max ?? 200,
+          )
+        }
+      }
+
+      const statusGroups = new Map<string, typeof status>()
+      for (const control of status) {
+        const key = `${control.target}\u0000${control.scene ?? ''}\u0000${control.input ?? ''}`
+        const group = statusGroups.get(key)
+        if (group) group.push(control)
+        else statusGroups.set(key, [control])
+      }
+      for (const controls of statusGroups.values()) {
+        const first = controls[0]!
+        let reading: ObsStatusReading | null = null
+        let error: string | null = null
+        if (!this.obsReader) {
+          error = 'OBS state is not available on this desktop.'
+        } else {
+          try {
+            reading = await this.obsReader.readStatus(first.target!, {
+              ...(first.scene ? { scene: first.scene } : {}),
+              ...(first.input ? { input: first.input } : {}),
+            })
+          } catch (caught) {
+            error = caught instanceof Error ? caught.message : String(caught)
+          }
+        }
+        for (const control of controls) {
+          this.updateEntry(control.key, control.controlId, 'obs', reading, error)
         }
       }
     }
@@ -490,10 +584,20 @@ export class ControlStateService {
     source: ControlStateSource
     input?: string
     max?: number
+    target?: ObsStateTarget
+    scene?: string
   }> {
     const controls = new Map<
       string,
-      { key: string; controlId: string; source: ControlStateSource; input?: string; max?: number }
+      {
+        key: string
+        controlId: string
+        source: ControlStateSource
+        input?: string
+        max?: number
+        target?: ObsStateTarget
+        scene?: string
+      }
     >()
     for (const sub of this.subscriptions.values()) {
       for (const controlId of sub.controlIds) {
@@ -506,6 +610,8 @@ export class ControlStateService {
           source: meta?.source ?? this.sources.get(key) ?? 'volume',
           ...(meta?.input ? { input: meta.input } : {}),
           ...(meta?.max !== undefined ? { max: meta.max } : {}),
+          ...(meta?.target ? { target: meta.target } : {}),
+          ...(meta?.scene ? { scene: meta.scene } : {}),
         })
       }
     }
@@ -525,7 +631,7 @@ export class ControlStateService {
     key: string,
     controlId: string,
     source: ControlStateSource,
-    reading: VolumeReading | MicReading | ObsInputReading | null,
+    reading: VolumeReading | MicReading | ObsInputReading | ObsStatusReading | null,
     error: string | null,
     max?: number,
   ): void {

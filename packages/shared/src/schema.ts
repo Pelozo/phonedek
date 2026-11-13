@@ -153,11 +153,39 @@ const micSchema = z.object({
   type: z.literal('mic'),
   action: z.literal('toggleMute'),
 })
-const obsSchema = z.object({
-  type: z.literal('obs'),
-  action: z.literal('toggleMute'),
-  input: z.string().min(1).max(128).optional(),
-})
+/** OBS names (input, scene, source, marker) are user-defined, max 128 chars. */
+const obsName = z.string().min(1).max(128)
+const obsSchema = z.union([
+  z.object({ type: z.literal('obs'), action: z.literal('toggleMute'), input: obsName.optional() }),
+  z.object({ type: z.literal('obs'), action: z.literal('setScene'), scene: obsName.optional() }),
+  z.object({
+    type: z.literal('obs'),
+    action: z.enum(['toggleStream', 'startStream', 'stopStream']),
+  }),
+  z.object({
+    type: z.literal('obs'),
+    action: z.enum(['toggleRecord', 'startRecord', 'stopRecord']),
+  }),
+  z.object({
+    type: z.literal('obs'),
+    action: z.enum(['startReplay', 'stopReplay', 'saveReplay']),
+  }),
+  z.object({ type: z.literal('obs'), action: z.literal('toggleVirtualCam') }),
+  z.object({
+    type: z.literal('obs'),
+    action: z.literal('setSourceVisibility'),
+    scene: obsName.optional(),
+    source: obsName,
+    visible: z.boolean(),
+  }),
+  z.object({
+    type: z.literal('obs'),
+    action: z.literal('toggleSourceVisibility'),
+    scene: obsName.optional(),
+    source: obsName,
+  }),
+  z.object({ type: z.literal('obs'), action: z.literal('addMarker'), name: obsName.optional() }),
+])
 
 export const MacroStepSchema = z.discriminatedUnion('type', [
   hotkeySchema,
@@ -353,6 +381,24 @@ export const TrackpadControlSpecSchema = z.object({
 
 export const ControlSpecSchema = z.union([sliderOrDialControlSchema, TrackpadControlSpecSchema])
 
+/** Read-only status binding on a normal button (OBS phase 2). */
+export const ObsStateBindingSchema = z.object({
+  type: z.literal('obs'),
+  target: z.enum([
+    'streaming',
+    'recording',
+    'replay',
+    'virtualCam',
+    'scene',
+    'inputMute',
+    'inputVolume',
+  ]),
+  scene: obsName.optional(),
+  input: obsName.optional(),
+})
+
+export const StateBindingSchema = ObsStateBindingSchema
+
 export const ButtonSchema = z.object({
   id,
   slot: z.number().int().min(0).max(99),
@@ -364,6 +410,7 @@ export const ButtonSchema = z.object({
   textColor: hexColor.optional(),
   actions: z.array(ActionSchema).max(16),
   control: ControlSpecSchema.optional(),
+  state: StateBindingSchema.optional(),
   span: CellSpanSchema.optional(),
 })
 

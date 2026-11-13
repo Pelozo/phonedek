@@ -371,7 +371,7 @@ export function ActionEditor({
           </p>
         )}
 
-        {action.type === 'obs' && (
+        {action.type === 'obs' && action.action === 'toggleMute' && (
           <div className="stack">
             <label className="field">
               <span>OBS input</span>
