@@ -16,6 +16,7 @@ import kotlin.math.roundToInt
 object ControlStateStore {
     const val NO_INPUT = "NO INPUT"
     const val NO_OBS = "NO OBS"
+    const val NO_TWITCH = "NO TWITCH"
     const val MUTED = "MUTED"
     const val SWITCHING = "SWITCHING"
     const val NO_STATE = "—"
@@ -62,19 +63,36 @@ object ControlStateStore {
     fun hasObsStateBinding(button: DeckButton?): Boolean =
         button?.state?.type == "obs"
 
+    /** True for a normal tile with a read-only Twitch status binding. */
+    fun hasTwitchStateBinding(button: DeckButton?): Boolean =
+        button?.state?.type == "twitch"
+
+    /** True when a button carries a Twitch action (chat/marker/title/game). */
+    fun hasTwitchAction(actions: List<ActionDto>): Boolean =
+        actions.any { it.type.trim().lowercase() == "twitch" }
+
     /**
      * Chip text for a non-control tile with a state binding. The desktop's
      * `detail` already carries the short form (`LIVE`, `REC`, `OFF`, `42%`,
-     * a scene name); `active` is only a fallback for sparse updates. `null`
-     * means there is nothing to show yet (or the desktop has no live-state
-     * capability, as with an older desktop).
+     * a scene name, a viewer count, uptime, title or game); `active` is only a
+     * fallback for sparse updates. `null` means there is nothing to show yet
+     * (or the desktop has no live-state capability, as with an older desktop).
      */
     fun stateTileText(
         binding: StateBindingDto?,
         state: ControlStateDto?,
         stateCapable: Boolean,
+    ): String? = when (binding?.type) {
+        "obs" -> obsStateTileText(binding, state, stateCapable)
+        "twitch" -> twitchStateTileText(binding, state, stateCapable)
+        else -> null
+    }
+
+    private fun obsStateTileText(
+        binding: StateBindingDto,
+        state: ControlStateDto?,
+        stateCapable: Boolean,
     ): String? {
-        if (binding?.type != "obs") return null
         if (state == null) return if (stateCapable) NO_STATE else null
         val detail = state.detail?.trim()?.takeIf { it.isNotEmpty() }
         // NO OBS / NO INPUT / SWITCHING are status text, not toasts. Show the
@@ -106,22 +124,50 @@ object ControlStateStore {
         }
     }
 
+    /**
+     * Twitch tiles are detail-driven: the desktop already formats `LIVE`,
+     * `OFF`, a viewer count, `1:23:45`, the title or the category. `NO TWITCH`
+     * and `TWITCH OFF` arrive as unavailable details and are shown quietly
+     * (the active treatment requires `available`), never as a toast.
+     */
+    private fun twitchStateTileText(
+        binding: StateBindingDto,
+        state: ControlStateDto?,
+        stateCapable: Boolean,
+    ): String? {
+        if (state == null) return if (stateCapable) NO_STATE else null
+        val detail = state.detail?.trim()?.takeIf { it.isNotEmpty() }
+        if (!state.available) return detail ?: NO_TWITCH
+        if (detail != null) return detail
+        // Sparse live update without a detail: `active` is the only live cue.
+        if (binding.target == "live") {
+            return when (state.active) {
+                true -> "LIVE"
+                false -> "OFF"
+                null -> null
+            }
+        }
+        return null
+    }
+
     /** True when the state chip should use the active/accent treatment. */
     fun stateTileActive(state: ControlStateDto?): Boolean =
         state?.available == true && state.active == true
 
     /**
      * Ids with a desktop live-state producer: absolute output volume,
-     * microphone gain, OBS input volume, and normal buttons with an OBS
-     * read-only `state` binding. Relative volume, scroll and trackpads stay
-     * open-loop.
+     * microphone gain, OBS input volume, and normal buttons with an OBS or
+     * Twitch read-only `state` binding. Relative volume, scroll and trackpads
+     * stay open-loop.
      */
     fun statefulControlIds(page: DeckPage): List<String> =
         page.buttons
             .asSequence()
             .filter { button ->
                 // A status tile uses the same channel, even without a control.
-                if (button.state?.type == "obs") return@filter true
+                if (button.state?.type == "obs" || button.state?.type == "twitch") {
+                    return@filter true
+                }
                 val control = button.control ?: return@filter false
                 if (control.kind == "trackpad" || control.emit != "value") {
                     return@filter false

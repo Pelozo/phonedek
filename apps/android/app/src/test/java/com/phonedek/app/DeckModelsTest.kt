@@ -723,6 +723,66 @@ class DeckModelsTest {
     }
 
     @Test
+    fun parsesEveryTwitchStateTargetOnPlainButtons() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [
+                    { "id": "live", "slot": 0, "label": "Live", "state": { "type": "twitch", "target": "live" } },
+                    { "id": "viewers", "slot": 1, "state": { "type": "twitch", "target": "viewers" } },
+                    { "id": "uptime", "slot": 2, "state": { "type": "twitch", "target": "uptime" } },
+                    { "id": "title", "slot": 3, "state": { "type": "twitch", "target": "title", "scene": "ignored", "input": "ignored" } },
+                    { "id": "game", "slot": 4, "state": { "type": "twitch", "target": "game" } }
+                  ]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val buttons = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons
+        assertEquals(
+            listOf("live", "viewers", "uptime", "title", "game"),
+            buttons.map { it.state!!.target },
+        )
+        assertTrue(buttons.all { it.state!!.type == "twitch" })
+        assertTrue(buttons.all { it.control == null })
+        // Helix targets carry no OBS scene/input hints.
+        assertTrue(buttons.all { it.state!!.scene == null && it.state!!.input == null })
+    }
+
+    @Test
+    fun rejectsUnknownTwitchStateTargetsAndTypes() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [
+                    { "id": "bad-target", "slot": 0, "label": "Keep", "state": { "type": "twitch", "target": "followers" } },
+                    { "id": "obs-target", "slot": 1, "label": "Keep", "state": { "type": "twitch", "target": "streaming" } },
+                    { "id": "bad-type", "slot": 2, "label": "Keep", "state": { "type": "youtube", "target": "live" } },
+                    { "id": "empty", "slot": 3, "state": { "type": "twitch", "target": "" } }
+                  ]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val buttons = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons
+        assertEquals(4, buttons.size)
+        buttons.forEach { button ->
+            assertNull("expected ${button.id} state to be dropped", button.state)
+            // The rest of the tile is still valid and tappable.
+            if (button.id != "empty") assertEquals("Keep", button.label)
+            assertNull(button.control)
+        }
+    }
+
+    @Test
     fun unsupportedControlFallsBackToATapTile() {
         val raw = """
             {

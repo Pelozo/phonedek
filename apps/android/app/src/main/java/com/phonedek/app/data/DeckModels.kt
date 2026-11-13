@@ -89,15 +89,23 @@ data class DeckButton(
     val textColor: String? = null,
     val actions: List<ActionDto> = emptyList(),
     val control: ControlDto? = null,
-    // Read-only status binding for the tile (OBS phase 2). Actions still own
-    // the write; the desktop is the only source of state.
+    // Read-only status binding for the tile (OBS phase 2 / Twitch Helix).
+    // Actions still own the write; the desktop is the only source of state.
     val state: StateBindingDto? = null,
     val span: CellSpanDto? = null,
 )
 
 /**
- * Read-only OBS status shown on a normal button. `scene` marks which scene is
- * live for the `scene` target; `input` selects an OBS input for mute/volume.
+ * Read-only status shown on a normal button.
+ *
+ * `type` selects the producer and its target union:
+ * - `obs`: `streaming`, `recording`, `replay`, `virtualCam`, `scene`,
+ *   `inputMute`, `inputVolume`. `scene` marks which scene is live for the
+ *   `scene` target; `input` selects an OBS input for mute/volume.
+ * - `twitch`: `live`, `viewers`, `uptime`, `title`, `game`. The desktop reads
+ *   the Helix field and sends it as `detail`; no scene/input applies.
+ *
+ * Kept as one forgiving wire shape so old OBS-only configs still parse.
  */
 @Serializable
 data class StateBindingDto(
@@ -476,25 +484,43 @@ private fun CellSpanDto.normalized(): CellSpanDto = copy(
     rows = rows.coerceIn(1, 10),
 )
 
-private fun StateBindingDto.normalized(): StateBindingDto? {
-    if (type.trim().lowercase() != "obs") return null
-    val safeTarget = when (target.trim().lowercase()) {
-        "streaming" -> "streaming"
-        "recording" -> "recording"
-        "replay" -> "replay"
-        "virtualcam" -> "virtualCam"
-        "scene" -> "scene"
-        "inputmute" -> "inputMute"
-        "inputvolume" -> "inputVolume"
-        else -> return null
+private fun StateBindingDto.normalized(): StateBindingDto? =
+    when (type.trim().lowercase()) {
+        "obs" -> {
+            val safeTarget = when (target.trim().lowercase()) {
+                "streaming" -> "streaming"
+                "recording" -> "recording"
+                "replay" -> "replay"
+                "virtualcam" -> "virtualCam"
+                "scene" -> "scene"
+                "inputmute" -> "inputMute"
+                "inputvolume" -> "inputVolume"
+                else -> return null
+            }
+            StateBindingDto(
+                type = "obs",
+                target = safeTarget,
+                scene = scene?.trim()?.take(128)?.takeIf { it.isNotEmpty() },
+                input = input?.trim()?.take(128)?.takeIf { it.isNotEmpty() },
+            )
+        }
+
+        "twitch" -> {
+            // Helix targets are a closed set; the desktop sends the field text
+            // as `detail`, so no scene/input is carried for Twitch.
+            val safeTarget = when (target.trim().lowercase()) {
+                "live" -> "live"
+                "viewers" -> "viewers"
+                "uptime" -> "uptime"
+                "title" -> "title"
+                "game" -> "game"
+                else -> return null
+            }
+            StateBindingDto(type = "twitch", target = safeTarget)
+        }
+
+        else -> null
     }
-    return StateBindingDto(
-        type = "obs",
-        target = safeTarget,
-        scene = scene?.trim()?.take(128)?.takeIf { it.isNotEmpty() },
-        input = input?.trim()?.take(128)?.takeIf { it.isNotEmpty() },
-    )
-}
 
 private fun ControlBindingDto.normalized(): ControlBindingDto? {
     return when (type.trim().lowercase()) {

@@ -256,10 +256,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val failure = error?.takeIf { it.isNotBlank() }
                         ?: "The desktop could not run that action."
                     // OBS being closed or an input disappearing is reflected in
-                    // the tile's live state (NO OBS / NO INPUT). Do not raise a
-                    // deck-level toast for it; a mute tap fails quietly.
-                    if (isObsButton(buttonId)) {
-                        Diag.w("OBS action rejected button=$buttonId error=\"$failure\"")
+                    // the tile's live state (NO OBS / NO INPUT). Twitch being
+                    // disabled, disconnected or unauthorized likewise arrives
+                    // as NO TWITCH / TWITCH OFF state. Do not raise a
+                    // deck-level toast for either; the press fails quietly.
+                    if (isObsButton(buttonId) || isTwitchButton(buttonId)) {
+                        Diag.w("State action rejected button=$buttonId error=\"$failure\"")
                     } else {
                         emit(failure)
                     }
@@ -1432,6 +1434,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val button = activeButton(buttonId) ?: return false
         return ControlStateStore.hasObsAction(button.actions) ||
             ControlStateStore.hasObsStateBinding(button)
+    }
+
+    private fun isTwitchButton(buttonId: String): Boolean {
+        val button = activeButton(buttonId) ?: return false
+        return ControlStateStore.hasTwitchAction(button.actions) ||
+            ControlStateStore.hasTwitchStateBinding(button)
     }
 
     fun onButtonPressed(button: DeckButton) {

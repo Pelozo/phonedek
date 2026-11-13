@@ -401,6 +401,138 @@ class ControlStateStoreTest {
     }
 
     @Test
+    fun watchIdsIncludeTwitchStateButtons() {
+        val page = DeckPage(
+            id = "pg1",
+            buttons = listOf(
+                button("plain", control = null),
+                button(
+                    "twitch-live",
+                    control = null,
+                    state = StateBindingDto(type = "twitch", target = "live"),
+                ),
+                button(
+                    "twitch-title",
+                    control = null,
+                    state = StateBindingDto(type = "twitch", target = "title"),
+                ),
+                button(
+                    "twitch-with-control",
+                    type = "obs",
+                    mode = null,
+                    target = "inputVolume",
+                    state = StateBindingDto(type = "twitch", target = "viewers"),
+                ),
+                button("", control = null, state = StateBindingDto(type = "twitch", target = "game")),
+            ),
+        )
+
+        assertEquals(
+            listOf("twitch-live", "twitch-title", "twitch-with-control"),
+            ControlStateStore.statefulControlIds(page),
+        )
+        assertTrue(
+            ControlStateStore.hasTwitchStateBinding(
+                DeckButton(state = StateBindingDto(type = "twitch", target = "uptime")),
+            ),
+        )
+        assertFalse(ControlStateStore.hasTwitchStateBinding(
+            DeckButton(state = StateBindingDto(type = "obs", target = "streaming")),
+        ))
+    }
+
+    @Test
+    fun twitchStateTileShowsDetailAndUsesTheLiveCue() {
+        fun text(
+            target: String,
+            detail: String? = null,
+            active: Boolean? = null,
+            available: Boolean = true,
+        ) = ControlStateStore.stateTileText(
+            StateBindingDto(type = "twitch", target = target),
+            ControlStateEntryDto(
+                controlId = "tile",
+                revision = 1,
+                available = available,
+                detail = detail,
+                active = active,
+            ),
+            stateCapable = true,
+        )
+
+        // Live cue plus each Helix detail form.
+        assertEquals("LIVE", text("live", detail = "LIVE", active = true))
+        assertEquals("OFF", text("live", detail = "OFF", available = false))
+        assertEquals("321", text("viewers", detail = "321", active = true))
+        assertEquals("1:23:45", text("uptime", detail = "1:23:45", active = true))
+        assertEquals("Late night ranked", text("title", detail = "Late night ranked"))
+        assertEquals("VALORANT", text("game", detail = "VALORANT"))
+        // Sparse live update without a detail still gets a cue.
+        assertEquals("LIVE", text("live", active = true))
+        assertEquals("OFF", text("live", active = false))
+
+        // Outage/unauthorized text is shown quietly on the tile.
+        assertEquals("NO TWITCH", text("live", detail = "NO TWITCH", available = false))
+        assertEquals("TWITCH OFF", text("viewers", detail = "TWITCH OFF", available = false))
+        assertEquals(ControlStateStore.NO_TWITCH, text("live", available = false, detail = null))
+
+        // No entry yet: placeholder only on a state-capable desktop.
+        assertNull(
+            ControlStateStore.stateTileText(
+                StateBindingDto(type = "twitch", target = "live"),
+                null,
+                stateCapable = false,
+            ),
+        )
+        assertEquals(
+            ControlStateStore.NO_STATE,
+            ControlStateStore.stateTileText(
+                StateBindingDto(type = "twitch", target = "live"),
+                null,
+                stateCapable = true,
+            ),
+        )
+    }
+
+    @Test
+    fun twitchActiveTreatmentRequiresAvailableAndTheLiveCue() {
+        val live = StateBindingDto(type = "twitch", target = "live")
+        assertEquals("LIVE", ControlStateStore.stateTileText(
+            live,
+            state("twitch", 1, detail = "LIVE", active = true),
+            stateCapable = true,
+        ))
+        assertTrue(
+            ControlStateStore.stateTileActive(
+                state("twitch", 1, detail = "LIVE", active = true),
+            ),
+        )
+        // Offline, viewer-count and title/game chips never use the accent.
+        assertFalse(
+            ControlStateStore.stateTileActive(
+                state("twitch", 2, detail = "OFF", active = false, available = false),
+            ),
+        )
+        assertFalse(
+            ControlStateStore.stateTileActive(
+                state("twitch", 3, detail = "NO TWITCH", available = false),
+            ),
+        )
+        assertFalse(
+            ControlStateStore.stateTileActive(
+                state("twitch", 4, detail = "Late night ranked"),
+            ),
+        )
+        // Viewers/uptime are live-derived readings, so the live cue still
+        // applies while active.
+        assertTrue(
+            ControlStateStore.stateTileActive(
+                state("twitch", 5, detail = "321", active = true),
+            ),
+        )
+    }
+
+    @Test
     fun normalizedStateMapsToTheControlRangeAndStep() {
         assertEquals(
             42f,
