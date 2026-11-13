@@ -25,4 +25,8 @@ describe('controlBadge', () => {
       'OBS · VOL',
     )
   })
+
+  it('labels shortcut chords', () => {
+    expect(controlBadge(control({ type: 'shortcut', keys: ['CTRL', 'TAB'] }))).toBe('SHORTCUT')
+  })
 })

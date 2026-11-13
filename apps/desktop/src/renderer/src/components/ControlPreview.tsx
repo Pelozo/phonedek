@@ -1,4 +1,10 @@
 import type { ControlSpec, SliderOrDialControlSpec } from '@phonedek/shared'
+import { useHostPlatform } from '../lib/platform'
+import {
+  formatKeysCompact,
+  shortcutBadge,
+  shortcutDirectionLabel,
+} from '../lib/shortcut'
 
 function initialPercent(control: SliderOrDialControlSpec): number {
   const min = control.min ?? 0
@@ -15,6 +21,7 @@ export function controlBadge(control: SliderOrDialControlSpec): string {
   }
   if (control.binding.type === 'mic') return 'MIC · GAIN'
   if (control.binding.type === 'obs') return 'OBS · VOL'
+  if (control.binding.type === 'shortcut') return 'SHORTCUT'
   return 'SCROLL'
 }
 
@@ -33,6 +40,8 @@ export function ControlPreview({
   sublabel?: string
   className?: string
 }) {
+  const platform = useHostPlatform()
+
   if (control.kind === 'trackpad') {
     return (
       <div className={`control-preview trackpad${className ? ` ${className}` : ''}`}>
@@ -51,6 +60,21 @@ export function ControlPreview({
   const percent = initialPercent(control)
   const axis = control.axis ?? 'horizontal'
   const dialAngle = -135 + percent * 270
+
+  if (control.binding.type === 'shortcut') {
+    return (
+      <div className={`control-preview shortcut${className ? ` ${className}` : ''}`}>
+        <span className="control-badge">{shortcutBadge(control.binding, platform)}</span>
+        <span className="control-copy">
+          <span className="control-chord">{formatKeysCompact(control.binding.keys, platform)}</span>
+          <span className="control-direction">
+            {shortcutDirectionLabel(control.binding, platform)}
+            {(control.binding.repeat ?? 1) > 1 ? ` ×${control.binding.repeat}` : ''}
+          </span>
+        </span>
+      </div>
+    )
+  }
 
   return (
     <div

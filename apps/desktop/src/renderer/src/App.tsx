@@ -25,6 +25,12 @@ import { SettingsDialog } from './components/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
 import { cutButtonFromPage, moveButtonToPage, pasteButtonIntoPage } from './lib/clipboard'
 import { HostPlatformProvider } from './lib/platform'
+import {
+  SHORTCUT_PRESETS,
+  shortcutPreset,
+  shortcutPresetControl,
+  type ShortcutPresetId,
+} from './lib/shortcut'
 
 type ToastKind = 'info' | 'success' | 'error'
 interface ToastState {
@@ -425,10 +431,16 @@ function AppContent() {
   }
 
   const addNewControl = (
-    kind: 'volume' | 'scroll' | 'volume-wheel' | 'mic' | 'trackpad' | 'obs',
+    kind: 'volume' | 'scroll' | 'volume-wheel' | 'mic' | 'trackpad' | 'obs' | 'shortcut',
     obsInput?: string,
+    shortcutId?: ShortcutPresetId,
   ): void => {
     if (!config || !profile || !page) return
+    const preset = kind === 'shortcut' ? (shortcutId ? shortcutPreset(shortcutId) : null) : null
+    if (kind === 'shortcut' && !preset) {
+      showToast('Unknown shortcut preset', 'error')
+      return
+    }
     const grid = pageGrid(profile, page)
     const spanCandidates: Array<{ columns: number; rows: number }> =
       kind === 'trackpad'
@@ -437,12 +449,14 @@ function AppContent() {
             { columns: 2, rows: 2 },
             { columns: 1, rows: 1 },
           ]
-        : [
-            kind === 'volume' || kind === 'mic' || kind === 'obs'
-              ? { columns: 3, rows: 1 }
-              : { columns: 2, rows: 1 },
-            { columns: 1, rows: 1 },
-          ]
+        : preset
+          ? [preset.span, { columns: 1, rows: 1 }]
+          : [
+              kind === 'volume' || kind === 'mic' || kind === 'obs'
+                ? { columns: 3, rows: 1 }
+                : { columns: 2, rows: 1 },
+              { columns: 1, rows: 1 },
+            ]
     const preferredSpan = spanCandidates[0]!
 
     const findSlot = (span: { columns: number; rows: number }): number | null => {
@@ -510,7 +524,9 @@ function AppContent() {
             },
             haptics: true,
           }
-        : kind === 'scroll'
+        : preset
+          ? shortcutPresetControl(preset, hostPlatform)
+          : kind === 'scroll'
           ? {
               kind: 'dial',
               emit: 'delta',
@@ -550,15 +566,17 @@ function AppContent() {
                 }
               : volumeControl(kind === 'volume' ? 'slider' : 'dial')
     const label =
-      kind === 'volume' || kind === 'volume-wheel'
-        ? 'Volume'
-        : kind === 'mic'
-          ? 'Mic'
-          : kind === 'obs'
-            ? obsInput?.trim() || 'OBS input'
-            : kind === 'scroll'
-              ? 'Scroll'
-              : 'Trackpad'
+      preset
+        ? preset.label(hostPlatform)
+        : kind === 'volume' || kind === 'volume-wheel'
+          ? 'Volume'
+          : kind === 'mic'
+            ? 'Mic'
+            : kind === 'obs'
+              ? obsInput?.trim() || 'OBS input'
+              : kind === 'scroll'
+                ? 'Scroll'
+                : 'Trackpad'
     // `DeckButton.actions` is still typed as the legacy `Action` union while the
     // config schema accepts `MicAction`; keep the cast local to this builder.
     const micAction: MicAction = { type: 'mic', action: 'toggleMute' }
@@ -570,13 +588,15 @@ function AppContent() {
     const button: DeckButton = {
       ...createEmptyButton(slot, label),
       icon:
-        kind === 'scroll' || kind === 'trackpad'
-          ? '🖱️'
-          : kind === 'mic'
-            ? '🎙️'
-            : kind === 'obs'
-              ? '🎚️'
-              : '🔊',
+        preset
+          ? preset.tileIcon
+          : kind === 'scroll' || kind === 'trackpad'
+            ? '🖱️'
+            : kind === 'mic'
+              ? '🎙️'
+              : kind === 'obs'
+                ? '🎚️'
+                : '🔊',
       span,
       control,
       ...(kind === 'mic'
@@ -590,17 +610,19 @@ function AppContent() {
       setConfig(next)
       setSelectedButtonId(button.id)
       const name =
-        kind === 'volume'
-          ? 'Volume slider'
-          : kind === 'volume-wheel'
-            ? 'Volume wheel'
-            : kind === 'mic'
-              ? 'Mic gain'
-              : kind === 'obs'
-                ? 'OBS input'
-                : kind === 'scroll'
-                  ? 'Scroll wheel'
-                  : 'Trackpad'
+        preset
+          ? preset.name
+          : kind === 'volume'
+            ? 'Volume slider'
+            : kind === 'volume-wheel'
+              ? 'Volume wheel'
+              : kind === 'mic'
+                ? 'Mic gain'
+                : kind === 'obs'
+                  ? 'OBS input'
+                  : kind === 'scroll'
+                    ? 'Scroll wheel'
+                    : 'Trackpad'
       showToast(
         fallback
           ? `${name} added as ${span.columns}×${span.rows} — no ${preferredSpan.columns}×${preferredSpan.rows} space was free`
@@ -760,6 +782,13 @@ function AppContent() {
                   description: '2 × 1 · one mouse-wheel notch per step',
                   onClick: () => addNewControl('scroll'),
                 },
+                ...SHORTCUT_PRESETS.map((preset) => ({
+                  label: preset.name,
+                  section: preset.section,
+                  icon: preset.menuIcon,
+                  description: `${preset.span.columns} × ${preset.span.rows} · ${preset.description}`,
+                  onClick: () => addNewControl('shortcut', undefined, preset.id),
+                })),
                 {
                   label: 'Trackpad',
                   section: 'Pointer',

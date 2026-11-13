@@ -26,11 +26,16 @@ export function Keycaps({
 export function ShortcutDialog({
   initial,
   title = 'Record shortcut',
+  subtitle = 'Press the key combination you want the phone button to send.',
+  modifiersOnly = false,
   onSave,
   onClose,
 }: {
   initial?: string[]
   title?: string
+  subtitle?: string
+  /** Hold keys are modifiers only and stay captured after the keys are released. */
+  modifiersOnly?: boolean
   onSave: (keys: string[]) => void
   onClose: () => void
 }) {
@@ -44,6 +49,7 @@ export function ShortcutDialog({
       event.stopPropagation()
       const key = keyFromEvent(event)
       if (!key) return
+      if (modifiersOnly && !isModifier(key)) return
       if (heldRef.current.includes(key)) return
       heldRef.current = [...heldRef.current, key]
       setHeld(heldRef.current)
@@ -56,6 +62,8 @@ export function ShortcutDialog({
       if (!key) return
       heldRef.current = heldRef.current.filter((item) => item !== key)
       setHeld(heldRef.current)
+      // A held modifier is the whole gesture here; keep it after release.
+      if (modifiersOnly) return
       setChord((previous) => {
         const meaningful = previous.filter((item) => !isModifier(item))
         return meaningful.length > 0 ? previous : []
@@ -67,14 +75,16 @@ export function ShortcutDialog({
       window.removeEventListener('keydown', onDown, true)
       window.removeEventListener('keyup', onUp, true)
     }
-  }, [])
+  }, [modifiersOnly])
 
-  const valid = chord.some((key) => !isModifier(key))
+  const valid = modifiersOnly
+    ? chord.length > 0 && chord.every((key) => isModifier(key))
+    : chord.some((key) => !isModifier(key))
 
   return (
     <Modal
       title={title}
-      subtitle="Press the key combination you want the phone button to send."
+      subtitle={subtitle}
       onClose={onClose}
       closeOnEscape={false}
       footer={
@@ -95,11 +105,15 @@ export function ShortcutDialog({
         {chord.length > 0 ? (
           <Keycaps keys={chord} />
         ) : (
-          <span className="capture-placeholder">Press any shortcut…</span>
+          <span className="capture-placeholder">
+            {modifiersOnly ? 'Hold a modifier…' : 'Press any shortcut…'}
+          </span>
         )}
       </div>
       <p className="hint">
-        Modifier-only combinations are not valid. Use the Save button (Esc can itself be part of a shortcut).
+        {modifiersOnly
+          ? 'Hold keys stay down for the whole phone gesture (for example Alt or Cmd).'
+          : 'Modifier-only combinations are not valid. Use the Save button (Esc can itself be part of a shortcut).'}
       </p>
     </Modal>
   )

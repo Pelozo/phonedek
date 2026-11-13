@@ -7,6 +7,7 @@ import type {
   ExecutableAction,
   MicAction,
   PointerBinding,
+  ShortcutBinding,
   SliderOrDialControlSpec,
   TrackpadControlSpec,
   DeckConfig,
@@ -25,6 +26,7 @@ import {
   pageGrid,
   removeButton,
   resizePageGrid,
+  shortcutDeltaPerStep,
   updateButton,
   updatePageMeta,
   updateProfileMeta,
@@ -44,7 +46,13 @@ import { PopMenu } from './Menu'
 import { MoveToDialog } from './MoveToDialog'
 import { PresetPicker } from './PresetPicker'
 import { ColorField, NumberField, Toggle, useConfirm } from './Primitives'
+import { ShortcutDialog } from './ShortcutDialog'
 import { useHostPlatform } from '../lib/platform'
+import {
+  destructiveShortcutWarning,
+  formatKeysCompact,
+  shortcutDirectionLabel,
+} from '../lib/shortcut'
 
 const DEFAULT_MACRO_STEP: MacroStep = { type: 'hotkey', keys: ['CTRL', 'C'], holdMs: 35 }
 
@@ -118,6 +126,7 @@ export function Inspector({
   const [presetsOpen, setPresetsOpen] = useState(false)
   const [moveOpen, setMoveOpen] = useState(false)
   const [iconBusy, setIconBusy] = useState<'image' | 'video' | null>(null)
+  const [shortcutTarget, setShortcutTarget] = useState<'keys' | 'reverse' | 'hold' | null>(null)
   const platform = useHostPlatform()
   const confirm = useConfirm()
   const initialObsBinding =
@@ -139,6 +148,10 @@ export function Inspector({
 
   useEffect(() => {
     setMoveOpen(false)
+  }, [button?.id])
+
+  useEffect(() => {
+    setShortcutTarget(null)
   }, [button?.id])
 
   const buttonDefaultBackground = profile.theme.buttonBackground
@@ -380,9 +393,21 @@ export function Inspector({
     })
   }
 
-  const setControlBinding = (type: 'volume' | 'scroll' | 'mic' | 'obs'): void => {
+  const setControlBinding = (type: 'volume' | 'scroll' | 'mic' | 'obs' | 'shortcut'): void => {
     if (!button.control || button.control.kind === 'trackpad') return
     if (button.control.binding.type === type) return
+    if (type === 'shortcut') {
+      updateControl({
+        emit: 'delta',
+        binding: {
+          type: 'shortcut',
+          keys: ['CTRL', 'TAB'],
+          reverseKeys: ['CTRL', 'SHIFT', 'TAB'],
+          ...(button.control.kind === 'slider' ? { travelSteps: 20 } : {}),
+        },
+      })
+      return
+    }
     if (type === 'scroll') {
       updateControl({ emit: 'delta', binding: { type: 'scroll', axis: 'vertical' } })
       return
@@ -536,9 +561,38 @@ export function Inspector({
   )
   const controlSpan = buttonSpan(button)
   const controlIsAbsolute = control?.binding.type === 'volume' && control.binding.mode === 'absolute'
+  const shortcut = control?.binding.type === 'shortcut' ? control.binding : null
+  const shortcutWarning = shortcut
+    ? (destructiveShortcutWarning(shortcut.keys, shortcut.holdKeys, platform) ??
+      (shortcut.reverseKeys
+        ? destructiveShortcutWarning(shortcut.reverseKeys, shortcut.holdKeys, platform)
+        : null))
+    : null
+
+  const updateShortcut = (patch: Partial<ShortcutBinding>): void => {
+    if (!control || control.binding.type !== 'shortcut') return
+    updateControl({
+      binding: { ...control.binding, ...structuredClone(patch) },
+    })
+  }
 
   const testControl = async (direction: -1 | 1): Promise<void> => {
     if (!control) return
+    if (control.binding.type === 'shortcut') {
+      const delta = direction * shortcutDeltaPerStep(control)
+      const result = await window.phonedek.testControlInput(profile.id, page.id, button.id, delta)
+      const chord =
+        direction > 0
+          ? control.binding.keys
+          : (control.binding.reverseKeys ?? control.binding.keys)
+      onToast(
+        result.ok
+          ? `Sent ${formatKeysCompact(chord, platform)} on this PC${control.binding.holdKeys?.length ? ' (hold keys apply on the phone)' : ''}`
+          : (result.error ?? 'Control test failed'),
+        result.ok ? 'success' : 'error',
+      )
+      return
+    }
     if (control.binding.type === 'mic') {
       await testActions([MIC_TOGGLE_ACTION], 'Toggle mic mute')
       return
@@ -604,7 +658,9 @@ export function Inspector({
         },
       },
       actions: button.actions.map((action): Action =>
-        action.type === 'obs' && (action.input === previous || action.input === undefined)
+        action.type === 'obs' &&
+        action.action === 'toggleMute' &&
+        (action.input === previous || action.input === undefined)
           ? { type: 'obs', action: 'toggleMute', ...(next ? { input: next } : {}) }
           : action,
       ),
@@ -1067,7 +1123,9 @@ export function Inspector({
                     ? 'MIC · GAIN'
                     : control.binding.type === 'obs'
                       ? 'OBS · VOL'
-                      : 'SCROLL'}
+                      : control.binding.type === 'shortcut'
+                        ? 'SHORTCUT'
+                        : 'SCROLL'}
               </span>
             </div>
 
@@ -1081,7 +1139,30 @@ export function Inspector({
             </div>
 
             <div className="row gap">
-              {control.binding.type === 'mic' ? (
+              {control.binding.type === 'shortcut' ? (
+                <>
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    title={`Send ${formatKeysCompact(control.binding.reverseKeys ?? control.binding.keys, platform)}`}
+                    onClick={() => void testControl(-1)}
+                  >
+                    Test −
+                  </button>
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    title={`Send ${formatKeysCompact(control.binding.keys, platform)}`}
+                    onClick={() => void testControl(1)}
+                  >
+                    Test +
+                  </button>
+                  <span className="hint">
+                    Sends the reverse / forward chord on this PC
+                    {control.binding.holdKeys?.length ? ' · hold keys apply on the phone' : ''}
+                  </span>
+                </>
+              ) : control.binding.type === 'mic' ? (
                 <>
                   <button
                     type="button"
@@ -1164,16 +1245,121 @@ export function Inspector({
                 <select
                   value={control.binding.type}
                   onChange={(event) =>
-                    setControlBinding(event.target.value as 'volume' | 'scroll' | 'mic' | 'obs')
+                    setControlBinding(
+                      event.target.value as 'volume' | 'scroll' | 'mic' | 'obs' | 'shortcut',
+                    )
                   }
                 >
                   <option value="volume">Volume</option>
                   <option value="mic">Mic</option>
                   <option value="obs">OBS input volume</option>
                   <option value="scroll">Scroll</option>
+                  <option value="shortcut">Shortcut chord</option>
                 </select>
               </label>
             </div>
+
+            {shortcut && (
+              <div className="shortcut-editor">
+                <div className="shortcut-summary">
+                  <span className="shortcut-summary-label">Primary</span>
+                  <span className="shortcut-chord mono">{formatKeysCompact(shortcut.keys, platform)}</span>
+                  <button
+                    type="button"
+                    className="button ghost small"
+                    onClick={() => setShortcutTarget('keys')}
+                  >
+                    Change
+                  </button>
+                </div>
+
+                <div className="shortcut-summary">
+                  <span className="shortcut-summary-label">Reverse</span>
+                  <span className={`shortcut-chord mono${shortcut.reverseKeys ? '' : ' muted'}`}>
+                    {shortcut.reverseKeys
+                      ? formatKeysCompact(shortcut.reverseKeys, platform)
+                      : 'Same as primary'}
+                  </span>
+                  <button
+                    type="button"
+                    className="button ghost small"
+                    onClick={() => setShortcutTarget('reverse')}
+                  >
+                    {shortcut.reverseKeys ? 'Change' : 'Set'}
+                  </button>
+                  {shortcut.reverseKeys && (
+                    <button
+                      type="button"
+                      className="button ghost small"
+                      onClick={() => updateShortcut({ reverseKeys: undefined })}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
+                <div className="shortcut-summary">
+                  <span className="shortcut-summary-label">Hold</span>
+                  <span className={`shortcut-chord mono${shortcut.holdKeys?.length ? '' : ' muted'}`}>
+                    {shortcut.holdKeys?.length
+                      ? formatKeysCompact(shortcut.holdKeys, platform)
+                      : 'None'}
+                  </span>
+                  <button
+                    type="button"
+                    className="button ghost small"
+                    onClick={() => setShortcutTarget('hold')}
+                  >
+                    {shortcut.holdKeys?.length ? 'Change' : 'Set'}
+                  </button>
+                  {shortcut.holdKeys?.length ? (
+                    <button
+                      type="button"
+                      className="button ghost small"
+                      onClick={() => updateShortcut({ holdKeys: undefined })}
+                    >
+                      Clear
+                    </button>
+                  ) : null}
+                </div>
+
+                <div className="two-col">
+                  <NumberField
+                    label="Repeat"
+                    value={shortcut.repeat ?? 1}
+                    min={1}
+                    max={5}
+                    onChange={(repeat) => updateShortcut({ repeat })}
+                  />
+                  {control.kind === 'slider' && (
+                    <NumberField
+                      label="Travel steps"
+                      value={shortcut.travelSteps ?? 20}
+                      min={4}
+                      max={100}
+                      onChange={(travelSteps) => updateShortcut({ travelSteps })}
+                    />
+                  )}
+                </div>
+
+                <p className="hint">
+                  One chord per dial detent
+                  {control.kind === 'slider'
+                    ? ` or per ${shortcut.travelSteps ?? 20} slices across the slider`
+                    : ''}
+                  . Positive movement sends the primary chord; negative sends the reverse.
+                </p>
+                <p className="hint mono shortcut-direction">
+                  {shortcutDirectionLabel(shortcut, platform)}
+                </p>
+                {shortcutWarning && (
+                  <p className="hint error-text">
+                    Warning: this sends {shortcutWarning}, which can lock, sign out of, or close
+                    apps on this PC.
+                  </p>
+                )}
+              </div>
+            )}
 
             {control.binding.type === 'mic' && (
               <p className="hint">Default capture device · tap the tile label to mute</p>
@@ -1247,7 +1433,7 @@ export function Inspector({
               </>
             )}
 
-            {control.kind === 'slider' && (
+            {control.kind === 'slider' && control.binding.type !== 'shortcut' && (
               <label className="field">
                 <span>Slider axis</span>
                 <select
@@ -1294,8 +1480,9 @@ export function Inspector({
               </div>
             )}
 
-            <div className="control-range">
-              <div className="two-col">
+            {control.binding.type !== 'shortcut' && (
+              <div className="control-range">
+                <div className="two-col">
                 <NumberField
                   label="Min"
                   value={controlMin}
@@ -1338,6 +1525,7 @@ export function Inspector({
                 />
               </label>
             </div>
+            )}
 
             <Toggle
               label="Haptics"
@@ -1364,13 +1552,15 @@ export function Inspector({
             </div>
 
             <p className="hint">
-              {control.binding.type === 'mic'
-                ? 'Editor preview only. Drag on the phone to set mic gain; tap the label or mic glyph to mute. The mic action below stays as the fallback.'
-                : control.binding.type === 'obs'
-                  ? 'Editor preview only. Drag on the phone to set the OBS input level; Test −, Test + and Test mute talk to OBS directly. Input names are scene-collection scoped.'
-                  : control.binding.type === 'volume' && control.binding.mode === 'absolute'
-                    ? 'Editor preview only. The phone sends an absolute value; tap actions stay as the fallback.'
-                    : 'Editor preview only. The phone renders this control and sends relative deltas; tap actions stay as the fallback.'}
+              {control.binding.type === 'shortcut'
+                ? 'Editor preview only. Drag on the phone to send one chord per step; Test − / Test + send a chord on this PC. Hold keys live only for the phone gesture.'
+                : control.binding.type === 'mic'
+                  ? 'Editor preview only. Drag on the phone to set mic gain; tap the label or mic glyph to mute. The mic action below stays as the fallback.'
+                  : control.binding.type === 'obs'
+                    ? 'Editor preview only. Drag on the phone to set the OBS input level; Test −, Test + and Test mute talk to OBS directly. Input names are scene-collection scoped.'
+                    : control.binding.type === 'volume' && control.binding.mode === 'absolute'
+                      ? 'Editor preview only. The phone sends an absolute value; tap actions stay as the fallback.'
+                      : 'Editor preview only. The phone renders this control and sends relative deltas; tap actions stay as the fallback.'}
             </p>
 
             <button type="button" className="button danger ghost full" onClick={() => void removeControl()}>
@@ -1430,7 +1620,9 @@ export function Inspector({
                       ? 'No tap action needed. Drag this control on the phone to set mic gain; use Test mute above to verify the mic on this PC.'
                       : button.control.binding.type === 'obs'
                         ? 'No tap action needed. Drag this control on the phone to set the OBS input level; add an OBS mute action if you want a tap action.'
-                        : 'No tap action needed. Drag this control on the phone to send volume or scroll steps; use Test − / Test + above to verify it on this PC.'
+                        : button.control.binding.type === 'shortcut'
+                          ? 'No tap action needed. Turn or drag this control on the phone to send chords; use Test − / Test + above to verify them on this PC.'
+                          : 'No tap action needed. Drag this control on the phone to send volume or scroll steps; use Test − / Test + above to verify it on this PC.'
                   : 'No actions yet. This button will do nothing when pressed.'}
               </p>
             </div>
@@ -1463,6 +1655,39 @@ export function Inspector({
       </div>
 
       {presetsOpen && <PresetPicker onClose={() => setPresetsOpen(false)} onPick={addPreset} />}
+      {shortcut && shortcutTarget && (
+        <ShortcutDialog
+          initial={
+            shortcutTarget === 'keys'
+              ? shortcut.keys
+              : shortcutTarget === 'reverse'
+                ? (shortcut.reverseKeys ?? [])
+                : (shortcut.holdKeys ?? [])
+          }
+          title={
+            shortcutTarget === 'keys'
+              ? 'Edit primary chord'
+              : shortcutTarget === 'reverse'
+                ? 'Edit reverse chord'
+                : 'Edit hold keys'
+          }
+          subtitle={
+            shortcutTarget === 'keys'
+              ? 'Sent when the phone control moves forward.'
+              : shortcutTarget === 'reverse'
+                ? 'Sent when the phone control moves backward. Leave unset to send the primary chord both ways.'
+                : 'Held down for the whole phone gesture. Modifiers only.'
+          }
+          modifiersOnly={shortcutTarget === 'hold'}
+          onSave={(keys) => {
+            if (shortcutTarget === 'keys') updateShortcut({ keys })
+            else if (shortcutTarget === 'reverse') updateShortcut({ reverseKeys: keys })
+            else updateShortcut({ holdKeys: keys })
+            setShortcutTarget(null)
+          }}
+          onClose={() => setShortcutTarget(null)}
+        />
+      )}
       {moveOpen && (
         <MoveToDialog
           config={config}
