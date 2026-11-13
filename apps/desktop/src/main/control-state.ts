@@ -4,18 +4,20 @@ import type {
   DeckButton,
   DeckConfig,
   ObsStateTarget,
+  TwitchStateTarget,
 } from '@phonedek/shared'
 import type { Logger } from './logger'
 import type { VolumeReader, VolumeReading } from './volume-source'
 import type { MicReader, MicReading } from './microphone-source'
 import type { ObsInputReading, ObsStateReader, ObsStatusReading } from './obs-source'
+import type { TwitchStateReader, TwitchStatusReading } from './twitch-source'
 
 /** Minimum allowed watch poll interval, matching the shared protocol schema. */
 export const MIN_WATCH_INTERVAL_MS = 500
 export const DEFAULT_WATCH_INTERVAL_MS = 1000
 const WRITE_GRACE_MS = 1500
 
-export type ControlStateSource = 'volume' | 'mic' | 'obs'
+export type ControlStateSource = 'volume' | 'mic' | 'obs' | 'twitch'
 
 export interface StateControl {
   id: string
@@ -25,10 +27,12 @@ export interface StateControl {
   input?: string
   /** Display maximum for OBS controls; defaults to 100 for volume/mic. */
   max?: number
-  /** Read-only status target from a button `state` binding. */
+  /** Read-only status target from an OBS button `state` binding. */
   target?: ObsStateTarget
   /** Scene name for the `scene` status target (also marks which scene is live). */
   scene?: string
+  /** Read-only status target from a Twitch button `state` binding. */
+  twitchTarget?: TwitchStateTarget
 }
 
 export interface AbsoluteVolumeControl {
@@ -62,6 +66,11 @@ export function isMicGainControl(button: DeckButton): boolean {
 /** A normal button with an OBS read-only `state` binding (status tile). */
 export function isObsStateButton(button: DeckButton): boolean {
   return button.state?.type === 'obs'
+}
+
+/** A normal button with a Twitch read-only `state` binding (status tile). */
+export function isTwitchStateButton(button: DeckButton): boolean {
+  return button.state?.type === 'twitch'
 }
 
 /** A value-bearing slider/dial that reads and writes one OBS input. */
@@ -125,6 +134,16 @@ export function resolveStateControls(
       if (controls.length >= 32) break
       continue
     }
+    if (state?.type === 'twitch') {
+      controls.push({
+        id: button.id,
+        label: button.label,
+        source: 'twitch',
+        twitchTarget: state.target,
+      })
+      if (controls.length >= 32) break
+      continue
+    }
     const obs = isObsVolumeControl(button) ? button.control : null
     const source: ControlStateSource | null = isAbsoluteVolumeControl(button)
       ? 'volume'
@@ -166,6 +185,7 @@ export interface ControlStateServiceOptions {
   reader?: VolumeReader
   micReader?: MicReader | null
   obsReader?: ObsStateReader | null
+  twitchReader?: TwitchStateReader | null
   logger?: Logger
   now?: () => number
   defaultIntervalMs?: number
@@ -196,8 +216,8 @@ function stateSignature(entry: ControlStateEntry): string {
 }
 
 function isStatusReading(
-  reading: VolumeReading | MicReading | ObsInputReading | ObsStatusReading,
-): reading is ObsStatusReading {
+  reading: VolumeReading | MicReading | ObsInputReading | ObsStatusReading | TwitchStatusReading,
+): reading is ObsStatusReading | TwitchStatusReading {
   return typeof (reading as ObsStatusReading).detail === 'string'
 }
 
@@ -216,10 +236,27 @@ function obsUnavailableDetail(error: string): string {
   return error.slice(0, 60)
 }
 
+function twitchUnavailableDetail(error: string): string {
+  if (/disabled/i.test(error)) return 'TWITCH OFF'
+  if (
+    /not connected|client id|authoriz|token|scope|unauthorized|auth required|reconnect/i.test(error)
+  ) {
+    return 'NO TWITCH'
+  }
+  if (/rate limit/i.test(error)) return 'RATE LIMIT'
+  return error.slice(0, 60)
+}
+
+function unavailableDetail(source: ControlStateSource, error: string): string {
+  if (source === 'obs') return obsUnavailableDetail(error)
+  if (source === 'twitch') return twitchUnavailableDetail(error)
+  return error.slice(0, 60)
+}
+
 function readingEntry(
   controlId: string,
   source: ControlStateSource,
-  reading: VolumeReading | MicReading | ObsInputReading | ObsStatusReading | null,
+  reading: VolumeReading | MicReading | ObsInputReading | ObsStatusReading | TwitchStatusReading | null,
   error: string | null,
   max?: number,
 ): ControlStateEntry {
@@ -228,22 +265,26 @@ function readingEntry(
       controlId,
       revision: 0,
       available: false,
-      detail: error
-        ? source === 'obs'
-          ? obsUnavailableDetail(error)
-          : error.slice(0, 60)
-        : 'Unavailable',
+      detail: error ? unavailableDetail(source, error) : 'Unavailable',
       ...(error ? { error: error.slice(0, 200) } : {}),
     }
   }
   if (isStatusReading(reading)) {
+    if ('available' in reading && reading.available === false) {
+      return {
+        controlId,
+        revision: 0,
+        available: false,
+        detail: reading.detail,
+      }
+    }
     return {
       controlId,
       revision: 0,
       available: true,
       detail: reading.detail,
       ...(reading.value === undefined ? {} : { value: reading.value }),
-      ...(reading.muted === undefined ? {} : { muted: reading.muted }),
+      ...('muted' in reading && reading.muted !== undefined ? { muted: reading.muted } : {}),
       ...(reading.active === undefined ? {} : { active: reading.active }),
     }
   }
@@ -274,6 +315,7 @@ export class ControlStateService {
   private readonly reader?: VolumeReader
   private readonly micReader?: MicReader | null
   private readonly obsReader?: ObsStateReader | null
+  private readonly twitchReader?: TwitchStateReader | null
   private readonly logger?: Logger
   private readonly now: () => number
   private readonly defaultIntervalMs: number
@@ -295,6 +337,7 @@ export class ControlStateService {
     this.reader = options.reader
     this.micReader = options.micReader
     this.obsReader = options.obsReader
+    this.twitchReader = options.twitchReader
     this.logger = options.logger
     this.now = options.now ?? Date.now
     this.defaultIntervalMs = clampInterval(options.defaultIntervalMs, DEFAULT_WATCH_INTERVAL_MS)
@@ -428,6 +471,16 @@ export class ControlStateService {
     })
   }
 
+  /** Twitch write or auth change: invalidate and send changed entries now. */
+  noteTwitchChanged(target?: TwitchStateTarget): Promise<void> {
+    if (this.disposed) return Promise.resolve()
+    return this.enqueue(async () => {
+      this.twitchReader?.invalidateStatus(target)
+      this.suppressUntil = Math.max(this.suppressUntil, this.now() + this.writeGraceMs)
+      await this.refresh(undefined, false, true)
+    })
+  }
+
   /** Test/manual hook: evaluate and send changed state immediately. */
   pollNow(): Promise<void> {
     if (this.disposed) return Promise.resolve()
@@ -553,6 +606,33 @@ export class ControlStateService {
       }
     }
 
+    const twitchControls = watched.filter((control) => control.source === 'twitch')
+    if (twitchControls.length > 0) {
+      const groups = new Map<TwitchStateTarget, typeof twitchControls>()
+      for (const control of twitchControls) {
+        const target = control.twitchTarget ?? 'live'
+        const group = groups.get(target)
+        if (group) group.push(control)
+        else groups.set(target, [control])
+      }
+      for (const [target, controls] of groups) {
+        let reading: TwitchStatusReading | null = null
+        let error: string | null = null
+        if (!this.twitchReader) {
+          error = 'Twitch state is not available on this desktop.'
+        } else {
+          try {
+            reading = await this.twitchReader.readStatus(target)
+          } catch (caught) {
+            error = caught instanceof Error ? caught.message : String(caught)
+          }
+        }
+        for (const control of controls) {
+          this.updateEntry(control.key, control.controlId, 'twitch', reading, error)
+        }
+      }
+    }
+
     const now = this.now()
     for (const sub of [...this.subscriptions.values()]) {
       if (immediate === sub) {
@@ -586,6 +666,7 @@ export class ControlStateService {
     max?: number
     target?: ObsStateTarget
     scene?: string
+    twitchTarget?: TwitchStateTarget
   }> {
     const controls = new Map<
       string,
@@ -597,6 +678,7 @@ export class ControlStateService {
         max?: number
         target?: ObsStateTarget
         scene?: string
+        twitchTarget?: TwitchStateTarget
       }
     >()
     for (const sub of this.subscriptions.values()) {
@@ -612,6 +694,7 @@ export class ControlStateService {
           ...(meta?.max !== undefined ? { max: meta.max } : {}),
           ...(meta?.target ? { target: meta.target } : {}),
           ...(meta?.scene ? { scene: meta.scene } : {}),
+          ...(meta?.twitchTarget ? { twitchTarget: meta.twitchTarget } : {}),
         })
       }
     }
@@ -631,7 +714,7 @@ export class ControlStateService {
     key: string,
     controlId: string,
     source: ControlStateSource,
-    reading: VolumeReading | MicReading | ObsInputReading | ObsStatusReading | null,
+    reading: VolumeReading | MicReading | ObsInputReading | ObsStatusReading | TwitchStatusReading | null,
     error: string | null,
     max?: number,
   ): void {

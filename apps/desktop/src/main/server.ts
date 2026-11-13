@@ -10,6 +10,7 @@ import {
   CONTROL_STATE_CAPABILITY,
   OBS_CAPABILITY,
   POINTER_CAPABILITY,
+  TWITCH_CAPABILITY,
   PROTOCOL_VERSION,
   parseClientMessage,
 } from '@phonedek/shared'
@@ -50,23 +51,26 @@ export const SERVER_CAPABILITIES = [
   POINTER_CAPABILITY,
   CONTROL_STATE_CAPABILITY,
   OBS_CAPABILITY,
+  TWITCH_CAPABILITY,
 ] as const
 
 /**
  * Capabilities for a specific host. Wayland/unsupported platforms must not
- * advertise `pointer-v1`, a host with no volume/mic/OBS reader must not
- * advertise `control-state-v1`, and `obs-v1` is dynamic: it is advertised only
- * while the OBS client is identified.
+ * advertise `pointer-v1`, a host with no volume/mic/OBS/Twitch state reader must
+ * not advertise `control-state-v1`, and `obs-v1`/`twitch-v1` are dynamic: they
+ * are advertised only while that integration is identified/authorized.
  */
 export function serverCapabilities(
   pointerSupported: boolean,
   stateSupported = false,
   obsSupported = false,
+  twitchSupported = false,
 ): string[] {
   return SERVER_CAPABILITIES.filter((capability) => {
     if (capability === POINTER_CAPABILITY) return pointerSupported
     if (capability === CONTROL_STATE_CAPABILITY) return stateSupported
     if (capability === OBS_CAPABILITY) return obsSupported
+    if (capability === TWITCH_CAPABILITY) return twitchSupported
     return true
   })
 }
@@ -155,6 +159,8 @@ export interface DeckServerOptions {
   controlStateSupported?: boolean
   /** Dynamic: advertise `obs-v1` only while the OBS client is identified. */
   obsSupported?: () => boolean
+  /** Dynamic: advertise `twitch-v1` only while Twitch is authorized. */
+  twitchSupported?: () => boolean
   /** Called when a phone disconnects, so held pointer buttons can be released. */
   onClientClosed?: (client: ConnectedClient) => void
   /** Called only after an uploaded backup validates; show native approval here. */
@@ -401,6 +407,7 @@ export class DeckServer {
       this.options.pointerSupported !== false,
       this.options.controlStateSupported === true,
       this.options.obsSupported?.() === true,
+      this.options.twitchSupported?.() === true,
     )
   }
 

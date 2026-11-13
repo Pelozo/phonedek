@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, statSync, accessSync, constants } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { ObsPlanStep } from '@phonedek/shared'
+import type { ObsPlanStep, TwitchPlanStep } from '@phonedek/shared'
 import type { Logger } from './logger'
 import {
   LINUX_INPUT_COMMAND,
@@ -32,6 +32,8 @@ export interface HostActions {
   toggleObsInputMute?(input?: string): Promise<void>
   /** Run any OBS plan step (optional; absent when OBS is not wired). */
   runObsAction?(step: ObsPlanStep): Promise<void>
+  /** Run any Twitch plan step (optional; absent when Twitch is not wired). */
+  runTwitchAction?(step: TwitchPlanStep): Promise<void>
 }
 
 export interface HostActionOptions {
@@ -54,6 +56,8 @@ export interface HostActionOptions {
   toggleObsInputMute?: (input?: string) => Promise<void>
   /** Test seam / shared controller for the full OBS action family. */
   runObsAction?: (step: ObsPlanStep) => Promise<void>
+  /** Test seam / shared controller for the full Twitch action family. */
+  runTwitchAction?: (step: TwitchPlanStep) => Promise<void>
   /** Overrides the user's home directory (used by tests to avoid touching ~/Desktop). */
   homeDir?: string
   logger?: Logger
@@ -425,6 +429,15 @@ export function createHostActions(options: HostActionOptions = {}): HostActions 
           async runObsAction(step: ObsPlanStep) {
             await options.runObsAction!(step)
             logger?.info(`Ran OBS action: ${step.action}`)
+          },
+        }
+      : {}),
+
+    ...(options.runTwitchAction
+      ? {
+          async runTwitchAction(step: TwitchPlanStep) {
+            await options.runTwitchAction!(step)
+            logger?.info(`Ran Twitch action: ${step.action}`)
           },
         }
       : {}),

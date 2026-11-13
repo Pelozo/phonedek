@@ -12,6 +12,9 @@ import type {
   PhoneDeckApi,
   SaveConfigResult,
   ServerInfoView,
+  TwitchAuthStartResult,
+  TwitchSettingsInput,
+  TwitchStatusView,
   UpdateStatus,
 } from '../shared/api'
 
@@ -53,6 +56,12 @@ const api: PhoneDeckApi = {
     ipcRenderer.invoke(IPC.testObsInputVolume, input, percent),
   testObsMute: (input?: string): Promise<PressResult> =>
     ipcRenderer.invoke(IPC.testObsMute, input),
+  getTwitchStatus: (): Promise<TwitchStatusView> => ipcRenderer.invoke(IPC.getTwitchStatus),
+  setTwitchSettings: (input: TwitchSettingsInput): Promise<OperationResult> =>
+    ipcRenderer.invoke(IPC.setTwitchSettings, input),
+  startTwitchAuth: (): Promise<TwitchAuthStartResult> => ipcRenderer.invoke(IPC.startTwitchAuth),
+  cancelTwitchAuth: (): Promise<OperationResult> => ipcRenderer.invoke(IPC.cancelTwitchAuth),
+  disconnectTwitch: (): Promise<OperationResult> => ipcRenderer.invoke(IPC.disconnectTwitch),
   exportConfig: (): Promise<OperationResult> => ipcRenderer.invoke(IPC.exportConfig),
   importConfig: (): Promise<SaveConfigResult> => ipcRenderer.invoke(IPC.importConfig),
   openLogs: (): Promise<void> => ipcRenderer.invoke(IPC.openLogs),

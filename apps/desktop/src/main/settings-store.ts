@@ -3,6 +3,7 @@ import { isAbsolute, join } from 'node:path'
 import { randomInt } from 'node:crypto'
 import { DEFAULT_HTTP_PORT } from '@phonedek/shared'
 import type { Logger } from './logger'
+import { builtinTwitchClientId, sanitizeTwitchClientId } from './twitch-auth'
 
 export interface AppSettings {
   port: number
@@ -25,6 +26,10 @@ export interface AppSettings {
   obsPort: number
   /** OBS WebSocket password. Never sent to the phone or renderer. */
   obsPassword: string
+  /** Connect the streamer's Twitch account through Device Code Flow. */
+  twitchEnabled: boolean
+  /** Public Twitch client ID. Defaults to a bundled/env value when present. */
+  twitchClientId: string
 }
 
 /** Four-digit pairing PIN (the QR/link is the low-friction path). */
@@ -80,6 +85,8 @@ export function defaultSettings(): AppSettings {
     obsHost: DEFAULT_OBS_HOST,
     obsPort: DEFAULT_OBS_PORT,
     obsPassword: '',
+    twitchEnabled: false,
+    twitchClientId: builtinTwitchClientId(),
   }
 }
 
@@ -125,6 +132,13 @@ function sanitize(input: Partial<AppSettings> | null | undefined): AppSettings {
     obsHost: sanitizeObsHost(input.obsHost),
     obsPort: sanitizeObsPort(input.obsPort),
     obsPassword: sanitizeObsPassword(input.obsPassword),
+    twitchEnabled:
+      typeof input.twitchEnabled === 'boolean' ? input.twitchEnabled : defaults.twitchEnabled,
+    // An explicit empty string is meaningful (user cleared a bundled default).
+    twitchClientId:
+      input.twitchClientId === undefined
+        ? defaults.twitchClientId
+        : sanitizeTwitchClientId(input.twitchClientId),
   }
 }
 

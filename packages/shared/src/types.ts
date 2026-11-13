@@ -23,6 +23,9 @@ export const KEYBOARD_CAPABILITY = 'keyboard-v1' as const
 /** Desktop capability for OBS WebSocket input volume/mute control. */
 export const OBS_CAPABILITY = 'obs-v1' as const
 
+/** Desktop capability for Twitch Helix reads and actions (authorized only). */
+export const TWITCH_CAPABILITY = 'twitch-v1' as const
+
 export const DEFAULT_HTTP_PORT = 47654
 export const DISCOVERY_PORT = 47655
 export const DISCOVERY_MAGIC = 'PHONEDECK'
@@ -257,12 +260,22 @@ export type Action =
   | ObsAction
 
 /**
- * Everything the host can execute. `MicAction` is accepted by ActionSchema and
- * the plan builder but deliberately stays out of `Action` so older renderers do
- * not have to handle it. OBS actions are part of `Action` because the UI needs
- * to render/edit them directly.
+ * Twitch Helix actions. Text is configured on the desktop and validated by the
+ * config schema; the phone never supplies it. Limits follow Twitch:
+ * chat 500, marker description 140, stream title 140.
  */
-export type ExecutableAction = Action | MicAction
+export type TwitchAction =
+  | { type: 'twitch'; action: 'sendChat'; message: string }
+  | { type: 'twitch'; action: 'createMarker'; description?: string }
+  | { type: 'twitch'; action: 'setTitle'; title: string }
+  | { type: 'twitch'; action: 'setGame'; game: string }
+
+/**
+ * Everything the host can execute. `MicAction` and `TwitchAction` are accepted
+ * by ActionSchema and the plan builder but deliberately stay out of `Action`
+ * so older renderers do not have to handle them.
+ */
+export type ExecutableAction = Action | MicAction | TwitchAction
 
 /** Footprint of a button measured in grid cells. */
 export interface CellSpan {
@@ -310,8 +323,17 @@ export interface ObsStateBinding {
   input?: string
 }
 
-/** State binding union; OBS is the only provider in this phase. */
-export type StateBinding = ObsStateBinding
+/** Read-only Twitch status a normal button tile can display. */
+export type TwitchStateTarget = 'live' | 'viewers' | 'uptime' | 'title' | 'game'
+
+/** Read-only Twitch status binding; `target` selects the Helix field. */
+export interface TwitchStateBinding {
+  type: 'twitch'
+  target: TwitchStateTarget
+}
+
+/** State binding union; OBS and Twitch status tiles. */
+export type StateBinding = ObsStateBinding | TwitchStateBinding
 
 /**
  * A key wheel: one chord per dial detent or slider slice.
@@ -557,6 +579,12 @@ export type ObsPlanStep =
   | { kind: 'obs'; action: 'toggleSourceVisibility'; scene?: string; source: string }
   | { kind: 'obs'; action: 'addMarker'; name?: string }
 
+export type TwitchPlanStep =
+  | { kind: 'twitch'; action: 'sendChat'; message: string }
+  | { kind: 'twitch'; action: 'createMarker'; description?: string }
+  | { kind: 'twitch'; action: 'setTitle'; title: string }
+  | { kind: 'twitch'; action: 'setGame'; game: string }
+
 export type PlanStep =
   | KeyPlanStep
   | TextPlanStep
@@ -569,6 +597,7 @@ export type PlanStep =
   | PagePlanStep
   | MicPlanStep
   | ObsPlanStep
+  | TwitchPlanStep
 
 export type KeyboardPlanStep = KeyPlanStep | TextPlanStep | DelayPlanStep | MediaPlanStep | MousePlanStep
 

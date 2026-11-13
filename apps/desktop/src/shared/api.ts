@@ -25,6 +25,8 @@ export interface ServerInfoView {
   logPath: string | null
   /** Live OBS connection status; never includes the password. */
   obsStatus: ObsStatusView
+  /** Live Twitch auth status; never includes tokens. */
+  twitchStatus: TwitchStatusView
 }
 
 export interface SettingsView {
@@ -42,6 +44,11 @@ export interface SettingsView {
   obsPort: number
   /** True when a password is stored; the secret itself is never exposed. */
   obsHasPassword: boolean
+  twitchEnabled: boolean
+  /** Public client ID only; tokens are never exposed. */
+  twitchClientId: string
+  /** True when a Twitch token bundle is stored. */
+  twitchHasToken: boolean
 }
 
 export type ObsStateView =
@@ -82,6 +89,48 @@ export interface ObsSettingsInput {
   /** Omitted/empty keeps the stored password; `clearPassword` removes it. */
   password?: string
   clearPassword?: boolean
+}
+
+export type TwitchStateView =
+  | 'disabled'
+  | 'unauthorized'
+  | 'authorizing'
+  | 'authorized'
+  | 'error'
+
+export interface TwitchDeviceView {
+  userCode: string
+  verificationUri: string
+  expiresAt: number
+  intervalMs: number
+}
+
+export interface TwitchStatusView {
+  state: TwitchStateView
+  enabled: boolean
+  /** True when a validated user token is loaded. */
+  connected: boolean
+  /** Display name/login; never a token. */
+  account?: string
+  login?: string
+  userId?: string
+  scopes: string[]
+  /** Present while a Device Code Flow awaits the user. */
+  device?: TwitchDeviceView
+  expiresAt?: number
+  lastError?: string
+}
+
+export interface TwitchAuthStartResult {
+  ok: boolean
+  device?: TwitchDeviceView
+  error?: string
+}
+
+export interface TwitchSettingsInput {
+  enabled?: boolean
+  /** Public client ID; empty clears it (unless a bundled default exists). */
+  clientId?: string
 }
 
 export type UpdateState =
@@ -170,6 +219,11 @@ export interface PhoneDeckApi {
   listObsInputs(): Promise<ObsInputsResult>
   testObsInputVolume(input: string | undefined, percent: number): Promise<PressResult>
   testObsMute(input?: string): Promise<PressResult>
+  getTwitchStatus(): Promise<TwitchStatusView>
+  setTwitchSettings(input: TwitchSettingsInput): Promise<OperationResult>
+  startTwitchAuth(): Promise<TwitchAuthStartResult>
+  cancelTwitchAuth(): Promise<OperationResult>
+  disconnectTwitch(): Promise<OperationResult>
   exportConfig(): Promise<OperationResult>
   importConfig(): Promise<SaveConfigResult>
   openLogs(): Promise<void>
@@ -211,6 +265,11 @@ export const IPC = {
   listObsInputs: 'phonedek:obs-list-inputs',
   testObsInputVolume: 'phonedek:obs-test-volume',
   testObsMute: 'phonedek:obs-test-mute',
+  getTwitchStatus: 'phonedek:twitch-get-status',
+  setTwitchSettings: 'phonedek:twitch-set-settings',
+  startTwitchAuth: 'phonedek:twitch-start-auth',
+  cancelTwitchAuth: 'phonedek:twitch-cancel-auth',
+  disconnectTwitch: 'phonedek:twitch-disconnect',
   exportConfig: 'phonedek:export-config',
   importConfig: 'phonedek:import-config',
   openLogs: 'phonedek:open-logs',

@@ -1,4 +1,17 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, shell, systemPreferences, Tray } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeImage,
+  Notification,
+  safeStorage,
+  shell,
+  systemPreferences,
+  Tray,
+} from 'electron'
 import type { MenuItemConstructorOptions, OpenDialogOptions, SaveDialogOptions } from 'electron'
 import { existsSync } from 'node:fs'
 import { basename, isAbsolute, join } from 'node:path'
@@ -37,6 +50,10 @@ import { createVolumeReader, HelperVolumeProbe, type VolumeReader } from './volu
 import { createMicrophone, parseWindowsInputPayload, type Microphone } from './microphone-source'
 import { ObsClient } from './obs-client'
 import { ObsStateSource, obsControlPercent } from './obs-source'
+import { SecretStore } from './secret-store'
+import { TwitchAuth, sanitizeTwitchClientId } from './twitch-auth'
+import { TwitchClient } from './twitch-client'
+import { TwitchStateSource } from './twitch-source'
 import { IPC } from '../shared/api'
 import type {
   AppState,
@@ -49,6 +66,9 @@ import type {
   PermissionStatus,
   SaveConfigResult,
   ServerInfoView,
+  TwitchAuthStartResult,
+  TwitchSettingsInput,
+  TwitchStatusView,
 } from '../shared/api'
 
 app.setName('PhoneDeck')
@@ -71,6 +91,9 @@ let volumeProbe: HelperVolumeProbe | null = null
 let microphone: Microphone | null = null
 let obsClient: ObsClient | null = null
 let obsSource: ObsStateSource | null = null
+let twitchAuth: TwitchAuth | null = null
+let twitchClient: TwitchClient | null = null
+let twitchSource: TwitchStateSource | null = null
 let pointerSender: PointerSender | null = null
 let pointerRouter: PointerRouter | null = null
 /** A native import/destructive dialog is waiting for a decision. */
@@ -203,6 +226,9 @@ async function buildServerInfo(): Promise<ServerInfoView> {
       obsHost: currentSettings.obsHost,
       obsPort: currentSettings.obsPort,
       obsHasPassword: currentSettings.obsPassword.length > 0,
+      twitchEnabled: currentSettings.twitchEnabled,
+      twitchClientId: currentSettings.twitchClientId,
+      twitchHasToken: twitchAuth?.hasToken === true,
     },
     clients: server?.getClients() ?? [],
     error: serverError,
@@ -216,6 +242,26 @@ async function buildServerInfo(): Promise<ServerInfoView> {
         host: currentSettings.obsHost,
         port: currentSettings.obsPort,
       },
+    twitchStatus: buildTwitchStatus(),
+  }
+}
+
+function buildTwitchStatus(): TwitchStatusView {
+  const status = twitchAuth?.status
+  if (!status) {
+    return { state: 'disabled', enabled: false, connected: false, scopes: [] }
+  }
+  return {
+    state: status.state,
+    enabled: status.enabled,
+    connected: twitchAuth?.connected === true,
+    scopes: [...status.scopes],
+    ...(status.account ? { account: status.account } : {}),
+    ...(status.login ? { login: status.login } : {}),
+    ...(status.userId ? { userId: status.userId } : {}),
+    ...(status.device ? { device: { ...status.device } } : {}),
+    ...(status.expiresAt ? { expiresAt: status.expiresAt } : {}),
+    ...(status.lastError ? { lastError: status.lastError } : {}),
   }
 }
 
@@ -235,6 +281,9 @@ async function buildState(): Promise<AppState> {
       obsHost: settings.get().obsHost,
       obsPort: settings.get().obsPort,
       obsHasPassword: settings.get().obsPassword.length > 0,
+      twitchEnabled: settings.get().twitchEnabled,
+      twitchClientId: settings.get().twitchClientId,
+      twitchHasToken: twitchAuth?.hasToken === true,
     },
   }
 }
@@ -670,6 +719,78 @@ function registerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.getTwitchStatus, async (): Promise<TwitchStatusView> => buildTwitchStatus())
+
+  ipcMain.handle(
+    IPC.setTwitchSettings,
+    async (_event, input: unknown): Promise<OperationResult> => {
+      if (typeof input !== 'object' || input === null) {
+        return { ok: false, error: 'Twitch settings must be an object' }
+      }
+      const value = input as TwitchSettingsInput
+      const patch: Partial<AppSettings> = {}
+      if (value.enabled !== undefined) {
+        if (typeof value.enabled !== 'boolean') return { ok: false, error: 'Twitch enabled must be true or false' }
+        patch.twitchEnabled = value.enabled
+      }
+      if (value.clientId !== undefined) {
+        if (typeof value.clientId !== 'string') {
+          return { ok: false, error: 'Twitch Client ID must be text' }
+        }
+        const trimmed = value.clientId.trim()
+        const clean = sanitizeTwitchClientId(trimmed)
+        if (trimmed.length > 0 && !clean) {
+          return { ok: false, error: 'Twitch Client ID may only contain letters and digits' }
+        }
+        patch.twitchClientId = clean
+      }
+      const updated = settings.update(patch)
+      if (!twitchAuth) return { ok: false, error: 'Twitch is not available on this desktop.' }
+      twitchAuth.configure({
+        clientId: updated.twitchClientId,
+        enabled: updated.twitchEnabled,
+      })
+      if (updated.twitchEnabled) {
+        void twitchAuth.start()
+      } else {
+        twitchAuth.cancelDeviceFlow()
+      }
+      await controlState?.noteTwitchChanged()
+      await pushServerInfo()
+      return { ok: true, state: await buildState() }
+    },
+  )
+
+  ipcMain.handle(IPC.startTwitchAuth, async (): Promise<TwitchAuthStartResult> => {
+    if (!twitchAuth) return { ok: false, error: 'Twitch is not available on this desktop.' }
+    if (!settings.get().twitchEnabled) {
+      return { ok: false, error: 'Enable Twitch in Settings first.' }
+    }
+    try {
+      const device = await twitchAuth.startDeviceFlow()
+      await pushServerInfo()
+      return { ok: true, device }
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      }
+    }
+  })
+
+  ipcMain.handle(IPC.cancelTwitchAuth, async (): Promise<OperationResult> => {
+    twitchAuth?.cancelDeviceFlow()
+    await pushServerInfo()
+    return { ok: true, state: await buildState() }
+  })
+
+  ipcMain.handle(IPC.disconnectTwitch, async (): Promise<OperationResult> => {
+    twitchAuth?.disconnect()
+    await controlState?.noteTwitchChanged()
+    await pushServerInfo()
+    return { ok: true, state: await buildState() }
+  })
+
   ipcMain.handle(
     IPC.setScreenshotDirectory,
     async (_event, input: unknown): Promise<OperationResult> => {
@@ -975,6 +1096,32 @@ async function bootstrap(): Promise<void> {
     enabled: settings.get().obsEnabled,
   })
 
+  let secretStorage: typeof safeStorage | null = null
+  try {
+    if (safeStorage.isEncryptionAvailable()) secretStorage = safeStorage
+  } catch (error) {
+    logger.warn(`OS secret encryption is unavailable: ${(error as Error).message}`)
+  }
+  const secrets = new SecretStore({ dir: userData, safeStorage: secretStorage, logger })
+  twitchAuth = new TwitchAuth({
+    clientId: settings.get().twitchClientId,
+    enabled: settings.get().twitchEnabled,
+    store: secrets,
+    logger,
+  })
+  twitchClient = new TwitchClient({ tokenProvider: twitchAuth, logger })
+  twitchSource = new TwitchStateSource(twitchClient, twitchAuth, { logger })
+  twitchAuth.onStatus((status) => {
+    if (status.lastError && status.state !== 'authorizing') {
+      logger.warn(`Twitch ${status.state}: ${status.lastError}`)
+    } else if (status.state === 'authorized') {
+      logger.info(`Twitch authorized${status.login ? ` as ${status.login}` : ''}`)
+    }
+    void controlState?.noteTwitchChanged()
+    void pushServerInfo()
+  })
+  if (settings.get().twitchEnabled) void twitchAuth.start()
+
   const host = createHostActions({
     platform: process.platform,
     logger,
@@ -1011,6 +1158,11 @@ async function bootstrap(): Promise<void> {
       await obsSource.execute(step)
       await controlState?.noteObsChanged()
     },
+    runTwitchAction: async (step) => {
+      if (!twitchSource) throw new Error('Twitch is not available on this desktop.')
+      await twitchSource.execute(step)
+      await controlState?.noteTwitchChanged()
+    },
   })
   executor = new ActionExecutor(keySender, host, logger, {
     onScreenshot: (path) => {
@@ -1037,11 +1189,12 @@ async function bootstrap(): Promise<void> {
           : null)
       : createVolumeReader(process.platform)
   controlState =
-    volumeReader || microphone || settings.get().obsEnabled
+    volumeReader || microphone || settings.get().obsEnabled || settings.get().twitchEnabled
       ? new ControlStateService({
           ...(volumeReader ? { reader: volumeReader } : {}),
           ...(microphone ? { micReader: microphone } : {}),
           ...(obsSource ? { obsReader: obsSource } : {}),
+          ...(twitchSource ? { twitchReader: twitchSource } : {}),
           logger,
         })
       : null
@@ -1050,6 +1203,7 @@ async function bootstrap(): Promise<void> {
       volumeReader ? 'volume' : null,
       microphone ? 'microphone' : null,
       obsSource ? 'OBS' : null,
+      twitchSource ? 'Twitch' : null,
     ]
       .filter(Boolean)
       .join(' + ')
@@ -1120,6 +1274,7 @@ async function bootstrap(): Promise<void> {
     controlState: controlState ?? undefined,
     controlStateSupported: controlState !== null,
     obsSupported: () => obsClient?.connected === true,
+    twitchSupported: () => twitchSource?.connected === true,
     onPointer: async (client, message, context) => {
       if (!pointerRouter) {
         return {
@@ -1323,6 +1478,7 @@ if (!gotLock) {
       try {
         await inputRouter?.dispose()
         controlState?.dispose()
+        twitchAuth?.dispose()
         obsSource?.dispose()
         obsClient?.dispose()
         volumeProbe?.dispose()

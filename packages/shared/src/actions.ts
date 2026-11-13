@@ -8,6 +8,8 @@ import type {
   ObsPlanStep,
   PagePlanStep,
   PlanStep,
+  TwitchAction,
+  TwitchPlanStep,
 } from './types'
 import { normalizeCombo, isModifier, formatCombo } from './keys'
 
@@ -127,6 +129,24 @@ function obsActionToPlan(action: ObsAction): ObsPlanStep {
   }
 }
 
+/** Map every Twitch action variant to its plan step. */
+function twitchActionToPlan(action: TwitchAction): TwitchPlanStep {
+  switch (action.action) {
+    case 'sendChat':
+      return { kind: 'twitch', action: 'sendChat', message: action.message }
+    case 'createMarker':
+      return {
+        kind: 'twitch',
+        action: 'createMarker',
+        ...(action.description ? { description: action.description } : {}),
+      }
+    case 'setTitle':
+      return { kind: 'twitch', action: 'setTitle', title: action.title }
+    case 'setGame':
+      return { kind: 'twitch', action: 'setGame', game: action.game }
+  }
+}
+
 /**
  * Flatten a button's actions into an ordered execution plan.
  * Page actions are returned as units; the phone normally handles them locally,
@@ -177,6 +197,9 @@ export function actionsToPlan(actions: readonly ExecutableAction[], options: Pla
         break
       case 'obs':
         plan.push(obsActionToPlan(action))
+        break
+      case 'twitch':
+        plan.push(twitchActionToPlan(action))
         break
     }
   }
@@ -563,6 +586,23 @@ export function describeAction(action: ExecutableAction, platform?: string): str
           return `Toggle OBS source "${action.source}"`
         case 'addMarker':
           return action.name ? `Add OBS marker "${action.name}"` : 'Add OBS chapter marker'
+      }
+    case 'twitch':
+      switch (action.action) {
+        case 'sendChat': {
+          const oneLine = action.message.replace(/\s+/g, ' ').trim()
+          return `Send Twitch chat "${oneLine.length > 36 ? `${oneLine.slice(0, 33)}…` : oneLine}"`
+        }
+        case 'createMarker':
+          return action.description
+            ? `Add Twitch marker "${action.description.slice(0, 40)}"`
+            : 'Add Twitch stream marker'
+        case 'setTitle': {
+          const oneLine = action.title.replace(/\s+/g, ' ').trim()
+          return `Set Twitch title "${oneLine.length > 40 ? `${oneLine.slice(0, 37)}…` : oneLine}"`
+        }
+        case 'setGame':
+          return `Set Twitch category "${action.game.slice(0, 40)}"`
       }
   }
 }

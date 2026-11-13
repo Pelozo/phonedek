@@ -148,3 +148,45 @@ describe('SettingsStore pointer control switch', () => {
     expect(new SettingsStore(dir).get().allowPointerControl).toBe(true)
   })
 })
+
+describe('SettingsStore Twitch settings', () => {
+  it('defaults Twitch to disabled with no bundled client ID', () => {
+    delete process.env['PHONEDEK_TWITCH_CLIENT_ID']
+    const settings = new SettingsStore(tempDir())
+    expect(settings.get().twitchEnabled).toBe(false)
+    expect(settings.get().twitchClientId).toBe('')
+    expect(defaultSettings().twitchEnabled).toBe(false)
+  })
+
+  it('keeps old settings files valid and persists the public client ID', () => {
+    const dir = tempDir()
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ port: 49010 }))
+    const settings = new SettingsStore(dir)
+    expect(settings.get().twitchEnabled).toBe(false)
+    expect(settings.get().twitchClientId).toBe('')
+
+    settings.update({ twitchEnabled: true, twitchClientId: 'abcdef123456' })
+    const reloaded = new SettingsStore(dir)
+    expect(reloaded.get().twitchEnabled).toBe(true)
+    expect(reloaded.get().twitchClientId).toBe('abcdef123456')
+  })
+
+  it('sanitizes client IDs and falls back to the bundled default only when absent', () => {
+    const dir = tempDir()
+    const settings = new SettingsStore(dir)
+    for (const value of ['bad id', 'x'.repeat(65), 'abc-123', 'abc/def']) {
+      settings.update({ twitchClientId: value })
+      expect(settings.get().twitchClientId).toBe('')
+    }
+    settings.update({ twitchClientId: 'ValidClient123' })
+    expect(settings.get().twitchClientId).toBe('ValidClient123')
+
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ port: 49011 }))
+    process.env['PHONEDEK_TWITCH_CLIENT_ID'] = 'BundledClient123'
+    try {
+      expect(new SettingsStore(dir).get().twitchClientId).toBe('BundledClient123')
+    } finally {
+      delete process.env['PHONEDEK_TWITCH_CLIENT_ID']
+    }
+  })
+})

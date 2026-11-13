@@ -187,6 +187,34 @@ const obsSchema = z.union([
   z.object({ type: z.literal('obs'), action: z.literal('addMarker'), name: obsName.optional() }),
 ])
 
+/** Twitch text limits: chat 500, marker 140, stream title 140, category 100. */
+const twitchChat = z
+  .string()
+  .max(500, 'Twitch chat messages are limited to 500 characters')
+  .refine((value) => value.trim().length > 0, 'Twitch chat message cannot be empty')
+const twitchTitle = z
+  .string()
+  .max(140, 'Twitch stream titles are limited to 140 characters')
+  .refine((value) => value.trim().length > 0, 'Twitch stream title cannot be empty')
+const twitchGame = z
+  .string()
+  .max(100, 'Twitch category names are limited to 100 characters')
+  .refine((value) => value.trim().length > 0, 'Twitch category cannot be empty')
+const twitchMarkerDescription = z
+  .string()
+  .max(140, 'Twitch marker descriptions are limited to 140 characters')
+
+const twitchSchema = z.union([
+  z.object({ type: z.literal('twitch'), action: z.literal('sendChat'), message: twitchChat }),
+  z.object({
+    type: z.literal('twitch'),
+    action: z.literal('createMarker'),
+    description: twitchMarkerDescription.optional(),
+  }),
+  z.object({ type: z.literal('twitch'), action: z.literal('setTitle'), title: twitchTitle }),
+  z.object({ type: z.literal('twitch'), action: z.literal('setGame'), game: twitchGame }),
+])
+
 export const MacroStepSchema = z.discriminatedUnion('type', [
   hotkeySchema,
   textSchema,
@@ -215,6 +243,7 @@ export const ActionSchema = z.union([
   pageSchema,
   micSchema,
   obsSchema,
+  twitchSchema,
 ])
 
 export const GridSchema = z.object({
@@ -397,7 +426,13 @@ export const ObsStateBindingSchema = z.object({
   input: obsName.optional(),
 })
 
-export const StateBindingSchema = ObsStateBindingSchema
+/** Read-only Twitch status tile (live/viewers/uptime/title/game). */
+export const TwitchStateBindingSchema = z.object({
+  type: z.literal('twitch'),
+  target: z.enum(['live', 'viewers', 'uptime', 'title', 'game']),
+})
+
+export const StateBindingSchema = z.union([ObsStateBindingSchema, TwitchStateBindingSchema])
 
 export const ButtonSchema = z.object({
   id,

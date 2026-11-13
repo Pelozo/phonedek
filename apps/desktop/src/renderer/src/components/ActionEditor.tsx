@@ -32,6 +32,7 @@ const ACTION_ICONS: Record<ExecutableAction['type'], IconName> = {
   page: 'layers',
   mic: 'microphone',
   obs: 'microphone',
+  twitch: 'monitor',
 }
 
 const ACTION_TITLES: Record<ExecutableAction['type'], string> = {
@@ -46,6 +47,7 @@ const ACTION_TITLES: Record<ExecutableAction['type'], string> = {
   page: 'Change page',
   mic: 'Mic mute',
   obs: 'OBS mute',
+  twitch: 'Twitch',
 }
 
 function obsIconName(action: ObsAction): IconName {

@@ -60,6 +60,7 @@ interface HarnessOptions {
   controlState?: ControlStateHub
   controlStateSupported?: boolean
   obsSupported?: () => boolean
+  twitchSupported?: () => boolean
 }
 
 async function harness(
@@ -99,6 +100,7 @@ async function harness(
     controlState: options.controlState,
     controlStateSupported: options.controlStateSupported,
     obsSupported: options.obsSupported,
+    twitchSupported: options.twitchSupported,
     importBackup: options.importBackup,
   })
   const port = await server.start()
@@ -1041,6 +1043,57 @@ describe('DeckServer control state', () => {
     expect(secondHello.capabilities).toContain('obs-v1')
     second.ws.close()
 
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
+  it('advertises twitch-v1 only while Twitch is authorized', async () => {
+    let authorized = false
+    const h = await harness({ ok: true }, { twitchSupported: () => authorized })
+
+    const info = await fetch(`http://127.0.0.1:${h.port}/api/info`)
+    const body = (await info.json()) as { capabilities?: string[] }
+    expect(body.capabilities).not.toContain('twitch-v1')
+
+    const first = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    const firstHello = await waitFor(() => first.messages.find((message) => message.type === 'hello'))
+    expect(firstHello.capabilities).not.toContain('twitch-v1')
+    first.ws.close()
+
+    authorized = true
+    const second = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    const secondHello = await waitFor(() => second.messages.find((message) => message.type === 'hello'))
+    expect(secondHello.capabilities).toContain('twitch-v1')
+    second.ws.close()
+
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
+  it('resolves Twitch state buttons for watch while unauthorized', async () => {
+    const fake = fakeHub()
+    const h = await harness(
+      { ok: true },
+      {
+        controlState: fake.hub,
+        controlStateSupported: true,
+        twitchSupported: () => false,
+      },
+    )
+    const button = h.config.profiles[0]!.pages[0]!.buttons[0]!
+    button.state = { type: 'twitch', target: 'live' }
+
+    const info = await fetch(`http://127.0.0.1:${h.port}/api/info`)
+    const body = (await info.json()) as { capabilities?: string[] }
+    expect(body.capabilities).toContain('control-state-v1')
+    expect(body.capabilities).not.toContain('twitch-v1')
+
+    const { ws } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await sendHello(ws, ['control-state-v1'])
+    ws.send(JSON.stringify(watch(h, [button.id])))
+    const call = await waitFor(() => fake.subscriptions[0])
+    expect(call.subscription.controls).toEqual([
+      { id: button.id, label: button.label, source: 'twitch', twitchTarget: 'live' },
+    ])
+    ws.close()
     await waitFor(() => h.server.getClients().length === 0)
   })
 

@@ -151,6 +151,12 @@ export class ActionExecutor {
               throw new Error('OBS is not available on this desktop.')
             }
             break
+          case 'twitch':
+            if (!this.host.runTwitchAction) {
+              throw new Error('Twitch is not available on this desktop.')
+            }
+            await this.host.runTwitchAction(step)
+            break
           default:
             if (KEYBOARD_KINDS.has(step.kind)) {
               // Win+Shift+S is the screenshot intent on Windows (Snipping Tool)
