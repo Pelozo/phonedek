@@ -67,6 +67,12 @@ data class PointerPadOptions(
     val dragLock: Boolean = true,
 )
 
+/** Immutable settings captured when the keyboard panel opens. */
+data class KeyboardPadOptions(
+    val controlId: String = "",
+    val label: String = "",
+)
+
 data class UiState(
     val ready: Boolean = false,
     val onboardingSeen: Boolean = true,
@@ -77,10 +83,14 @@ data class UiState(
     val connection: ConnectionStatus = ConnectionStatus.OFFLINE,
     val inputCapable: Boolean = false,
     val pointerCapable: Boolean = false,
+    val keyboardCapable: Boolean = false,
     val stateCapable: Boolean = false,
     val controlStates: Map<String, ControlStateDto> = emptyMap(),
     val pointerPadOpen: Boolean = false,
     val pointerPadOptions: PointerPadOptions = PointerPadOptions(),
+    val keyboardPadOpen: Boolean = false,
+    val keyboardPadOptions: KeyboardPadOptions = KeyboardPadOptions(),
+    val keyboardStatus: KeyboardStatus = KeyboardStatus.READY,
     val phoneBrightness: Float? = null,
     val keepScreenOn: Boolean = true,
     val hideTopBarWhenConnected: Boolean = true,
@@ -151,6 +161,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var lastInputSentAt = 0L
     private var inputUnsupportedShown = false
     private var pointerUnsupportedShown = false
+    private var keyboardUnsupportedShown = false
     private var protocolWarningShown = false
     private var authWarningShown = false
 
@@ -165,6 +176,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var pointerGestureActive = false
     private var pointerStartSent = false
     private var pointerLastFlushAt = 0L
+
+    private var keyboardSeq = 0L
+    private var keyboardControlId: String? = null
+    private var keyboardProfileId: String? = null
+    private var keyboardPageId: String? = null
+    private var keyboardStartSent = false
 
     private val connection = DeckConnection(
         client = socketClient,
@@ -185,10 +202,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     // The socket is gone; there is nobody to receive `cancel`.
                     closePointerPad(sendCancel = false)
                 }
+                if (status != ConnectionStatus.CONNECTED && _state.value.keyboardPadOpen) {
+                    // The socket is gone; the desktop cancels the session on close.
+                    closeKeyboardPad(cancel = false)
+                }
             }
 
             override fun onOpen() {
                 pointerSeq = 0L
+                keyboardSeq = 0L
                 refreshConfig()
             }
 
@@ -200,11 +222,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val inputCapable = "input-v1" in capabilities
                 val brightnessCapable = "brightness-v1" in capabilities
                 val pointerCapable = "pointer-v1" in capabilities
+                val keyboardCapable = "keyboard-v1" in capabilities
                 val stateCapable = "control-state-v1" in capabilities
                 _state.update { current ->
                     current.copy(
                         inputCapable = inputCapable,
                         pointerCapable = pointerCapable,
+                        keyboardCapable = keyboardCapable,
                         stateCapable = stateCapable,
                         // A hello starts a new socket; state from the previous
                         // connection (and its revision counter) is stale.
@@ -223,10 +247,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 if (inputCapable) inputUnsupportedShown = false
                 if (pointerCapable) pointerUnsupportedShown = false
+                if (keyboardCapable) keyboardUnsupportedShown = false
                 if (!pointerCapable &&
                     (_state.value.pointerPadOpen || pointerControlId != null)
                 ) {
                     closePointerPad(sendCancel = false)
+                }
+                if (!keyboardCapable && _state.value.keyboardPadOpen) {
+                    closeKeyboardPad(cancel = false)
                 }
                 if (protocol != 1 && !protocolWarningShown) {
                     protocolWarningShown = true
@@ -337,6 +365,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 closePointerPad(sendCancel = false)
             }
 
+            override fun onKeyboardResult(seq: Long, ok: Boolean, error: String?) {
+                if (ok) {
+                    // Acks only arrive on start/end/cancel; text and key
+                    // successes are intentionally silent.
+                    if (_state.value.keyboardStatus == KeyboardStatus.OPENING) {
+                        _state.update { it.copy(keyboardStatus = KeyboardStatus.READY) }
+                    }
+                    return
+                }
+                // Privacy: error strings come from the desktop and never echo text.
+                Diag.w("Keyboard rejected seq=$seq error=\"${error.orEmpty()}\"")
+                val message = error?.takeIf { it.isNotBlank() }
+                    ?: "The desktop could not use the keyboard."
+                closeKeyboardPad(cancel = false)
+                emit(message)
+            }
+
             override fun onServerError(code: String, message: String) {
                 Diag.w("Server error code=$code message=\"$message\"")
                 emit(message.ifBlank { "The desktop reported an error." })
@@ -367,6 +412,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         Diag.i("App backgrounded; stopping WebSocket")
         stopWatching(sendEmpty = true)
         closePointerPad()
+        // Backgrounding is an abort, not a clean finish: cancel pending text
+        // and release any held key on the desktop before the socket goes away.
+        closeKeyboardPad(cancel = true)
         foreground = false
         connection.stop()
     }
@@ -1137,6 +1185,170 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         pointerLastFlushAt = 0L
     }
 
+    private fun noteKeyboardUnsupported() {
+        if (keyboardUnsupportedShown) return
+        keyboardUnsupportedShown = true
+        emit("Update PhoneDeck on your PC to use the keyboard.")
+    }
+
+    /**
+     * Opens the full-screen keyboard panel for a launcher button. The desktop
+     * requires a bound keyboard tile, so `start` carries the visible profile,
+     * page and launcher id. No `press` is ever sent for a keyboard action.
+     */
+    fun openKeyboardPad(button: DeckButton) {
+        val snapshot = _state.value
+        when (
+            val launch = keyboardLaunch(
+                button = button,
+                profileId = snapshot.activeProfileId,
+                pageId = snapshot.activePageId,
+                capable = snapshot.keyboardCapable,
+                connected = snapshot.connection == ConnectionStatus.CONNECTED,
+            )
+        ) {
+            KeyboardLaunch.NotLauncher -> return
+
+            KeyboardLaunch.Unsupported -> {
+                noteKeyboardUnsupported()
+                return
+            }
+
+            KeyboardLaunch.Offline -> {
+                emit("Offline — the keyboard needs a connection.")
+                return
+            }
+
+            is KeyboardLaunch.Open -> {
+                // Re-opening rebinds the same client; start resets the baseline.
+                keyboardSeq = 0L
+                keyboardProfileId = launch.profileId
+                keyboardPageId = launch.pageId
+                keyboardControlId = launch.controlId
+                keyboardStartSent = false
+                _state.update {
+                    it.copy(
+                        keyboardPadOpen = true,
+                        keyboardPadOptions = KeyboardPadOptions(
+                            controlId = launch.controlId,
+                            label = launch.label,
+                        ),
+                        keyboardStatus = KeyboardStatus.OPENING,
+                    )
+                }
+                Diag.i("Keyboard pad opened control=${launch.controlId}")
+                if (!sendKeyboardNow("start")) {
+                    closeKeyboardPad(cancel = false)
+                    emit("Connection lost — the keyboard did not open.")
+                }
+            }
+        }
+    }
+
+    /**
+     * Closes the panel. A clean close releases held keys and ends the ordered
+     * desktop queue; [cancel] abandons queued text instead (background/ON_STOP).
+     * Safe to call twice, including from Compose disposal.
+     */
+    fun closeKeyboardPad(cancel: Boolean = false) {
+        val wasOpen = _state.value.keyboardPadOpen
+        val started = keyboardStartSent
+        if (started && _state.value.keyboardCapable && connection.isConnected()) {
+            keyboardClosePhases(cancel).forEach { phase -> sendKeyboardNow(phase) }
+        }
+        resetKeyboardState()
+        if (wasOpen) {
+            Diag.i("Keyboard pad closed cancel=$cancel")
+            _state.update {
+                it.copy(
+                    keyboardPadOpen = false,
+                    keyboardStatus = KeyboardStatus.READY,
+                )
+            }
+        }
+    }
+
+    /**
+     * Sends committed text in wire-sized chunks. The caller must have checked
+     * `planLineSend` (no active IME composition) first.
+     */
+    fun sendKeyboardText(text: String) {
+        val snapshot = _state.value
+        if (!snapshot.keyboardPadOpen || !snapshot.keyboardCapable) return
+        if (snapshot.connection != ConnectionStatus.CONNECTED) {
+            closeKeyboardPad(cancel = false)
+            emit("Keyboard disconnected.")
+            return
+        }
+        val chunks = chunkKeyboardText(text)
+        if (chunks.isEmpty()) return
+        for (chunk in chunks) {
+            if (!sendKeyboardNow("text", text = chunk)) {
+                closeKeyboardPad(cancel = false)
+                emit("Keyboard text was not sent.")
+                return
+            }
+        }
+        _state.update { it.copy(keyboardStatus = KeyboardStatus.READY) }
+    }
+
+    /** Sends one atomic key or chord. [repeat] is capped by the payload. */
+    fun sendKeyboardKey(keys: List<String>, repeat: Int = 1) {
+        val snapshot = _state.value
+        if (!snapshot.keyboardPadOpen || !snapshot.keyboardCapable) return
+        if (snapshot.connection != ConnectionStatus.CONNECTED) {
+            closeKeyboardPad(cancel = false)
+            emit("Keyboard disconnected.")
+            return
+        }
+        if (keys.isEmpty()) return
+        if (!sendKeyboardNow("key", keys = keys, repeat = repeat)) {
+            closeKeyboardPad(cancel = false)
+            emit("Keyboard key was not sent.")
+        }
+    }
+
+    /** Sends one keyboard frame with the session's monotonic seq. */
+    private fun sendKeyboardNow(
+        phase: String,
+        text: String? = null,
+        keys: List<String>? = null,
+        repeat: Int? = null,
+    ): Boolean {
+        val profileId = keyboardProfileId
+        val pageId = keyboardPageId
+        val controlId = keyboardControlId
+        if (phase == "start" &&
+            (profileId == null || pageId == null || controlId == null)
+        ) {
+            return false
+        }
+        val sent = connection.sendKeyboard(
+            seq = keyboardSeq++,
+            phase = phase,
+            profileId = if (phase == "start") profileId else null,
+            pageId = if (phase == "start") pageId else null,
+            controlId = if (phase == "start") controlId else null,
+            text = text,
+            keys = keys,
+            repeat = repeat,
+        )
+        if (sent && phase == "start") keyboardStartSent = true
+        if (!sent) {
+            // Never log text; the phase and seq are enough to diagnose.
+            Diag.w("Keyboard message dropped phase=$phase")
+        }
+        return sent
+    }
+
+    private fun resetKeyboardState() {
+        keyboardControlId = null
+        keyboardProfileId = null
+        keyboardPageId = null
+        keyboardStartSent = false
+        keyboardSeq = 0L
+    }
+
     /**
      * Coalesces watch updates triggered by hello/config/page changes. The
      * desktop allows one watch per 500 ms, so a fast page flip must not send a
@@ -1456,6 +1668,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onButtonPressed(button: DeckButton) {
         val snapshot = _state.value
+        // Phone-local launchers open their panel and never send `press`.
+        if (hasKeyboardAction(button)) {
+            openKeyboardPad(button)
+            return
+        }
         if (button.control?.kind == "trackpad") {
             openPointerPad(button)
             return
@@ -1673,6 +1890,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         importJob?.cancel()
         inputFlushJob?.cancel()
         stopWatching(sendEmpty = false)
+        closeKeyboardPad(cancel = true)
         stopPointerKeepalive()
         pointerFlushJob?.cancel()
         connection.stop()

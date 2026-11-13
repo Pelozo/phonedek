@@ -95,6 +95,41 @@ inline with a concrete message.
 - Settings shows the server, reconnect, change server (forget pairing),
   keep-screen-on and app version.
 
+## Phone keyboard
+
+A button with the `keyboard/open` action (the desktop editor's
+**Add control → Pointer → Keyboard**, 2×1) opens a full-screen keyboard panel.
+The desktop must advertise `keyboard-v1`; otherwise the phone shows
+“Update PhoneDeck on your PC to use the keyboard.” and does not open.
+
+- Text uses the system IME (Gboard/Samsung/CJK) with local echo. It is sent in
+  line mode: tap **SEND**, the IME Send action, or the strip **⏎** (which also
+  presses Enter on the PC). Nothing is sent while the IME has an active
+  composition.
+- The pinned strip sends **Esc, Tab, ⌫, ⏎ and arrows**; **⌫** repeats while
+  held. Tap **Ctrl/Alt/Shift/Win** to arm a modifier for the next key, or
+  long-press to lock it. **CLR** clears only the phone's text field; the system
+  keyboard's Backspace edits the local text too.
+- **FN** opens F1–F12. **×** or Back (once the IME is hidden) closes the panel;
+  ON_STOP/background cancels pending typing. Typed text is never logged.
+
+### Manual device checks
+
+Run against a desktop build with `keyboard-v1`:
+
+1. Type a line into Notepad and Chrome's address bar; verify SEND, the IME
+   Send action, and strip ⏎ (text first, then Enter).
+2. Verify Tab / Shift+Tab, Esc, Backspace tap and hold, and all four arrows.
+3. Arm Ctrl and press C (copy), lock Shift and press Tab repeatedly; verify the
+   modifier clears after one chord unless locked.
+4. Type with a CJK IME/pinyin before committing: no partial or pinyin text
+   reaches the PC. Commit, then SEND.
+5. Type a long line (>4096 chars or paste) and verify it arrives in order.
+6. Background the app or press × mid-line; verify the desktop session ends and
+   no queued text is typed afterwards.
+7. Pair with an old desktop without `keyboard-v1`: the launcher shows the
+   one-shot update message and no press is sent.
+
 ## Architecture
 
 ```

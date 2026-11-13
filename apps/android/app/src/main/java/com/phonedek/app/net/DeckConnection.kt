@@ -53,6 +53,7 @@ internal val CLIENT_CAPABILITIES = listOf(
     "brightness-v1",
     "pointer-v1",
     "control-state-v1",
+    "keyboard-v1",
 )
 
 internal fun buildHelloPayload(device: DeviceInfo): JsonObject = buildJsonObject {
@@ -99,6 +100,7 @@ class DeckConnection(
         )
         fun onInputResult(requestId: String, controlId: String, ok: Boolean, error: String?)
         fun onPointerResult(seq: Long, ok: Boolean, error: String?)
+        fun onKeyboardResult(seq: Long, ok: Boolean, error: String?)
         fun onBrightness(level: Float?)
         fun onControlState(
             profileId: String,
@@ -258,6 +260,47 @@ class DeckConnection(
                 )
             }
         }
+        return socket.send(payload.toString())
+    }
+
+    /**
+     * Keyboard text/chord input. `start` carries the launcher ids; `text`
+     * carries committed text only. Text is never logged — only the phase, seq
+     * and character count.
+     */
+    fun sendKeyboard(
+        seq: Long,
+        phase: String,
+        profileId: String? = null,
+        pageId: String? = null,
+        controlId: String? = null,
+        text: String? = null,
+        keys: List<String>? = null,
+        repeat: Int? = null,
+    ): Boolean {
+        val socket = webSocketRef
+        if (!active || !connected || socket == null) {
+            Diag.w(
+                "sendKeyboard dropped: phase=$phase connected=$connected " +
+                    "active=$active socket=${socket != null}",
+            )
+            return false
+        }
+        val payload = buildKeyboardPayload(
+            seq = seq,
+            phase = phase,
+            profileId = profileId,
+            pageId = pageId,
+            controlId = controlId,
+            text = text,
+            keys = keys,
+            repeat = repeat,
+        )
+        // Privacy: lengths and key counts are fine; never the text itself.
+        Diag.d(
+            "WS -> keyboard $phase seq=$seq chars=${text?.length ?: 0} " +
+                "keys=${keys?.size ?: 0} repeat=${repeat ?: 1}",
+        )
         return socket.send(payload.toString())
     }
 
@@ -468,6 +511,11 @@ class DeckConnection(
                 listener.onPointerResult(result.seq, result.ok, result.error)
             }
 
+            "keyboardResult" -> {
+                val result = parseKeyboardResult(obj)
+                listener.onKeyboardResult(result.seq, result.ok, result.error)
+            }
+
             "brightness" -> {
                 when (val brightness = parseBrightness(obj)) {
                     is BrightnessMessage.Level -> listener.onBrightness(brightness.level)
@@ -648,6 +696,85 @@ internal data class PointerResultPayload(
 )
 
 internal fun parsePointerResult(obj: JsonObject): PointerResultPayload = PointerResultPayload(
+    seq = obj.long("seq") ?: 0L,
+    ok = obj.bool("ok") ?: false,
+    error = obj.string("error"),
+)
+
+private val KEYBOARD_PHASES = setOf("start", "text", "key", "release", "end", "cancel")
+
+/**
+ * Keyboard payload shared by [DeckConnection.sendKeyboard] and tests. Only
+ * `start` carries ids, only `text` carries text, and only `key` carries keys /
+ * repeat. The same clamps as the shared zod schema are applied here so a caller
+ * cannot emit an out-of-protocol frame.
+ */
+internal fun buildKeyboardPayload(
+    seq: Long,
+    phase: String,
+    profileId: String? = null,
+    pageId: String? = null,
+    controlId: String? = null,
+    text: String? = null,
+    keys: List<String>? = null,
+    repeat: Int? = null,
+): JsonObject = buildJsonObject {
+    val safePhase = phase.takeIf { it in KEYBOARD_PHASES } ?: "cancel"
+    put("type", "keyboard")
+    put("seq", seq.coerceAtLeast(0L))
+    put("phase", safePhase)
+
+    when (safePhase) {
+        "start" -> {
+            profileId?.trim()?.takeIf { it.isNotEmpty() }
+                ?.let { put("profileId", it.take(64)) }
+            pageId?.trim()?.takeIf { it.isNotEmpty() }
+                ?.let { put("pageId", it.take(64)) }
+            controlId?.trim()?.takeIf { it.isNotEmpty() }
+                ?.let { put("controlId", it.take(128)) }
+        }
+
+        "text" -> {
+            text?.let { put("text", boundedKeyboardText(it)) }
+        }
+
+        "key" -> {
+            val safeKeys = keys.orEmpty()
+                .asSequence()
+                .map { it.trim().uppercase() }
+                .filter { it.isNotEmpty() && it.length <= 24 }
+                .distinct()
+                .take(8)
+                .toList()
+            if (safeKeys.isNotEmpty()) {
+                put("keys", buildJsonArray {
+                    safeKeys.forEach { key -> add(key) }
+                })
+            }
+            repeat?.let { put("repeat", it.coerceIn(1, 100)) }
+        }
+
+        // release / end / cancel carry no payload.
+    }
+}
+
+/** Max 4096 UTF-16 units without cutting a surrogate pair. */
+internal fun boundedKeyboardText(raw: String): String {
+    if (raw.length <= 4096) return raw
+    var end = 4096
+    if (Character.isHighSurrogate(raw[end - 1]) && Character.isLowSurrogate(raw[end])) {
+        end -= 1
+    }
+    return raw.substring(0, end)
+}
+
+internal data class KeyboardResultPayload(
+    val seq: Long,
+    val ok: Boolean,
+    val error: String?,
+)
+
+internal fun parseKeyboardResult(obj: JsonObject): KeyboardResultPayload = KeyboardResultPayload(
     seq = obj.long("seq") ?: 0L,
     ok = obj.bool("ok") ?: false,
     error = obj.string("error"),
