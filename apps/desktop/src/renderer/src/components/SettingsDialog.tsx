@@ -19,6 +19,7 @@ import {
 import { obsEndpoint, obsStatusSummary } from '../lib/obs'
 import { Icon } from './Icons'
 import { Modal, Slider, Toggle, useConfirm } from './Primitives'
+import { TwitchSettings } from './TwitchSettings'
 
 function PhoneBrightnessRow({
   client,
@@ -698,6 +699,13 @@ export function SettingsDialog({
           </div>
         )}
       </div>
+
+      <TwitchSettings
+        server={server}
+        settings={settings}
+        onServerUpdate={onServerUpdate}
+        onToast={onToast}
+      />
 
       <div className="settings-section">
         <h3>Phone</h3>

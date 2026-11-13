@@ -12,10 +12,24 @@ import {
 import type { DeckConfig, DeckPage, DeckProfile } from '@phonedek/shared'
 import type { ServerInfoView } from '../../../shared/api'
 import { obsStateBadge, obsStateBindingSummary } from '../lib/obs'
+import { twitchStateBadge, twitchStateBindingSummary } from '../lib/twitch'
+import type { StateBinding } from '@phonedek/shared'
 import { backgroundStyle, buttonBackground, isVideoBackground, textColorFor } from '../lib/ui'
 import { ControlPreview } from './ControlPreview'
 import { DeckMedia } from './DeckMedia'
 import { Icon } from './Icons'
+
+function statusBadge(state: StateBinding): string {
+  if (state.type === 'obs') return obsStateBadge(state.target)
+  if (state.type === 'twitch') return twitchStateBadge(state.target)
+  return `LIGHT · ${state.target.toUpperCase()}`
+}
+
+function statusSummary(state: StateBinding): string | null {
+  if (state.type === 'obs') return obsStateBindingSummary(state)
+  if (state.type === 'twitch') return twitchStateBindingSummary(state)
+  return `Light ${state.target}`
+}
 
 export function DeckCanvas({
   config,
@@ -198,15 +212,15 @@ export function DeckCanvas({
                       {button.sublabel && <span className="deck-sublabel">{button.sublabel}</span>}
                     </div>
                   )}
-                  {button.state?.type === 'obs' && (
+                  {button.state && (
                     <span
                       className="deck-status-badge"
-                      title={obsStateBindingSummary(button.state) ?? undefined}
+                      title={statusSummary(button.state) ?? undefined}
                     >
-                      {obsStateBadge(button.state.target)}
+                      {statusBadge(button.state)}
                     </span>
                   )}
-                  {!button.control && button.actions.length === 0 && (
+                  {!button.control && button.actions.length === 0 && !button.state && (
                     <span className="deck-warning" title="This button has no actions">
                       !
                     </span>

@@ -25,6 +25,11 @@ import { SettingsDialog } from './components/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
 import { cutButtonFromPage, moveButtonToPage, pasteButtonIntoPage } from './lib/clipboard'
 import { OBS_STATUS_TILES, createObsStatusButton, type ObsStatusTilePreset } from './lib/obsStatus'
+import {
+  TWITCH_STATUS_TILES,
+  createTwitchStatusButton,
+  type TwitchStatusTilePreset,
+} from './lib/twitchStatus'
 import { HostPlatformProvider } from './lib/platform'
 import {
   SHORTCUT_PRESETS,
@@ -653,6 +658,27 @@ function AppContent() {
     }
   }
 
+  const addTwitchStatusTile = (preset: TwitchStatusTilePreset): void => {
+    if (!config || !profile || !page) return
+    const slot = nextFreeSlotForPage(profile, page)
+    if (slot === null) {
+      showToast('This page is full. Add rows/columns or delete a button first.', 'error')
+      return
+    }
+    const button = createTwitchStatusButton(preset, slot)
+    try {
+      const next = addButton(config, profile.id, page.id, button)
+      setConfig(next)
+      setSelectedButtonId(button.id)
+      showToast(
+        `${preset.menuLabel} added — read-only, tapping does nothing`,
+        server?.twitchStatus.connected ? 'success' : 'info',
+      )
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error')
+    }
+  }
+
   const openObsInputPicker = (): void => {
     if (!server) return
     if (server.obsStatus.state !== 'connected') {
@@ -800,6 +826,15 @@ function AppContent() {
                   icon: preset.menuIcon,
                   description: preset.menuDescription,
                   onClick: () => addObsStatusTile(preset),
+                })),
+                ...TWITCH_STATUS_TILES.map((preset) => ({
+                  label: preset.menuLabel,
+                  section: 'Twitch status',
+                  icon: preset.menuIcon,
+                  description: server.twitchStatus.connected
+                    ? preset.menuDescription
+                    : `${preset.menuDescription} · connect Twitch in Settings`,
+                  onClick: () => addTwitchStatusTile(preset),
                 })),
                 {
                   label: 'Scroll wheel',

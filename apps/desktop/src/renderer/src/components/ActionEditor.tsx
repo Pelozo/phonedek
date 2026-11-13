@@ -1,12 +1,14 @@
 import { useEffect, useId, useState } from 'react'
 import { describeAction, formatCombo } from '@phonedek/shared'
-import type { DeckPage, ExecutableAction, MacroAction, MacroStep, MediaKey, ObsAction } from '@phonedek/shared'
+import type { DeckPage, ExecutableAction, MacroAction, MacroStep, MediaKey, ObsAction, TwitchAction } from '@phonedek/shared'
 import { Icon, type IconName } from './Icons'
 import { NumberField } from './Primitives'
 import { Keycaps, ShortcutDialog } from './ShortcutDialog'
 import { MacroEditor } from './MacroEditor'
 import { ObsActionEditor } from './ObsActionEditor'
+import { TwitchActionEditor } from './TwitchActionEditor'
 import { obsActionTitle } from '../lib/obs'
+import { twitchActionTitle } from '../lib/twitch'
 import { useHostPlatform } from '../lib/platform'
 import type { ServerInfoView } from '../../../shared/api'
 
@@ -75,6 +77,19 @@ function obsIconName(action: ObsAction): IconName {
       return 'clock'
     case 'toggleMute':
       return 'microphone'
+  }
+}
+
+function twitchIconName(action: TwitchAction): IconName {
+  switch (action.action) {
+    case 'sendChat':
+      return 'text'
+    case 'createMarker':
+      return 'clock'
+    case 'setTitle':
+      return 'monitor'
+    case 'setGame':
+      return 'grid'
   }
 }
 
@@ -199,7 +214,13 @@ export function ActionEditor({
       <header className="action-header">
         <span className="action-icon">
           <Icon
-            name={action.type === 'obs' ? obsIconName(action) : ACTION_ICONS[action.type]}
+            name={
+              action.type === 'obs'
+                ? obsIconName(action)
+                : action.type === 'twitch'
+                  ? twitchIconName(action)
+                  : ACTION_ICONS[action.type]
+            }
             size={16}
           />
         </span>
@@ -222,7 +243,11 @@ export function ActionEditor({
         ) : (
           <div className="action-title">
             <strong>
-              {action.type === 'obs' ? obsActionTitle(action) : ACTION_TITLES[action.type]}
+              {action.type === 'obs'
+                ? obsActionTitle(action)
+                : action.type === 'twitch'
+                  ? twitchActionTitle(action)
+                  : ACTION_TITLES[action.type]}
             </strong>
             <small>{describeAction(action, platform)}</small>
           </div>
@@ -410,6 +435,10 @@ export function ActionEditor({
 
         {action.type === 'obs' && (
           <ObsActionEditor action={action} server={server} onUpdate={onUpdate} />
+        )}
+
+        {action.type === 'twitch' && (
+          <TwitchActionEditor action={action} server={server} onUpdate={onUpdate} />
         )}
 
         {action.type === 'page' && (

@@ -17,6 +17,9 @@ import type {
   MediaIcon,
   ObsAction,
   ObsStateBinding,
+  StateBinding,
+  TwitchAction,
+  TwitchStateBinding,
 } from '@phonedek/shared'
 import {
   buttonSpan,
@@ -40,6 +43,10 @@ import {
   obsStateBadge,
   obsStateBindingSummary,
 } from '../lib/obs'
+import {
+  twitchStateBadge,
+  twitchStateBindingSummary,
+} from '../lib/twitch'
 import { useObsInputs } from '../lib/useObsInputs'
 import { backgroundStyle, buttonBackground, textColorFor } from '../lib/ui'
 import { ActionEditor } from './ActionEditor'
@@ -51,6 +58,7 @@ import { IconPicker } from './IconPicker'
 import { PopMenu } from './Menu'
 import { MoveToDialog } from './MoveToDialog'
 import { ObsStatusEditor } from './ObsStatusEditor'
+import { TwitchStatusEditor } from './TwitchStatusEditor'
 import { PresetPicker } from './PresetPicker'
 import { ColorField, NumberField, Toggle, useConfirm } from './Primitives'
 import { ShortcutDialog } from './ShortcutDialog'
@@ -66,6 +74,21 @@ const DEFAULT_MACRO_STEP: MacroStep = { type: 'hotkey', keys: ['CTRL', 'C'], hol
 /** Mic actions are valid in configs but not yet part of the legacy Action union. */
 const MIC_TOGGLE_ACTION: MicAction = { type: 'mic', action: 'toggleMute' }
 const asLegacyAction = (action: ExecutableAction): Action => action as unknown as Action
+
+/** Static status labels for the three binding families the editor can hold. */
+function stateBadge(state: StateBinding): string {
+  if (state.type === 'obs') return obsStateBadge(state.target)
+  if (state.type === 'twitch') return twitchStateBadge(state.target)
+  return `LIGHT · ${state.target.toUpperCase()}`
+}
+
+function stateSummary(state: StateBinding): string {
+  if (state.type === 'obs') return obsStateBindingSummary(state) ?? 'OBS status'
+  if (state.type === 'twitch') return twitchStateBindingSummary(state) ?? 'Twitch status'
+  if (state.target === 'power') return 'Light power status'
+  if (state.target === 'brightness') return 'Light brightness status'
+  return 'Light temperature status'
+}
 
 function defaultAction(type: Action['type'], platform: string): Action {
   switch (type) {
@@ -140,11 +163,11 @@ export function Inspector({
     button?.control && button.control.kind !== 'trackpad' && button.control.binding.type === 'obs'
       ? button.control.binding
       : null
-  const statusBinding = button?.state?.type === 'obs' ? button.state : null
+  const statusBinding = button?.state ?? null
   const obsInputsState = useObsInputs(
     initialObsBinding !== null ||
-      statusBinding?.target === 'inputMute' ||
-      statusBinding?.target === 'inputVolume',
+      (statusBinding?.type === 'obs' &&
+        (statusBinding.target === 'inputMute' || statusBinding.target === 'inputVolume')),
   )
 
   const makeAction = (type: Action['type']): Action => defaultAction(type, platform)
@@ -739,6 +762,19 @@ export function Inspector({
     })
   }
 
+  const addTwitchAction = (action: TwitchAction, label: string, icon: string): void => {
+    const current = button.label.trim().toLowerCase()
+    const untitled =
+      current === '' || current === 'untitled' || current === 'untitled button' || current === 'new button'
+    update({
+      actions: [...button.actions, action as unknown as Action],
+      ...(untitled ? { label, icon } : {}),
+    })
+    if (action.action !== 'createMarker') {
+      onToast(`${label} action added — fill in the required Twitch text to save`, 'info')
+    }
+  }
+
   const chooseIconMedia = async (kind: 'image' | 'video'): Promise<void> => {
     setIconBusy(kind)
     try {
@@ -839,10 +875,10 @@ export function Inspector({
               <Icon name="layers" size={14} /> Move to…
             </button>
           </div>
-          {button.state?.type === 'obs' && (
+          {button.state && (
             <div className="obs-state-summary">
-              <span className="obs-state-pill">{obsStateBadge(button.state.target)}</span>
-              <span>{obsStateBindingSummary(button.state)}</span>
+              <span className="obs-state-pill">{stateBadge(button.state)}</span>
+              <span>{stateSummary(button.state)}</span>
             </div>
           )}
           <p className="hint">
@@ -1044,32 +1080,66 @@ export function Inspector({
             <div className="section-heading">
               <h3>Status</h3>
               <span className="inspector-badge mono">
-                {statusBinding ? obsStateBadge(statusBinding.target) : 'OFF'}
+                {statusBinding ? stateBadge(statusBinding) : 'OFF'}
               </span>
             </div>
             <p className="hint">
-              Add a live OBS readout to this button without replacing its tap actions. Status uses
-              the desktop&apos;s OBS connection and control-state-v1.
+              Add a live readout to this button without replacing its tap actions. OBS uses its
+              WebSocket connection; Twitch uses the Helix account from Settings → Twitch. Both feed
+              the phone through control-state-v1.
             </p>
-            <div className="section-title">
-              <span>Show OBS status</span>
-              <Toggle
-                label=""
-                checked={statusBinding !== null}
-                onChange={(enabled) =>
-                  update({
-                    state: enabled ? { type: 'obs', target: 'streaming' } : undefined,
-                  })
-                }
-              />
-            </div>
-            {statusBinding && (
+            <label className="field">
+              <span>Status source</span>
+              <select
+                value={statusBinding?.type ?? 'off'}
+                onChange={(event) => {
+                  const value = event.target.value
+                  if (value === 'off') update({ state: undefined })
+                  else if (value === 'twitch') {
+                    update({ state: { type: 'twitch', target: 'live' } })
+                  } else if (value === 'obs') {
+                    update({ state: { type: 'obs', target: 'streaming' } })
+                  }
+                }}
+              >
+                <option value="off">Off</option>
+                <option value="obs">OBS Studio</option>
+                <option value="twitch">Twitch</option>
+                {statusBinding?.type === 'light' && (
+                  <option value="light">Light (existing tile)</option>
+                )}
+              </select>
+            </label>
+            {statusBinding?.type === 'light' && (
+              <p className="hint">
+                This button shows a light status tile. Its device and target stay with the light
+                controls; choose Off, OBS Studio or Twitch to replace the readout here.
+              </p>
+            )}
+            {statusBinding?.type === 'obs' && (
               <>
                 <ObsStatusEditor
-                  key={button.id}
+                  key={`obs-${button.id}`}
                   binding={statusBinding}
                   server={server}
                   onUpdate={(state: ObsStateBinding) => update({ state })}
+                />
+                <button
+                  type="button"
+                  className="button danger ghost full"
+                  onClick={() => update({ state: undefined })}
+                >
+                  <Icon name="trash" size={15} /> Remove status
+                </button>
+              </>
+            )}
+            {statusBinding?.type === 'twitch' && (
+              <>
+                <TwitchStatusEditor
+                  key={`twitch-${button.id}`}
+                  binding={statusBinding}
+                  server={server}
+                  onUpdate={(state: TwitchStateBinding) => update({ state })}
                 />
                 <button
                   type="button"
@@ -1683,6 +1753,10 @@ export function Inspector({
                   { label: 'OBS source visibility', icon: 'image', description: 'Show or hide a source', onClick: () => addObsAction({ type: 'obs', action: 'toggleSourceVisibility', source: 'Camera' }, 'Source', '👁️') },
                   { label: 'OBS add marker', icon: 'clock', description: 'Drop a chapter marker', onClick: () => addObsAction({ type: 'obs', action: 'addMarker' }, 'Marker', '🔖') },
                   { label: 'OBS mute', icon: 'microphone', description: 'Toggle mute on an OBS input', onClick: () => addObsAction({ type: 'obs', action: 'toggleMute' }, 'Mic', '🎙️') },
+                  { label: 'Twitch send chat', section: 'Integrations', icon: 'text', description: 'Post a message as your Twitch account', onClick: () => addTwitchAction({ type: 'twitch', action: 'sendChat', message: '' }, 'Chat', '💬') },
+                  { label: 'Twitch create marker', icon: 'clock', description: 'Drop a marker on the live stream', onClick: () => addTwitchAction({ type: 'twitch', action: 'createMarker' }, 'Marker', '🔖') },
+                  { label: 'Twitch set title', icon: 'monitor', description: 'Replace the live stream title', onClick: () => addTwitchAction({ type: 'twitch', action: 'setTitle', title: '' }, 'Title', '📝') },
+                  { label: 'Twitch set game / category', icon: 'grid', description: 'Change the Twitch category by name', onClick: () => addTwitchAction({ type: 'twitch', action: 'setGame', game: '' }, 'Game', '🎮') },
                   { label: 'Delay', icon: 'clock', description: 'Wait before the next action', onClick: () => update({ actions: [...button.actions, makeAction('delay')] }) },
                   { label: 'Change page', icon: 'layers', description: 'Navigate to another deck page', onClick: () => update({ actions: [...button.actions, makeAction('page')] }) },
                 ]}
@@ -1704,7 +1778,9 @@ export function Inspector({
                         : button.control.binding.type === 'shortcut'
                           ? 'No tap action needed. Turn or drag this control on the phone to send chords; use Test − / Test + above to verify them on this PC.'
                           : 'No tap action needed. Drag this control on the phone to send volume or scroll steps; use Test − / Test + above to verify it on this PC.'
-                  : 'No actions yet. This button will do nothing when pressed.'}
+                  : button.state?.type === 'twitch'
+                    ? 'Read-only Twitch status tile. Tapping it does nothing; the phone shows the live value while the tile is visible.'
+                    : 'No actions yet. This button will do nothing when pressed.'}
               </p>
             </div>
           ) : (
