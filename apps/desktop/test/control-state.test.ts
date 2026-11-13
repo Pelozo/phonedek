@@ -13,10 +13,12 @@ import type { MicReader, MicReading } from '../src/main/microphone-source'
 import type { ObsStateTarget } from '@phonedek/shared'
 import type {
   ObsInputReading,
+  ObsClientLike,
   ObsStateReader,
   ObsStatusOptions,
   ObsStatusReading,
 } from '../src/main/obs-source'
+import { ObsStateSource } from '../src/main/obs-source'
 import {
   CachedVolumeReader,
   parseMacVolumeOutput,
@@ -584,6 +586,26 @@ class FakeObsReader implements ObsStateReader {
   reads: Array<string | undefined> = []
   invalidations: Array<string | undefined> = []
   known: Array<{ input: string | undefined; reading: ObsInputReading }> = []
+  statusReadings = new Map<string, ObsStatusReading>()
+  statusFailures = new Map<string, Error>()
+  statusCalls: Array<{ target: ObsStateTarget; options?: ObsStatusOptions }> = []
+  statusInvalidations: ObsStateTarget[] = []
+
+  private statusKey(target: ObsStateTarget, options?: ObsStatusOptions): string {
+    return `${target}|${options?.scene ?? ''}|${options?.input ?? ''}`
+  }
+
+  setStatus(target: ObsStateTarget, options: ObsStatusOptions | undefined, reading: ObsStatusReading): void {
+    this.statusReadings.set(this.statusKey(target, options), reading)
+  }
+
+  failStatus(target: ObsStateTarget, options: ObsStatusOptions | undefined, error: Error): void {
+    this.statusFailures.set(this.statusKey(target, options), error)
+  }
+
+  clearStatusFailure(target: ObsStateTarget, options?: ObsStatusOptions): void {
+    this.statusFailures.delete(this.statusKey(target, options))
+  }
 
   async read(input?: string): Promise<ObsInputReading> {
     this.reads.push(input)
@@ -605,14 +627,18 @@ class FakeObsReader implements ObsStateReader {
   }
 
   async readStatus(
-    _target: ObsStateTarget,
-    _options?: ObsStatusOptions,
+    target: ObsStateTarget,
+    options?: ObsStatusOptions,
   ): Promise<ObsStatusReading> {
-    return { active: false, detail: 'OFF' }
+    this.statusCalls.push({ target, ...(options ? { options } : {}) })
+    const key = this.statusKey(target, options)
+    const failure = this.statusFailures.get(key)
+    if (failure) throw failure
+    return { ...(this.statusReadings.get(key) ?? { active: false, detail: 'OFF' }) }
   }
 
-  invalidateStatus(_target?: ObsStateTarget): void {
-    // no cache in the fake
+  invalidateStatus(target?: ObsStateTarget): void {
+    if (target) this.statusInvalidations.push(target)
   }
 
   async setVolume(): Promise<string> {
@@ -824,3 +850,272 @@ describe('OBS control state', () => {
     })
   })
 })
+
+describe('OBS status control state', () => {
+  function obsStatusFixture(): {
+    config: DeckConfig
+    profileId: string
+    pageId: string
+    otherPageId: string
+    streamId: string
+    sceneId: string
+    muteId: string
+    volumeId: string
+    hiddenId: string
+  } {
+    const config = createDefaultConfig()
+    const profile = config.profiles[0]!
+    const page = profile.pages[0]!
+    const stream = page.buttons.find((item) => item.id === 'btn-copy')!
+    stream.state = { type: 'obs', target: 'streaming' }
+    const scene = page.buttons.find((item) => item.id === 'btn-paste')!
+    scene.state = { type: 'obs', target: 'scene', scene: 'Gaming' }
+    const mute = page.buttons.find((item) => item.id === 'btn-undo')!
+    mute.state = { type: 'obs', target: 'inputMute', input: 'Mic/Aux' }
+    const volume = page.buttons.find((item) => item.id === 'btn-youtube')!
+    volume.state = { type: 'obs', target: 'inputVolume', input: 'Game' }
+    const otherPage = profile.pages[1]!
+    const hidden = otherPage.buttons[0]!
+    hidden.state = { type: 'obs', target: 'replay' }
+    return {
+      config,
+      profileId: profile.id,
+      pageId: page.id,
+      otherPageId: otherPage.id,
+      streamId: stream.id,
+      sceneId: scene.id,
+      muteId: mute.id,
+      volumeId: volume.id,
+      hiddenId: hidden.id,
+    }
+  }
+
+  function serviceWithStatusObs(obsReader: ObsStateReader): ControlStateService {
+    const created = new ControlStateService({ obsReader })
+    services.push(created)
+    return created
+  }
+
+  it('resolves status bindings with target, scene, input and volume max', () => {
+    const { config, profileId, pageId, otherPageId, streamId, sceneId, muteId, volumeId, hiddenId } =
+      obsStatusFixture()
+
+    expect(resolveStateControls(config, profileId, pageId)).toEqual([
+      { id: streamId, label: 'Copy', source: 'obs', target: 'streaming' },
+      { id: sceneId, label: 'Paste', source: 'obs', target: 'scene', scene: 'Gaming' },
+      { id: muteId, label: 'Undo', source: 'obs', target: 'inputMute', input: 'Mic/Aux' },
+      {
+        id: volumeId,
+        label: 'YouTube',
+        source: 'obs',
+        target: 'inputVolume',
+        input: 'Game',
+        max: 200,
+      },
+    ])
+
+    // The hidden page's replay tile is only resolved for that page.
+    expect(resolveStateControls(config, profileId, pageId)!.map((control) => control.id)).not.toContain(
+      hiddenId,
+    )
+    expect(resolveStateControls(config, profileId, otherPageId)!.map((control) => control.id)).toEqual([
+      hiddenId,
+    ])
+  })
+
+  it('emits revisioned entries with active and detail for each status target', async () => {
+    const { config, profileId, pageId, streamId, sceneId, muteId, volumeId } = obsStatusFixture()
+    const obs = new FakeObsReader()
+    obs.setStatus('streaming', undefined, { active: true, detail: 'LIVE 01:02' })
+    obs.setStatus('scene', { scene: 'Gaming' }, { active: true, detail: 'Gaming' })
+    obs.setStatus('inputMute', { input: 'Mic/Aux' }, { active: false, muted: false, detail: 'ON' })
+    obs.setStatus('inputVolume', { input: 'Game' }, { value: 0.75, muted: false, detail: '150%' })
+    const controls = resolveStateControls(config, profileId, pageId)!
+    const messages: ControlStateMessage[] = []
+    const state = serviceWithStatusObs(obs)
+
+    await state.subscribe('client-1', {
+      profileId,
+      pageId,
+      controlIds: controls.map((control) => control.id),
+      controls,
+      intervalMs: 1000,
+      send: (message) => messages.push(message),
+    })
+
+    expect(messages).toHaveLength(1)
+    expect(messages[0]!.states).toEqual([
+      { controlId: streamId, revision: 1, available: true, detail: 'LIVE 01:02', active: true },
+      { controlId: sceneId, revision: 1, available: true, detail: 'Gaming', active: true },
+      { controlId: muteId, revision: 1, available: true, detail: 'ON', active: false, muted: false },
+      {
+        controlId: volumeId,
+        revision: 1,
+        available: true,
+        detail: '150%',
+        value: 0.75,
+        muted: false,
+      },
+    ])
+    expect(obs.statusCalls).toEqual([
+      { target: 'inputVolume', options: { input: 'Game' } },
+      { target: 'streaming', options: {} },
+      { target: 'scene', options: { scene: 'Gaming' } },
+      { target: 'inputMute', options: { input: 'Mic/Aux' } },
+    ])
+    // Only the visible page's controls were read; the replay tile was not.
+    expect(obs.statusCalls.some((call) => call.target === 'replay')).toBe(false)
+  })
+
+  it('bumps revisions when an OBS event changes the status detail', async () => {
+    const { config, profileId, pageId, streamId, sceneId } = obsStatusFixture()
+    const obs = new FakeObsReader()
+    obs.setStatus('streaming', undefined, { active: false, detail: 'OFF' })
+    obs.setStatus('scene', { scene: 'Gaming' }, { active: false, detail: 'Main' })
+    const controls = resolveStateControls(config, profileId, pageId)!.filter(
+      (control) => control.id === streamId || control.id === sceneId,
+    )
+    const messages: ControlStateMessage[] = []
+    const state = serviceWithStatusObs(obs)
+
+    await state.subscribe('client-1', {
+      profileId,
+      pageId,
+      controlIds: controls.map((control) => control.id),
+      controls,
+      intervalMs: 1000,
+      send: (message) => messages.push(message),
+    })
+
+    obs.setStatus('streaming', undefined, { active: true, detail: 'LIVE 02:00' })
+    obs.setStatus('scene', { scene: 'Gaming' }, { active: true, detail: 'Gaming' })
+    await state.noteObsChanged()
+
+    expect(messages.at(-1)!.states).toEqual([
+      { controlId: streamId, revision: 2, available: true, detail: 'LIVE 02:00', active: true },
+      { controlId: sceneId, revision: 2, available: true, detail: 'Gaming', active: true },
+    ])
+  })
+
+  it('reports NO OBS then NO INPUT and recovers with a new revision', async () => {
+    const { profileId, pageId, muteId } = obsStatusFixture()
+    const obs = new FakeObsReader()
+    obs.failStatus('inputMute', { input: 'Mic/Aux' }, new Error('OBS is not connected.'))
+    const messages: ControlStateMessage[] = []
+    const state = serviceWithStatusObs(obs)
+    const controls = [
+      {
+        id: muteId,
+        label: 'Undo',
+        source: 'obs' as const,
+        target: 'inputMute' as const,
+        input: 'Mic/Aux',
+      },
+    ]
+
+    await state.subscribe('client-1', {
+      profileId,
+      pageId,
+      controlIds: [muteId],
+      controls,
+      intervalMs: 1000,
+      send: (message) => messages.push(message),
+    })
+    expect(messages.at(-1)!.states[0]).toMatchObject({
+      controlId: muteId,
+      revision: 1,
+      available: false,
+      detail: 'NO OBS',
+      error: 'OBS is not connected.',
+    })
+
+    obs.clearStatusFailure('inputMute', { input: 'Mic/Aux' })
+    obs.failStatus('inputMute', { input: 'Mic/Aux' }, new Error('OBS input "Mic/Aux" was not found'))
+    await state.noteObsChanged('Mic/Aux')
+    expect(messages.at(-1)!.states[0]).toMatchObject({
+      controlId: muteId,
+      revision: 2,
+      available: false,
+      detail: 'NO INPUT',
+    })
+
+    obs.clearStatusFailure('inputMute', { input: 'Mic/Aux' })
+    obs.setStatus('inputMute', { input: 'Mic/Aux' }, { active: true, muted: true, detail: 'MUTED' })
+    await state.noteObsChanged('Mic/Aux')
+    expect(messages.at(-1)!.states[0]).toMatchObject({
+      controlId: muteId,
+      revision: 3,
+      available: true,
+      detail: 'MUTED',
+      active: true,
+      muted: true,
+    })
+  })
+
+  it('refreshes a status tile after an OBS action write', async () => {
+    const { profileId, pageId, streamId } = obsStatusFixture()
+    const client = new FakeStatusClient()
+    const source = new ObsStateSource(client)
+    const messages: ControlStateMessage[] = []
+    const state = serviceWithStatusObs(source)
+
+    try {
+      await state.subscribe('client-1', {
+        profileId,
+        pageId,
+        controlIds: [streamId],
+        controls: [
+          { id: streamId, label: 'Copy', source: 'obs', target: 'streaming' },
+        ],
+        intervalMs: 1000,
+        send: (message) => messages.push(message),
+      })
+      expect(messages.at(-1)!.states[0]).toMatchObject({
+        controlId: streamId,
+        revision: 1,
+        available: true,
+        active: false,
+        detail: 'OFF',
+      })
+
+      client.streaming = true
+      await source.execute({ kind: 'obs', action: 'startStream' })
+      await state.noteObsChanged()
+
+      expect(client.requests).toContain('StartStream')
+      expect(messages.at(-1)!.states[0]).toMatchObject({
+        controlId: streamId,
+        revision: 2,
+        available: true,
+        active: true,
+        detail: 'LIVE',
+      })
+    } finally {
+      source.dispose()
+    }
+  })
+})
+
+class FakeStatusClient implements ObsClientLike {
+  connected = true
+  paused = false
+  streaming = false
+  requests: string[] = []
+  private listeners = new Set<(type: string, data: Record<string, unknown>) => void>()
+
+  async request<T = Record<string, unknown>>(type: string): Promise<T> {
+    this.requests.push(type)
+    return (type === 'GetStreamStatus' ? { outputActive: this.streaming } : {}) as T
+  }
+
+  onEvent(listener: (type: string, data: Record<string, unknown>) => void): () => void {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+
+  emit(type: string, data: Record<string, unknown>): void {
+    for (const listener of this.listeners) listener(type, data)
+  }
+}

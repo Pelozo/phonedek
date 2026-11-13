@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Action, KeyboardPlanStep } from '@phonedek/shared'
+import type { Action, KeyboardPlanStep, ObsPlanStep } from '@phonedek/shared'
 import { ActionExecutor } from '../src/main/executor'
 import type { HostActions } from '../src/main/host-actions'
 import type { KeySender } from '../src/main/key-sender'
@@ -337,5 +337,107 @@ describe('ActionExecutor OBS mute', () => {
     const result = await executor.execute([{ type: 'obs', action: 'toggleMute' }], 'obs')
     expect(result.ok).toBe(false)
     expect(result.error).toMatch(/OBS is not available on this desktop/)
+  })
+})
+
+describe('ActionExecutor OBS plan steps', () => {
+  it('routes every OBS action to runObsAction when it is available', async () => {
+    const log: string[] = []
+    const steps: ObsPlanStep[] = []
+    const host: HostActions = {
+      ...fakeHost(log),
+      async runObsAction(step) {
+        steps.push(step)
+      },
+      async toggleObsInputMute(input?: string) {
+        log.push(`legacy-mute:${input ?? '(auto)'}`)
+      },
+    }
+    const executor = new ActionExecutor(fakeKeys(log), host)
+
+    await expect(
+      executor.execute(
+        [
+          { type: 'obs', action: 'setScene', scene: 'Gaming' },
+          { type: 'obs', action: 'startStream' },
+          { type: 'obs', action: 'saveReplay' },
+          { type: 'obs', action: 'toggleSourceVisibility', source: 'Webcam' },
+          {
+            type: 'obs',
+            action: 'setSourceVisibility',
+            scene: 'Main',
+            source: 'Webcam',
+            visible: false,
+          },
+          { type: 'obs', action: 'addMarker', name: 'Boss' },
+          { type: 'obs', action: 'toggleMute', input: 'Mic/Aux' },
+        ],
+        'obs',
+      ),
+    ).resolves.toEqual({ ok: true })
+
+    expect(steps).toEqual([
+      { kind: 'obs', action: 'setScene', scene: 'Gaming' },
+      { kind: 'obs', action: 'startStream' },
+      { kind: 'obs', action: 'saveReplay' },
+      { kind: 'obs', action: 'toggleSourceVisibility', source: 'Webcam' },
+      { kind: 'obs', action: 'setSourceVisibility', scene: 'Main', source: 'Webcam', visible: false },
+      { kind: 'obs', action: 'addMarker', name: 'Boss' },
+      { kind: 'obs', action: 'toggleMute', input: 'Mic/Aux' },
+    ])
+    expect(log).toEqual([])
+  })
+
+  it('falls back to toggleObsInputMute for legacy mute-only hosts', async () => {
+    const log: string[] = []
+    const host: HostActions = {
+      ...fakeHost(log),
+      async toggleObsInputMute(input?: string) {
+        log.push(`legacy-mute:${input ?? '(auto)'}`)
+      },
+    }
+    const executor = new ActionExecutor(fakeKeys(log), host)
+
+    await expect(
+      executor.execute(
+        [
+          { type: 'obs', action: 'toggleMute', input: 'Mic/Aux' },
+          { type: 'obs', action: 'toggleMute' },
+        ],
+        'obs',
+      ),
+    ).resolves.toEqual({ ok: true })
+    expect(log).toEqual(['legacy-mute:Mic/Aux', 'legacy-mute:(auto)'])
+
+    const unsupported = await executor.execute([{ type: 'obs', action: 'startStream' }], 'obs')
+    expect(unsupported).toEqual({ ok: false, error: 'OBS is not available on this desktop.' })
+    expect(log).toEqual(['legacy-mute:Mic/Aux', 'legacy-mute:(auto)'])
+  })
+
+  it('returns a useful error when an OBS action fails and keeps the queue alive', async () => {
+    const log: string[] = []
+    const host: HostActions = {
+      ...fakeHost(log),
+      async runObsAction(step) {
+        if (step.action === 'setScene') throw new Error('OBS scene "Nope" was not found')
+        log.push(`obs:${step.action}`)
+      },
+    }
+    const executor = new ActionExecutor(fakeKeys(log), host)
+
+    await expect(
+      executor.execute([{ type: 'obs', action: 'setScene', scene: 'Nope' }], 'obs'),
+    ).resolves.toEqual({ ok: false, error: 'OBS scene "Nope" was not found' })
+
+    await expect(
+      executor.execute(
+        [
+          { type: 'obs', action: 'startStream' },
+          { type: 'hotkey', keys: ['WIN', 'D'] },
+        ],
+        'after',
+      ),
+    ).resolves.toEqual({ ok: true })
+    expect(log).toEqual(['obs:startStream', 'keys:WIN+D'])
   })
 })

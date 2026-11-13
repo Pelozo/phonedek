@@ -854,6 +854,7 @@ export class ObsStateSource implements ObsStateReader {
           const existing = this.cache.get(name)!.reading
           this.setKnown(name, { level: obsMulToPercent(mul), muted: existing.muted })
         }
+        this.invalidateStatus('inputVolume')
         this.scheduleNotify(name)
         return
       }
@@ -864,6 +865,8 @@ export class ObsStateSource implements ObsStateReader {
           const existing = this.cache.get(name)!.reading
           this.setKnown(name, { ...existing, muted: data['inputMuted'] === true })
         }
+        this.invalidateStatus('inputMute')
+        this.invalidateStatus('inputVolume')
         this.scheduleNotify(name)
         return
       }
@@ -881,6 +884,8 @@ export class ObsStateSource implements ObsStateReader {
           this.cache.set(newName, cached)
         }
         this.listCache = null
+        this.invalidateStatus('inputMute')
+        this.invalidateStatus('inputVolume')
         this.scheduleNotify(newName)
         return
       }

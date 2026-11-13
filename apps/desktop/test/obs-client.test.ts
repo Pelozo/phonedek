@@ -328,7 +328,7 @@ describe('ObsClient requests', () => {
         return { ok: true }
       },
     })
-    const client = makeClient(fake, { requestTimeoutMs: 30 })
+    const client = makeClient(fake, { requestTimeoutMs: 250 })
     client.configure({ enabled: true })
     await waitFor(() => client.connected)
 

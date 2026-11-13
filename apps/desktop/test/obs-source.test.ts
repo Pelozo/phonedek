@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import type { ObsPlanStep } from '@phonedek/shared'
 import { ObsRequestError } from '../src/main/obs-client'
 import {
   ObsStateSource,
@@ -319,5 +320,510 @@ describe('ObsStateSource writes', () => {
     const state = source(client)
     await expect(state.setVolume('Mic', 100)).rejects.toThrow('OBS is not connected')
     await expect(state.toggleMute('Mic')).rejects.toThrow('OBS is not connected')
+  })
+})
+
+describe('ObsStateSource actions', () => {
+  it('switches to a named scene and falls back to the first scene', async () => {
+    const client = new FakeObsClient()
+    client.handler = (type) => {
+      if (type === 'GetSceneList') {
+        return {
+          currentProgramSceneName: 'Main',
+          scenes: [
+            { sceneName: 'Main', sceneIndex: 0 },
+            { sceneName: 'Gaming', sceneIndex: 1 },
+          ],
+        }
+      }
+      return {}
+    }
+    const state = source(client)
+
+    await expect(state.setScene('Gaming')).resolves.toEqual({ scene: 'Gaming' })
+    await expect(state.setScene('   ')).resolves.toEqual({ scene: 'Main' })
+    expect(
+      client.requests
+        .filter((request) => request.type === 'SetCurrentProgramScene')
+        .map((request) => request.data?.['sceneName']),
+    ).toEqual(['Gaming', 'Main'])
+  })
+
+  it('maps every output transition to its obs-websocket request', async () => {
+    const client = new FakeObsClient()
+    const state = source(client)
+    const steps: ObsPlanStep[] = [
+      { kind: 'obs', action: 'startStream' },
+      { kind: 'obs', action: 'stopStream' },
+      { kind: 'obs', action: 'toggleStream' },
+      { kind: 'obs', action: 'startRecord' },
+      { kind: 'obs', action: 'stopRecord' },
+      { kind: 'obs', action: 'toggleRecord' },
+      { kind: 'obs', action: 'startReplay' },
+      { kind: 'obs', action: 'stopReplay' },
+      { kind: 'obs', action: 'toggleVirtualCam' },
+    ]
+
+    for (const step of steps) await state.execute(step)
+
+    expect(client.requests.map((request) => request.type)).toEqual([
+      'StartStream',
+      'StopStream',
+      'ToggleStream',
+      'StartRecord',
+      'StopRecord',
+      'ToggleRecord',
+      'StartReplayBuffer',
+      'StopReplayBuffer',
+      'ToggleVirtualCam',
+    ])
+  })
+
+  it('saves the replay buffer and adds chapter markers', async () => {
+    const client = new FakeObsClient()
+    const state = source(client)
+
+    await state.execute({ kind: 'obs', action: 'saveReplay' })
+    await state.execute({ kind: 'obs', action: 'addMarker', name: 'Boss' })
+    await state.execute({ kind: 'obs', action: 'addMarker' })
+
+    expect(client.requests).toEqual([
+      { type: 'SaveReplayBuffer', data: undefined },
+      { type: 'CreateRecordChapter', data: { chapterName: 'Boss' } },
+      { type: 'CreateRecordChapter', data: {} },
+    ])
+  })
+
+  it('sets and toggles a source in an explicit scene', async () => {
+    const client = new FakeObsClient()
+    let enabled = false
+    client.handler = (type, data) => {
+      if (type === 'GetSceneItemList') {
+        return { sceneItems: [{ sceneItemId: 7, sourceName: 'Webcam', sceneItemEnabled: enabled }] }
+      }
+      if (type === 'SetSceneItemEnabled') {
+        enabled = data['sceneItemEnabled'] === true
+        return {}
+      }
+      return {}
+    }
+    const state = source(client)
+
+    await expect(
+      state.execute({
+        kind: 'obs',
+        action: 'setSourceVisibility',
+        scene: 'Main',
+        source: 'Webcam',
+        visible: true,
+      }),
+    ).resolves.toBeUndefined()
+    expect(
+      client.requests.find((request) => request.type === 'SetSceneItemEnabled')?.data,
+    ).toEqual({ sceneName: 'Main', sceneItemId: 7, sceneItemEnabled: true })
+
+    await expect(
+      state.execute({ kind: 'obs', action: 'toggleSourceVisibility', scene: 'Main', source: 'Webcam' }),
+    ).resolves.toBeUndefined()
+    const writes = client.requests.filter((request) => request.type === 'SetSceneItemEnabled')
+    expect(writes.at(-1)?.data).toEqual({
+      sceneName: 'Main',
+      sceneItemId: 7,
+      sceneItemEnabled: false,
+    })
+    expect(client.count('GetSceneItemList')).toBe(1)
+  })
+
+  it('resolves an omitted source scene to the current program scene', async () => {
+    const client = new FakeObsClient()
+    client.handler = (type) => {
+      if (type === 'GetSceneList') {
+        return { currentProgramSceneName: 'Live', scenes: [{ sceneName: 'Live', sceneIndex: 0 }] }
+      }
+      if (type === 'GetSceneItemList') {
+        return { sceneItems: [{ sceneItemId: 3, sourceName: 'Overlay', sceneItemEnabled: false }] }
+      }
+      return {}
+    }
+    const state = source(client)
+
+    await expect(
+      state.execute({ kind: 'obs', action: 'toggleSourceVisibility', source: 'Overlay' }),
+    ).resolves.toBeUndefined()
+
+    expect(client.requests.map((request) => request.type)).toEqual([
+      'GetSceneList',
+      'GetSceneItemList',
+      'SetSceneItemEnabled',
+    ])
+    expect(
+      client.requests.find((request) => request.type === 'SetSceneItemEnabled')?.data,
+    ).toEqual({ sceneName: 'Live', sceneItemId: 3, sceneItemEnabled: true })
+  })
+
+  it('rejects a missing source after one forced refresh', async () => {
+    const client = new FakeObsClient()
+    client.handler = (type) => (type === 'GetSceneItemList' ? { sceneItems: [] } : {})
+    const state = source(client)
+
+    await expect(
+      state.execute({
+        kind: 'obs',
+        action: 'setSourceVisibility',
+        scene: 'Main',
+        source: 'Ghost',
+        visible: true,
+      }),
+    ).rejects.toThrow('OBS source "Ghost" was not found in scene "Main"')
+    expect(client.count('GetSceneItemList')).toBe(2)
+    expect(client.count('SetSceneItemEnabled')).toBe(0)
+  })
+
+  it('turns OBS request errors into clear rejections', async () => {
+    const client = new FakeObsClient()
+    const state = source(client)
+
+    client.handler = () => {
+      throw new ObsRequestError('SetCurrentProgramScene', 600)
+    }
+    await expect(state.setScene('Nope')).rejects.toThrow('OBS scene "Nope" was not found')
+
+    client.handler = () => {
+      throw new Error('OBS request timed out: StartStream')
+    }
+    await expect(state.execute({ kind: 'obs', action: 'startStream' })).rejects.toThrow(
+      'OBS request timed out: StartStream',
+    )
+
+    client.handler = () => {
+      throw new ObsRequestError('ToggleVirtualCam', 204)
+    }
+    await expect(state.execute({ kind: 'obs', action: 'toggleVirtualCam' })).rejects.toThrow(
+      'OBS does not support ToggleVirtualCam',
+    )
+
+    client.handler = () => {
+      throw new ObsRequestError('SaveReplayBuffer', 204)
+    }
+    await expect(state.saveReplay()).rejects.toThrow(
+      'OBS does not support saving the replay buffer',
+    )
+
+    client.handler = () => {
+      throw new ObsRequestError('CreateRecordChapter', 702)
+    }
+    await expect(state.addMarker('Boss')).rejects.toThrow('Hybrid MP4')
+  })
+
+  it('rejects actions while OBS is disconnected or switching scene collections', async () => {
+    const client = new FakeObsClient()
+    const state = source(client)
+
+    client.connected = false
+    await expect(state.setScene('Main')).rejects.toThrow('OBS is not connected')
+    await expect(state.execute({ kind: 'obs', action: 'startStream' })).rejects.toThrow(
+      'OBS is not connected',
+    )
+
+    client.connected = true
+    client.paused = true
+    await expect(state.execute({ kind: 'obs', action: 'toggleRecord' })).rejects.toThrow(
+      'switching scene collections',
+    )
+    await expect(state.readStatus('streaming')).rejects.toThrow('switching scene collections')
+    expect(client.requests).toEqual([])
+  })
+})
+
+describe('ObsStateSource status', () => {
+  it('reports output targets with active state and detail', async () => {
+    const client = new FakeObsClient()
+    client.handler = (type) => {
+      switch (type) {
+        case 'GetStreamStatus':
+          return { outputActive: true, outputTimecode: '00:12:34.567' }
+        case 'GetRecordStatus':
+          return { outputActive: true, outputPaused: false, outputTimecode: '01:02:03.999' }
+        case 'GetReplayBufferStatus':
+          return { outputActive: true }
+        case 'GetVirtualCamStatus':
+          return { outputActive: false }
+        default:
+          return {}
+      }
+    }
+    const state = source(client)
+
+    await expect(state.readStatus('streaming')).resolves.toEqual({
+      active: true,
+      detail: 'LIVE 12:34',
+    })
+    await expect(state.readStatus('recording')).resolves.toEqual({
+      active: true,
+      detail: 'REC 01:02:03',
+    })
+    await expect(state.readStatus('replay')).resolves.toEqual({ active: true, detail: 'REPLAY' })
+    await expect(state.readStatus('virtualCam')).resolves.toEqual({ active: false, detail: 'OFF' })
+  })
+
+  it('shows OFF and REC PAUSED for inactive or paused outputs', async () => {
+    const client = new FakeObsClient()
+    client.handler = (type) => {
+      if (type === 'GetStreamStatus') return { outputActive: false }
+      if (type === 'GetRecordStatus') return { outputActive: true, outputPaused: true }
+      return {}
+    }
+    const state = source(client)
+
+    await expect(state.readStatus('streaming')).resolves.toEqual({ active: false, detail: 'OFF' })
+    await expect(state.readStatus('recording')).resolves.toEqual({
+      active: true,
+      detail: 'REC PAUSED',
+    })
+  })
+
+  it('reports the current scene and marks a bound scene active', async () => {
+    const client = new FakeObsClient()
+    client.handler = (type) =>
+      type === 'GetSceneList'
+        ? {
+            currentProgramSceneName: 'Main',
+            scenes: [
+              { sceneName: 'Main', sceneIndex: 0 },
+              { sceneName: 'Gaming', sceneIndex: 1 },
+            ],
+          }
+        : {}
+    const state = source(client)
+
+    await expect(state.readStatus('scene')).resolves.toEqual({ active: true, detail: 'Main' })
+    await expect(state.readStatus('scene', { scene: 'Main' })).resolves.toEqual({
+      active: true,
+      detail: 'Main',
+    })
+    await expect(state.readStatus('scene', { scene: 'Gaming' })).resolves.toEqual({
+      active: false,
+      detail: 'Main',
+    })
+    expect(client.count('GetSceneList')).toBe(1)
+  })
+
+  it('reports input mute and volume, including MUTED detail', async () => {
+    const client = new FakeObsClient()
+    client.handler = (type, data) => {
+      if (type === 'GetInputVolume') {
+        return { inputVolumeMul: data['inputName'] === 'Loud' ? 2 : 1.5 }
+      }
+      if (type === 'GetInputMute') return { inputMuted: data['inputName'] === 'Muted' }
+      return {}
+    }
+    const state = source(client)
+
+    await expect(state.readStatus('inputMute', { input: 'Mic' })).resolves.toEqual({
+      active: false,
+      muted: false,
+      detail: 'ON',
+    })
+    await expect(state.readStatus('inputMute', { input: 'Muted' })).resolves.toEqual({
+      active: true,
+      muted: true,
+      detail: 'MUTED',
+    })
+    await expect(state.readStatus('inputVolume', { input: 'Loud' })).resolves.toEqual({
+      value: 1,
+      muted: false,
+      detail: '200%',
+    })
+    await expect(state.readStatus('inputVolume', { input: 'Muted' })).resolves.toEqual({
+      value: 0.75,
+      muted: true,
+      detail: 'MUTED',
+    })
+  })
+
+  it('maps missing inputs to a clear rejection', async () => {
+    const client = new FakeObsClient()
+    const state = source(client)
+
+    client.handler = () => {
+      throw new ObsRequestError('GetInputVolume', 600)
+    }
+    await expect(state.readStatus('inputMute', { input: 'Gone' })).rejects.toThrow(
+      'OBS input "Gone" was not found',
+    )
+
+    client.handler = () => {
+      throw new ObsRequestError('GetInputVolume', 605)
+    }
+    await expect(state.readStatus('inputVolume', { input: 'Image' })).rejects.toThrow(
+      '"Image" is not an audio input',
+    )
+  })
+
+  it('caches status per target and shares one in-flight request', async () => {
+    let now = 1000
+    let calls = 0
+    let release: ((value: Record<string, unknown>) => void) | null = null
+    const client = new FakeObsClient()
+    client.handler = (type) => {
+      if (type !== 'GetStreamStatus') return {}
+      calls += 1
+      return new Promise<Record<string, unknown>>((resolve) => {
+        release = resolve
+      })
+    }
+    const state = source(client, { ttlMs: 900, now: () => now })
+
+    const first = state.readStatus('streaming')
+    const second = state.readStatus('streaming')
+    expect(calls).toBe(1)
+    release!({ outputActive: true, outputTimecode: '00:00:05.000' })
+    await expect(first).resolves.toEqual({ active: true, detail: 'LIVE 00:05' })
+    await expect(second).resolves.toEqual({ active: true, detail: 'LIVE 00:05' })
+    expect(calls).toBe(1)
+
+    await state.readStatus('streaming')
+    expect(calls).toBe(1)
+
+    now += 901
+    const third = state.readStatus('streaming')
+    expect(calls).toBe(2)
+    release!({ outputActive: false })
+    await expect(third).resolves.toEqual({ active: false, detail: 'OFF' })
+  })
+
+  it('invalidates status per target and for all targets', async () => {
+    const client = new FakeObsClient()
+    const state = source(client)
+
+    await state.readStatus('streaming')
+    await state.readStatus('replay')
+    await state.readStatus('streaming')
+    expect(client.count('GetStreamStatus')).toBe(1)
+    expect(client.count('GetReplayBufferStatus')).toBe(1)
+
+    state.invalidateStatus('streaming')
+    await state.readStatus('streaming')
+    await state.readStatus('replay')
+    expect(client.count('GetStreamStatus')).toBe(2)
+    expect(client.count('GetReplayBufferStatus')).toBe(1)
+
+    state.invalidateStatus()
+    await state.readStatus('streaming')
+    await state.readStatus('replay')
+    expect(client.count('GetStreamStatus')).toBe(3)
+    expect(client.count('GetReplayBufferStatus')).toBe(2)
+  })
+
+  it('refreshes output status immediately after OBS events', async () => {
+    const client = new FakeObsClient()
+    let streaming = false
+    client.handler = (type) => (type === 'GetStreamStatus' ? { outputActive: streaming } : {})
+    const state = source(client)
+
+    await expect(state.readStatus('streaming')).resolves.toEqual({ active: false, detail: 'OFF' })
+    streaming = true
+    client.emit('StreamStateChanged', { outputActive: true })
+    await expect(state.readStatus('streaming')).resolves.toEqual({ active: true, detail: 'LIVE' })
+    expect(client.count('GetStreamStatus')).toBe(2)
+  })
+
+  it('tracks program scene changes and scene renames', async () => {
+    const client = new FakeObsClient()
+    let current = 'Main'
+    client.handler = (type) =>
+      type === 'GetSceneList'
+        ? { currentProgramSceneName: current, scenes: [{ sceneName: current, sceneIndex: 0 }] }
+        : {}
+    const state = source(client)
+
+    await expect(state.readStatus('scene')).resolves.toEqual({ active: true, detail: 'Main' })
+
+    current = 'Gaming'
+    client.emit('CurrentProgramSceneChanged', { sceneName: 'Gaming' })
+    await expect(state.readStatus('scene')).resolves.toEqual({ active: true, detail: 'Gaming' })
+    expect(client.count('GetSceneList')).toBe(1)
+
+    current = 'Renamed'
+    client.emit('SceneNameChanged', { sceneName: 'Renamed' })
+    await expect(state.readStatus('scene')).resolves.toEqual({ active: true, detail: 'Renamed' })
+    expect(client.count('GetSceneList')).toBe(2)
+  })
+
+  it('refreshes input status immediately after mute and volume events', async () => {
+    const client = new FakeObsClient()
+    let mul = 1
+    let muted = false
+    client.handler = (type) => {
+      if (type === 'GetInputVolume') return { inputVolumeMul: mul }
+      if (type === 'GetInputMute') return { inputMuted: muted }
+      return {}
+    }
+    const state = source(client)
+
+    await expect(state.readStatus('inputMute', { input: 'Mic' })).resolves.toEqual({
+      active: false,
+      muted: false,
+      detail: 'ON',
+    })
+    await expect(state.readStatus('inputVolume', { input: 'Mic' })).resolves.toEqual({
+      value: 0.5,
+      muted: false,
+      detail: '100%',
+    })
+
+    muted = true
+    client.emit('InputMuteStateChanged', { inputName: 'Mic', inputMuted: true })
+    await expect(state.readStatus('inputMute', { input: 'Mic' })).resolves.toEqual({
+      active: true,
+      muted: true,
+      detail: 'MUTED',
+    })
+    await expect(state.readStatus('inputVolume', { input: 'Mic' })).resolves.toEqual({
+      value: 0.5,
+      muted: true,
+      detail: 'MUTED',
+    })
+
+    mul = 2
+    client.emit('InputVolumeChanged', { inputName: 'Mic', inputVolumeMul: 2 })
+    await expect(state.readStatus('inputVolume', { input: 'Mic' })).resolves.toEqual({
+      value: 1,
+      muted: true,
+      detail: 'MUTED',
+    })
+  })
+
+  it('keeps status working after an input rename', async () => {
+    const client = new FakeObsClient()
+    const names: string[] = []
+    client.handler = (type, data) => {
+      if (type === 'GetInputVolume') {
+        names.push(String(data['inputName']))
+        return { inputVolumeMul: 1 }
+      }
+      if (type === 'GetInputMute') {
+        names.push(String(data['inputName']))
+        return { inputMuted: data['inputName'] === 'New' }
+      }
+      return {}
+    }
+    const state = source(client)
+
+    await expect(state.readStatus('inputMute', { input: 'Old' })).resolves.toEqual({
+      active: false,
+      muted: false,
+      detail: 'ON',
+    })
+    expect(names).toEqual(['Old', 'Old'])
+
+    client.emit('InputNameChanged', { oldInputName: 'Old', inputName: 'New' })
+    state.invalidate('Old')
+    await expect(state.readStatus('inputMute', { input: 'Old' })).resolves.toEqual({
+      active: true,
+      muted: true,
+      detail: 'MUTED',
+    })
+    expect(names).toEqual(['Old', 'Old', 'New', 'New'])
   })
 })
