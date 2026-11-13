@@ -23,6 +23,7 @@ import { applyBackupImport, readBackupFile, writeBackupFile } from './backup'
 import { ConfigStore } from './config-store'
 import { DiscoveryService } from './discovery'
 import { ActionExecutor } from './executor'
+import { GameWatcher } from './game-watcher'
 import { createHostActions } from './host-actions'
 import { ControlInputRouter } from './control-input'
 import { ControlStateService } from './control-state'
@@ -41,7 +42,9 @@ import {
 import { createPairInfo } from './qr'
 import { DeckServer, type PressContext } from './server'
 import {
+  MAX_AUTO_PROFILE_RULES,
   SettingsStore,
+  sanitizeAutoProfileRules,
   sanitizeLightDevices,
   sanitizeObsHost,
   sanitizeObsPort,
@@ -67,6 +70,7 @@ import { IPC } from '../shared/api'
 import type {
   AppState,
   AssetPickResult,
+  AutoProfileSettingsInput,
   LightSettingsInput,
   LightStatusView,
   ObsInputsResult,
@@ -112,6 +116,7 @@ let pointerSender: PointerSender | null = null
 let pointerRouter: PointerRouter | null = null
 let keyboardSender: KeyboardSender | null = null
 let keyboardRouter: KeyboardRouter | null = null
+let gameWatcher: GameWatcher | null = null
 /** A native import/destructive dialog is waiting for a decision. */
 let dialogOpen = false
 let updater: UpdateService
@@ -248,6 +253,8 @@ async function buildServerInfo(): Promise<ServerInfoView> {
       twitchHasToken: twitchAuth?.hasToken === true,
       lightsEnabled: lightsActive(currentSettings),
       lights: currentSettings.lights.map((device) => ({ ...device })),
+      autoProfileEnabled: currentSettings.autoProfileEnabled,
+      autoProfileRules: currentSettings.autoProfileRules.map((rule) => ({ ...rule })),
     },
     clients: server?.getClients() ?? [],
     error: serverError,
@@ -324,6 +331,8 @@ async function buildState(): Promise<AppState> {
       twitchHasToken: twitchAuth?.hasToken === true,
       lightsEnabled: lightsActive(settings.get()),
       lights: settings.get().lights.map((device) => ({ ...device })),
+      autoProfileEnabled: settings.get().autoProfileEnabled,
+      autoProfileRules: settings.get().autoProfileRules.map((rule) => ({ ...rule })),
     },
   }
 }
@@ -885,6 +894,59 @@ function registerIpc(): void {
       const updated = settings.update(patch)
       lightSource?.configure(updated.lights)
       await controlState?.noteLightChanged()
+      await pushServerInfo()
+      return { ok: true, state: await buildState() }
+    },
+  )
+
+  ipcMain.handle(
+    IPC.setAutoProfileSettings,
+    async (_event, input: unknown): Promise<OperationResult> => {
+      if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+        return { ok: false, error: 'Invalid auto-profile settings', state: await buildState() }
+      }
+      const value = input as AutoProfileSettingsInput
+      const patch: Partial<AppSettings> = {}
+
+      if (value.enabled !== undefined) {
+        if (typeof value.enabled !== 'boolean') {
+          return { ok: false, error: 'Auto-profile enabled must be true or false', state: await buildState() }
+        }
+        patch.autoProfileEnabled = value.enabled
+      }
+
+      if (value.rules !== undefined) {
+        if (!Array.isArray(value.rules)) {
+          return { ok: false, error: 'Auto-profile rules must be a list', state: await buildState() }
+        }
+        if (value.rules.length > MAX_AUTO_PROFILE_RULES) {
+          return {
+            ok: false,
+            error: `At most ${MAX_AUTO_PROFILE_RULES} auto-profile rules can be configured`,
+            state: await buildState(),
+          }
+        }
+        const rules = sanitizeAutoProfileRules(value.rules)
+        if (rules.length !== value.rules.length) {
+          return {
+            ok: false,
+            error: 'Each rule needs an existing profile and a process name or executable path.',
+            state: await buildState(),
+          }
+        }
+        const profileIds = new Set(store.get().profiles.map((profile) => profile.id))
+        if (rules.some((rule) => !profileIds.has(rule.profileId))) {
+          return {
+            ok: false,
+            error: 'Each rule must use a profile that exists in this deck.',
+            state: await buildState(),
+          }
+        }
+        patch.autoProfileRules = rules
+      }
+
+      settings.update(patch)
+      gameWatcher?.refresh()
       await pushServerInfo()
       return { ok: true, state: await buildState() }
     },
@@ -1612,6 +1674,18 @@ async function bootstrap(): Promise<void> {
     })
   })
 
+  gameWatcher = new GameWatcher({
+    getSettings: () => ({
+      enabled: settings.get().autoProfileEnabled,
+      rules: settings.get().autoProfileRules,
+    }),
+    getProfileIds: () => store.get().profiles.map((profile) => profile.id),
+    onSwitch: (profileId) => {
+      server.broadcastProfile(profileId)
+    },
+    logger,
+  })
+
   discovery = new DiscoveryService({
     getPort: () => server.port || settings.get().port,
     getName: () => store.get().serverName,
@@ -1627,6 +1701,7 @@ async function bootstrap(): Promise<void> {
 
   await startServer()
   if (settings.get().discovery) await discovery.start()
+  gameWatcher.refresh()
   if ((process.platform === 'win32' || process.platform === 'darwin') && 'prewarm' in keySender) {
     void (keySender as unknown as { prewarm: () => Promise<void> }).prewarm()
   }
@@ -1720,6 +1795,7 @@ if (!gotLock) {
         pointerSender?.dispose()
         keyboardRouter?.dispose()
         keyboardSender?.dispose()
+        gameWatcher?.dispose()
         keySender?.dispose?.()
         discovery?.stop()
         await server?.stop()

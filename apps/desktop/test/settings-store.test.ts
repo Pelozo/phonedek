@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { defaultSettings, SettingsStore } from '../src/main/settings-store'
+import { defaultSettings, normalizeProcessName, sanitizeAutoProfileRules, SettingsStore } from '../src/main/settings-store'
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), 'phonedek-test-'))
@@ -187,8 +187,7 @@ describe('SettingsStore keyboard control switch', () => {
   })
 })
 
-describe('SettingsStore Twitch settings', () => {
-  it('defaults Twitch to disabled with no bundled client ID', () => {
+describe('SettingsStore Twitch settings', () => {  it('defaults Twitch to disabled with no bundled client ID', () => {
     delete process.env['PHONEDEK_TWITCH_CLIENT_ID']
     const settings = new SettingsStore(tempDir())
     expect(settings.get().twitchEnabled).toBe(false)
@@ -226,5 +225,86 @@ describe('SettingsStore Twitch settings', () => {
     } finally {
       delete process.env['PHONEDEK_TWITCH_CLIENT_ID']
     }
+  })
+})
+
+describe('SettingsStore auto-profile settings', () => {
+  it('defaults auto-profile off with no rules', () => {
+    const settings = new SettingsStore(tempDir())
+    expect(settings.get().autoProfileEnabled).toBe(false)
+    expect(settings.get().autoProfileRules).toEqual([])
+    expect(defaultSettings().autoProfileEnabled).toBe(false)
+    expect(defaultSettings().autoProfileRules).toEqual([])
+  })
+
+  it('keeps old settings files valid and defaults missing fields', () => {
+    const dir = tempDir()
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ port: 49020, discovery: false }))
+    const settings = new SettingsStore(dir)
+    expect(settings.get().port).toBe(49020)
+    expect(settings.get().autoProfileEnabled).toBe(false)
+    expect(settings.get().autoProfileRules).toEqual([])
+
+    writeFileSync(
+      join(dir, 'settings.json'),
+      JSON.stringify({ port: 49021, autoProfileEnabled: 'yes', autoProfileRules: 'game' }),
+    )
+    const repaired = new SettingsStore(dir)
+    expect(repaired.get().autoProfileEnabled).toBe(false)
+    expect(repaired.get().autoProfileRules).toEqual([])
+  })
+
+  it('persists rules and normalizes executable paths, case and .exe', () => {
+    const dir = tempDir()
+    const settings = new SettingsStore(dir)
+    settings.update({
+      autoProfileEnabled: true,
+      autoProfileRules: [
+        { id: 'rule-1', process: 'C:\\Games\\Game.EXE', profileId: 'game' },
+        { id: 'rule-2', process: '  /usr/bin/Team Fortress 2  ', profileId: 'shooter' },
+        { id: 'rule-3', process: 'chrome.exe', profileId: 'browser' },
+      ],
+    })
+    expect(settings.get().autoProfileEnabled).toBe(true)
+    expect(settings.get().autoProfileRules).toEqual([
+      { id: 'rule-1', process: 'game', profileId: 'game' },
+      { id: 'rule-2', process: 'team fortress 2', profileId: 'shooter' },
+      { id: 'rule-3', process: 'chrome', profileId: 'browser' },
+    ])
+
+    const reloaded = new SettingsStore(dir)
+    expect(reloaded.get().autoProfileRules).toEqual(settings.get().autoProfileRules)
+  })
+
+  it('caps rules at 16 and makes duplicate or malformed ids unique', () => {
+    const input = Array.from({ length: 20 }, (_, index) => ({
+      id: index < 2 ? 'same' : '',
+      process: `game-${index}.exe`,
+      profileId: 'game',
+    }))
+    const rules = sanitizeAutoProfileRules(input)
+    expect(rules).toHaveLength(16)
+    expect(new Set(rules.map((rule) => rule.id)).size).toBe(16)
+    expect(rules[0]).toMatchObject({ id: 'same', process: 'game-0' })
+    expect(rules[1]).toMatchObject({ id: 'same-2', process: 'game-1' })
+  })
+
+  it('drops invalid process names and profile ids', () => {
+    expect(
+      sanitizeAutoProfileRules([
+        { id: 'ok', process: 'game.exe', profileId: 'game' },
+        { process: '', profileId: 'game' },
+        { process: 'game', profileId: '' },
+        { process: 'game', profileId: '../escape' },
+        { process: 42, profileId: 'game' },
+        null,
+        'not a rule',
+      ]),
+    ).toEqual([{ id: 'ok', process: 'game', profileId: 'game' }])
+
+    expect(normalizeProcessName('C:\\Program Files\\Game\\Game.EXE')).toBe('game')
+    expect(normalizeProcessName('/Applications/Game.app/Game')).toBe('game')
+    expect(normalizeProcessName('  ')).toBeNull()
+    expect(normalizeProcessName(7)).toBeNull()
   })
 })

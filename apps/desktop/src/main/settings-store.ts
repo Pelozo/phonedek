@@ -1,9 +1,19 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { randomInt } from 'node:crypto'
-import { DEFAULT_HTTP_PORT, LIGHT_DEFAULT_PORT } from '@phonedek/shared'
+import { DEFAULT_HTTP_PORT, LIGHT_DEFAULT_PORT, normalizeProfileId } from '@phonedek/shared'
 import type { Logger } from './logger'
 import { builtinTwitchClientId, sanitizeTwitchClientId } from './twitch-auth'
+
+/** One auto-profile rule: launch this process → show this deck profile. */
+export interface AutoProfileRule {
+  /** Stable id; unique within the list. */
+  id: string
+  /** Normalized executable basename, lowercase, without `.exe`. */
+  process: string
+  /** Profile id from the deck config. */
+  profileId: string
+}
 
 /** One local light device. Elgato is the only provider in this MVP. */
 export interface LightDeviceSettings {
@@ -49,6 +59,10 @@ export interface AppSettings {
   lightsEnabled: boolean
   /** Local devices (Elgato Key Light family). No credentials. Max 8. */
   lights: LightDeviceSettings[]
+  /** Switch connected phones to a profile when a configured game starts. */
+  autoProfileEnabled: boolean
+  /** Process → profile rules, evaluated in order. Max 16. */
+  autoProfileRules: AutoProfileRule[]
 }
 
 /** Four-digit pairing PIN (the QR/link is the low-friction path). */
@@ -60,8 +74,58 @@ export const DEFAULT_OBS_HOST = '127.0.0.1'
 export const DEFAULT_OBS_PORT = 4455
 export const DEFAULT_LIGHT_PORT = LIGHT_DEFAULT_PORT
 export const MAX_LIGHT_DEVICES = 8
+export const MAX_AUTO_PROFILE_RULES = 16
 const LIGHT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
+const RULE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
 const LIGHT_HOST_PATTERN = /^[A-Za-z0-9][A-Za-z0-9.-]*$/
+
+/**
+ * Normalize an executable name to the form used by process snapshots:
+ * basename, lowercase, no trailing `.exe`. Accepts a full path or a bare
+ * filename so a pasted `C:\Games\Game.exe` and `game` match the same process.
+ */
+export function normalizeProcessName(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const raw = value.trim()
+  if (!raw || raw.length > 4096) return null
+  const slash = Math.max(raw.lastIndexOf('/'), raw.lastIndexOf('\\'))
+  let name = (slash >= 0 ? raw.slice(slash + 1) : raw).trim().toLowerCase()
+  if (name.endsWith('.exe')) name = name.slice(0, -4)
+  if (!name || name.length > 160) return null
+  if (/[\u0000-\u001f\u007f]/.test(name)) return null
+  return name
+}
+
+/**
+ * Sanitize the persisted auto-profile list: drop malformed entries, normalize
+ * process names, cap at 16 and make ids stable, valid and unique. Profile
+ * existence is checked by the caller against the current deck config.
+ */
+export function sanitizeAutoProfileRules(input: unknown): AutoProfileRule[] {
+  if (!Array.isArray(input)) return []
+  const rules: AutoProfileRule[] = []
+  const used = new Set<string>()
+  for (const [index, item] of input.entries()) {
+    if (rules.length >= MAX_AUTO_PROFILE_RULES) break
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) continue
+    const candidate = item as Record<string, unknown>
+    const process = normalizeProcessName(candidate.process)
+    const profileId = normalizeProfileId(candidate.profileId)
+    if (!process || !profileId) continue
+
+    const rawId = typeof candidate.id === 'string' ? candidate.id.trim() : ''
+    let id = RULE_ID_PATTERN.test(rawId) ? rawId : `rule-${index + 1}`
+    if (used.has(id)) {
+      let suffix = 2
+      while (used.has(`${id}-${suffix}`)) suffix += 1
+      id = `${id}-${suffix}`
+    }
+    used.add(id)
+
+    rules.push({ id, process, profileId })
+  }
+  return rules
+}
 
 /**
  * Accept localhost, IPv4, hostnames and a bracketed IPv6 literal. Reject
@@ -179,6 +243,8 @@ export function defaultSettings(): AppSettings {
     twitchClientId: builtinTwitchClientId(),
     lightsEnabled: false,
     lights: [],
+    autoProfileEnabled: false,
+    autoProfileRules: [],
   }
 }
 
@@ -241,6 +307,11 @@ function sanitize(input: Partial<AppSettings> | null | undefined): AppSettings {
     lightsEnabled:
       typeof input.lightsEnabled === 'boolean' ? input.lightsEnabled : lights.length > 0,
     lights,
+    autoProfileEnabled:
+      typeof input.autoProfileEnabled === 'boolean'
+        ? input.autoProfileEnabled
+        : defaults.autoProfileEnabled,
+    autoProfileRules: sanitizeAutoProfileRules(input.autoProfileRules),
   }
 }
 
@@ -257,7 +328,11 @@ export class SettingsStore {
   }
 
   get(): AppSettings {
-    return { ...this.settings, lights: this.settings.lights.map((device) => ({ ...device })) }
+    return {
+      ...this.settings,
+      lights: this.settings.lights.map((device) => ({ ...device })),
+      autoProfileRules: this.settings.autoProfileRules.map((rule) => ({ ...rule })),
+    }
   }
 
   update(patch: Partial<AppSettings>): AppSettings {

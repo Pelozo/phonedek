@@ -879,6 +879,17 @@ export interface BrightnessMessage {
   level: number | null
 }
 
+/**
+ * Ask every connected phone to show another profile. Sent by the desktop when
+ * an auto-profile rule matches a newly launched process. Additive: older
+ * phones ignore unknown server messages and keep their current profile.
+ */
+export interface ProfileMessage {
+  type: 'profile'
+  /** Existing profile id from the deck config. */
+  profileId: string
+}
+
 /** Live state for one control the phone is watching. */
 export interface ControlStateEntry {
   controlId: string
@@ -931,6 +942,7 @@ export type ServerMessage =
   | { type: 'inputResult'; requestId: string; controlId: string; ok: boolean; error?: string }
   | ({ type: 'pointerResult' } & PointerResult)
   | BrightnessMessage
+  | ProfileMessage
   | ControlStateMessage
   | ({ type: 'keyboardResult' } & KeyboardResult)
   | { type: 'navigate'; direction: 'next' | 'prev' | 'goto'; pageId?: string }

@@ -14,6 +14,7 @@ import {
   POINTER_CAPABILITY,
   TWITCH_CAPABILITY,
   PROTOCOL_VERSION,
+  normalizeProfileId,
   parseClientMessage,
 } from '@phonedek/shared'
 import type {
@@ -571,6 +572,18 @@ export class DeckServer {
     const message: ServerMessage = { type: 'config', config: this.options.getConfig() }
     this.broadcast(message)
     for (const record of this.clients.values()) this.maybeNotifyOutdated(record)
+  }
+
+  /**
+   * Ask every connected phone to switch profiles. Returns false for an
+   * invalid id so a stale settings rule is ignored without disturbing clients.
+   */
+  broadcastProfile(profileId: string): boolean {
+    const id = normalizeProfileId(profileId)
+    if (!id) return false
+    this.broadcast({ type: 'profile', profileId: id })
+    this.options.logger?.info(`Asked ${this.clients.size} connected phone(s) to switch to profile "${id}"`)
+    return true
   }
 
   getClients(): ConnectedClient[] {

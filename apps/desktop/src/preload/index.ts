@@ -4,6 +4,7 @@ import { IPC } from '../shared/api'
 import type {
   AppState,
   AssetPickResult,
+  AutoProfileSettingsInput,
   LightSettingsInput,
   LightStatusView,
   ObsInputsResult,
@@ -69,6 +70,8 @@ const api: PhoneDeckApi = {
   setLightSettings: (input: LightSettingsInput): Promise<OperationResult> =>
     ipcRenderer.invoke(IPC.setLightSettings, input),
   getLightStatuses: (): Promise<LightStatusView[]> => ipcRenderer.invoke(IPC.getLightStatuses),
+  setAutoProfileSettings: (input: AutoProfileSettingsInput): Promise<OperationResult> =>
+    ipcRenderer.invoke(IPC.setAutoProfileSettings, input),
   exportConfig: (): Promise<OperationResult> => ipcRenderer.invoke(IPC.exportConfig),
   importConfig: (): Promise<SaveConfigResult> => ipcRenderer.invoke(IPC.importConfig),
   openLogs: (): Promise<void> => ipcRenderer.invoke(IPC.openLogs),

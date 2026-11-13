@@ -55,6 +55,10 @@ export interface SettingsView {
   lightsEnabled: boolean
   /** Configured local lights; never contains credentials. */
   lights: LightDeviceView[]
+  /** Switch connected phones to a profile when a configured game starts. */
+  autoProfileEnabled: boolean
+  /** Process → profile rules, evaluated in top-to-bottom priority order. */
+  autoProfileRules: AutoProfileRuleView[]
 }
 
 /** One configured local light as exposed to the renderer. */
@@ -92,6 +96,20 @@ export interface LightSettingsInput {
   enabled?: boolean
   /** Full replacement list (max 8). Omit to change only `enabled`. */
   lights?: LightDeviceInput[]
+}
+
+/** One auto-profile rule as exposed to the renderer. */
+export interface AutoProfileRuleView {
+  id: string
+  /** Normalized executable basename, lowercase, without `.exe`. */
+  process: string
+  profileId: string
+}
+
+export interface AutoProfileSettingsInput {
+  enabled?: boolean
+  /** Full replacement list (max 16). Omit to change only `enabled`. */
+  rules?: AutoProfileRuleView[]
 }
 
 export type ObsStateView =
@@ -270,6 +288,7 @@ export interface PhoneDeckApi {
   disconnectTwitch(): Promise<OperationResult>
   setLightSettings(input: LightSettingsInput): Promise<OperationResult>
   getLightStatuses(): Promise<LightStatusView[]>
+  setAutoProfileSettings(input: AutoProfileSettingsInput): Promise<OperationResult>
   exportConfig(): Promise<OperationResult>
   importConfig(): Promise<SaveConfigResult>
   openLogs(): Promise<void>
@@ -319,6 +338,7 @@ export const IPC = {
   disconnectTwitch: 'phonedek:twitch-disconnect',
   setLightSettings: 'phonedek:lights-set-settings',
   getLightStatuses: 'phonedek:lights-get-statuses',
+  setAutoProfileSettings: 'phonedek:auto-profile-set-settings',
   exportConfig: 'phonedek:export-config',
   importConfig: 'phonedek:import-config',
   openLogs: 'phonedek:open-logs',

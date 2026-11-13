@@ -101,6 +101,27 @@ export const ControlStateMessageSchema = z.object({
   states: z.array(ControlStateEntrySchema).max(32),
 })
 
+/** Server → phone profile switch, e.g. after a game process starts. */
+export const ProfileMessageSchema = z.object({
+  type: z.literal('profile'),
+  profileId: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/, 'Profile ids may only contain letters, digits, "-" and "_"'),
+})
+
+/**
+ * Trim and validate a profile id from settings, IPC or a process rule.
+ * Returns null instead of throwing so callers can ignore bad input.
+ */
+export function normalizeProfileId(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const id = value.trim()
+  if (!id || id.length > 64) return null
+  return /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(id) ? id : null
+}
+
 export const KeyboardMessageSchema = z
   .object({
     type: z.literal('keyboard'),

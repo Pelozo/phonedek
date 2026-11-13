@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import AdmZip from 'adm-zip'
 import { WebSocket } from 'ws'
 import { createDefaultConfig } from '@phonedek/shared'
+import { ProfileMessageSchema } from '@phonedek/shared'
 import type {
   ClientMessage,
   ControlSpec,
@@ -468,8 +469,35 @@ describe('DeckServer WebSocket', () => {
     await waitFor(() => h.server.getClients().length === 0)
   })
 
-  it('forwards a press result message to the phone', async () => {
-    const h = await harness({ ok: true, message: 'Screenshot saved to Desktop: shot.png' })
+  it('broadcasts a profile switch to every connected phone and ignores invalid ids', async () => {
+    const h = await harness()
+    const target = `ws://127.0.0.1:${h.port}/ws?token=${h.token}`
+    const a = await openSocket(target)
+    const b = await openSocket(target)
+    await waitFor(() => a.messages.find((message) => message.type === 'hello'))
+    await waitFor(() => b.messages.find((message) => message.type === 'hello'))
+
+    expect(h.server.broadcastProfile('  game-profile  ')).toBe(true)
+    const first = await waitFor(() => a.messages.find((message) => message.type === 'profile'))
+    expect(ProfileMessageSchema.safeParse(first).success).toBe(true)
+    expect(first).toEqual({ type: 'profile', profileId: 'game-profile' })
+    const second = await waitFor(() => b.messages.find((message) => message.type === 'profile'))
+    expect(second).toEqual({ type: 'profile', profileId: 'game-profile' })
+
+    expect(h.server.broadcastProfile('')).toBe(false)
+    expect(h.server.broadcastProfile('../escape')).toBe(false)
+    expect(h.server.broadcastProfile('x'.repeat(65))).toBe(false)
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(a.messages.filter((message) => message.type === 'profile')).toHaveLength(1)
+    expect(b.messages.filter((message) => message.type === 'profile')).toHaveLength(1)
+
+    a.ws.close()
+    b.ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
+  it('forwards a press result message to the phone', async () => {    const h = await harness({ ok: true, message: 'Screenshot saved to Desktop: shot.png' })
     const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
     await waitFor(() => messages.find((message) => message.type === 'hello'))
 
