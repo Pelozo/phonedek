@@ -89,7 +89,22 @@ data class DeckButton(
     val textColor: String? = null,
     val actions: List<ActionDto> = emptyList(),
     val control: ControlDto? = null,
+    // Read-only status binding for the tile (OBS phase 2). Actions still own
+    // the write; the desktop is the only source of state.
+    val state: StateBindingDto? = null,
     val span: CellSpanDto? = null,
+)
+
+/**
+ * Read-only OBS status shown on a normal button. `scene` marks which scene is
+ * live for the `scene` target; `input` selects an OBS input for mute/volume.
+ */
+@Serializable
+data class StateBindingDto(
+    val type: String = "",
+    val target: String = "",
+    val scene: String? = null,
+    val input: String? = null,
 )
 
 @Serializable
@@ -157,6 +172,8 @@ data class ControlStateEntryDto(
     val muted: Boolean? = null,
     val available: Boolean = false,
     val detail: String? = null,
+    // On/off cue for status targets (streaming, recording, replay, cam, mute).
+    val active: Boolean? = null,
 )
 
 /** Alias used by the connection/UI API; the wire shape is [ControlStateEntryDto]. */
@@ -382,6 +399,7 @@ private fun DeckPage.normalized(profileGrid: GridSettings): DeckPage {
             icon = button.icon?.take(48),
             iconMedia = button.iconMedia?.normalized(),
             control = button.control?.normalized(),
+            state = button.state?.normalized(),
             span = if (button.span == null) null else span,
         )
     }
@@ -457,6 +475,26 @@ private fun CellSpanDto.normalized(): CellSpanDto = copy(
     columns = columns.coerceIn(1, 10),
     rows = rows.coerceIn(1, 10),
 )
+
+private fun StateBindingDto.normalized(): StateBindingDto? {
+    if (type.trim().lowercase() != "obs") return null
+    val safeTarget = when (target.trim().lowercase()) {
+        "streaming" -> "streaming"
+        "recording" -> "recording"
+        "replay" -> "replay"
+        "virtualcam" -> "virtualCam"
+        "scene" -> "scene"
+        "inputmute" -> "inputMute"
+        "inputvolume" -> "inputVolume"
+        else -> return null
+    }
+    return StateBindingDto(
+        type = "obs",
+        target = safeTarget,
+        scene = scene?.trim()?.take(128)?.takeIf { it.isNotEmpty() },
+        input = input?.trim()?.take(128)?.takeIf { it.isNotEmpty() },
+    )
+}
 
 private fun ControlBindingDto.normalized(): ControlBindingDto? {
     return when (type.trim().lowercase()) {

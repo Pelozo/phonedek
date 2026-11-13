@@ -66,6 +66,7 @@ class DeckModelsTest {
         assertNull(profile.pages.single().grid)
         assertEquals(profile.grid, pageGrid(profile, profile.pages.single()))
         assertNull(profile.pages.single().buttons.single().control)
+        assertNull(profile.pages.single().buttons.single().state)
         assertNull(profile.pages.single().buttons.single().span)
     }
 
@@ -650,6 +651,75 @@ class DeckModelsTest {
         assertNull(buttons.first { it.id == "bad-target" }.control)
         assertNull(buttons.first { it.id == "bad-mode" }.control)
         assertNull(buttons.first { it.id == "bad-emit" }.control)
+    }
+
+    @Test
+    fun parsesEveryObsStateTargetOnPlainButtons() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [
+                    { "id": "stream", "slot": 0, "label": "Stream", "state": { "type": "obs", "target": "streaming" } },
+                    { "id": "record", "slot": 1, "state": { "type": "obs", "target": "recording" } },
+                    { "id": "replay", "slot": 2, "state": { "type": "obs", "target": "replay" } },
+                    { "id": "cam", "slot": 3, "state": { "type": "obs", "target": "virtualCam" } },
+                    { "id": "scene", "slot": 4, "state": { "type": "obs", "target": "scene", "scene": "Game" } },
+                    { "id": "mute", "slot": 5, "state": { "type": "obs", "target": "inputMute", "input": "Mic/Aux" } },
+                    { "id": "volume", "slot": 6, "state": { "type": "obs", "target": "inputVolume", "input": "Desktop" } }
+                  ]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val buttons = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons
+        assertEquals(
+            listOf(
+                "streaming",
+                "recording",
+                "replay",
+                "virtualCam",
+                "scene",
+                "inputMute",
+                "inputVolume",
+            ),
+            buttons.map { it.state!!.target },
+        )
+        assertTrue(buttons.all { it.state!!.type == "obs" })
+        assertTrue(buttons.all { it.control == null })
+        assertEquals("Game", buttons.first { it.id == "scene" }.state!!.scene)
+        assertEquals("Mic/Aux", buttons.first { it.id == "mute" }.state!!.input)
+        assertEquals("Desktop", buttons.first { it.id == "volume" }.state!!.input)
+    }
+
+    @Test
+    fun rejectsUnknownObsStateTypesAndTargets() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [
+                    { "id": "bad-type", "slot": 0, "label": "Keep", "state": { "type": "volume", "target": "streaming" } },
+                    { "id": "bad-target", "slot": 1, "label": "Keep", "state": { "type": "obs", "target": "mic" } },
+                    { "id": "empty", "slot": 2, "state": { "type": "", "target": "" } }
+                  ]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val buttons = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons
+        assertEquals(3, buttons.size)
+        buttons.forEach { button ->
+            assertNull("expected ${button.id} state to be dropped", button.state)
+        }
+        assertEquals("Keep", buttons.first { it.id == "bad-type" }.label)
+        assertEquals("Keep", buttons.first { it.id == "bad-target" }.label)
     }
 
     @Test

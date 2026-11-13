@@ -3,7 +3,9 @@ package com.phonedek.app.ui
 import com.phonedek.app.data.ActionDto
 import com.phonedek.app.data.ControlDto
 import com.phonedek.app.data.ControlStateDto
+import com.phonedek.app.data.DeckButton
 import com.phonedek.app.data.DeckPage
+import com.phonedek.app.data.StateBindingDto
 import kotlin.math.roundToInt
 
 /**
@@ -16,8 +18,9 @@ object ControlStateStore {
     const val NO_OBS = "NO OBS"
     const val MUTED = "MUTED"
     const val SWITCHING = "SWITCHING"
+    const val NO_STATE = "—"
 
-    private val unavailableDetails = setOf(NO_INPUT, NO_OBS, SWITCHING)
+    private val unavailableDetails = setOf(NO_INPUT, NO_OBS, SWITCHING, "NO SCENE", "NO SOURCE")
 
     /**
      * Text shown in a control header. The local value stays usable while the
@@ -55,15 +58,70 @@ object ControlStateStore {
     fun hasObsAction(actions: List<ActionDto>): Boolean =
         actions.any { it.type.trim().lowercase() == "obs" }
 
+    /** True for a normal tile with a read-only OBS status binding. */
+    fun hasObsStateBinding(button: DeckButton?): Boolean =
+        button?.state?.type == "obs"
+
     /**
-     * Controls with a desktop live-state producer: absolute output volume,
-     * microphone gain and OBS input volume. Relative volume, scroll and
-     * trackpads stay open-loop.
+     * Chip text for a non-control tile with a state binding. The desktop's
+     * `detail` already carries the short form (`LIVE`, `REC`, `OFF`, `42%`,
+     * a scene name); `active` is only a fallback for sparse updates. `null`
+     * means there is nothing to show yet (or the desktop has no live-state
+     * capability, as with an older desktop).
+     */
+    fun stateTileText(
+        binding: StateBindingDto?,
+        state: ControlStateDto?,
+        stateCapable: Boolean,
+    ): String? {
+        if (binding?.type != "obs") return null
+        if (state == null) return if (stateCapable) NO_STATE else null
+        val detail = state.detail?.trim()?.takeIf { it.isNotEmpty() }
+        // NO OBS / NO INPUT / SWITCHING are status text, not toasts. Show the
+        // exact desktop detail so a missing OBS is visible on the tile.
+        if (!state.available) return detail ?: NO_OBS
+        if (state.muted == true || detail == MUTED) return MUTED
+        if (binding.target == "scene") {
+            return when {
+                detail == null -> if (state.active == false) "OFF" else null
+                detail == "NO SCENE" -> detail
+                else -> "SCENE: $detail"
+            }
+        }
+        if (detail != null) return detail
+        // Volume updates normally carry a detail percentage; fall back to the
+        // normalized value for a desktop that only sends the value.
+        if (binding.target == "inputVolume") {
+            state.value?.let { return "${(it.coerceIn(0f, 1f) * 100).roundToInt()}%" }
+        }
+        val active = state.active ?: return null
+        if (!active) return "OFF"
+        return when (binding.target) {
+            "streaming" -> "LIVE"
+            "recording" -> "REC"
+            "replay" -> "REPLAY"
+            "virtualCam" -> "VCAM"
+            "inputMute" -> MUTED
+            else -> "ON"
+        }
+    }
+
+    /** True when the state chip should use the active/accent treatment. */
+    fun stateTileActive(state: ControlStateDto?): Boolean =
+        state?.available == true && state.active == true
+
+    /**
+     * Ids with a desktop live-state producer: absolute output volume,
+     * microphone gain, OBS input volume, and normal buttons with an OBS
+     * read-only `state` binding. Relative volume, scroll and trackpads stay
+     * open-loop.
      */
     fun statefulControlIds(page: DeckPage): List<String> =
         page.buttons
             .asSequence()
             .filter { button ->
+                // A status tile uses the same channel, even without a control.
+                if (button.state?.type == "obs") return@filter true
                 val control = button.control ?: return@filter false
                 if (control.kind == "trackpad" || control.emit != "value") {
                     return@filter false

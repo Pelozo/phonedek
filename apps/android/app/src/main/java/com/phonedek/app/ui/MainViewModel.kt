@@ -1428,8 +1428,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun isObsControl(controlId: String): Boolean =
         ControlStateStore.isObsValueControl(activeButton(controlId)?.control)
 
-    private fun isObsButton(buttonId: String): Boolean =
-        activeButton(buttonId)?.let { ControlStateStore.hasObsAction(it.actions) } == true
+    private fun isObsButton(buttonId: String): Boolean {
+        val button = activeButton(buttonId) ?: return false
+        return ControlStateStore.hasObsAction(button.actions) ||
+            ControlStateStore.hasObsStateBinding(button)
+    }
 
     fun onButtonPressed(button: DeckButton) {
         val snapshot = _state.value

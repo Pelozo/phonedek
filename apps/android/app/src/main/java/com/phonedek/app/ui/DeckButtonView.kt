@@ -133,13 +133,26 @@ fun DeckButtonView(
         label = "deckButtonScale",
     )
 
-    val description = listOfNotNull(button.icon, button.label, button.sublabel)
+    val control = button.control
+    // OBS status is a read-only chip on the normal tile; controls keep their
+    // own live value/mute readout in DeckControlView.
+    val stateText = if (control == null) {
+        ControlStateStore.stateTileText(button.state, controlState, stateCapable)
+    } else {
+        null
+    }
+    val stateActive = ControlStateStore.stateTileActive(controlState)
+
+    val description = listOfNotNull(
+        button.icon,
+        button.label,
+        button.sublabel,
+        stateText,
+    )
         .map { it.trim() }
         .filter { it.isNotEmpty() }
         .joinToString(", ")
         .ifBlank { "Button" }
-
-    val control = button.control
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -225,6 +238,8 @@ fun DeckButtonView(
             val iconExtent = minOf(maxHeight * 0.34f, 38.dp)
             val iconSize = with(density) { iconExtent.toSp() }
             val sublabelSize = labelSize * 0.8f
+            val statusSize = (labelSize.value * 0.58f).coerceIn(5.5f, 8f).sp
+            val statusLine = statusSize * 1.15f
             val mediaFit = if (media?.fit == "contain") ContentScale.Fit else ContentScale.Crop
 
             Column(
@@ -257,6 +272,47 @@ fun DeckButtonView(
                         )
                         Spacer(Modifier.height(2.dp))
                     }
+                }
+                if (stateText != null) {
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                color = if (stateActive) {
+                                    Accent.copy(alpha = 0.20f)
+                                } else {
+                                    Color.Black.copy(alpha = 0.22f)
+                                },
+                                shape = RoundedCornerShape(3.dp),
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = if (stateActive) {
+                                    Accent.copy(alpha = 0.70f)
+                                } else {
+                                    textColor.copy(alpha = 0.18f)
+                                },
+                                shape = RoundedCornerShape(3.dp),
+                            )
+                            .padding(horizontal = 5.dp, vertical = 1.dp),
+                    ) {
+                        Text(
+                            text = stateText,
+                            color = if (stateActive) {
+                                AccentHigh
+                            } else {
+                                textColor.copy(alpha = 0.72f)
+                            },
+                            fontFamily = ConsoleMono,
+                            fontSize = statusSize,
+                            lineHeight = statusLine,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Spacer(Modifier.height(2.dp))
                 }
                 if (button.label.isNotBlank()) {
                     Text(

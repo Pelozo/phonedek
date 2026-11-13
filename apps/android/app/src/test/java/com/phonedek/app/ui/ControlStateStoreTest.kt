@@ -6,8 +6,10 @@ import com.phonedek.app.data.ControlDto
 import com.phonedek.app.data.ControlStateEntryDto
 import com.phonedek.app.data.DeckButton
 import com.phonedek.app.data.DeckPage
+import com.phonedek.app.data.StateBindingDto
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -90,11 +92,48 @@ class ControlStateStoreTest {
                 ),
                 button("plain", control = null),
                 button("", control = null),
+                button(
+                    "status-stream",
+                    control = null,
+                    state = StateBindingDto(type = "obs", target = "streaming"),
+                ),
+                button(
+                    "status-scene",
+                    control = null,
+                    state = StateBindingDto(
+                        type = "obs",
+                        target = "scene",
+                        scene = "Game",
+                    ),
+                ),
             ),
         )
 
         assertEquals(
-            listOf("abs-slider", "abs-wheel", "mic", "obs"),
+            listOf("abs-slider", "abs-wheel", "mic", "obs", "status-stream", "status-scene"),
+            ControlStateStore.statefulControlIds(page),
+        )
+    }
+
+    @Test
+    fun watchIdsSkipUnboundButtonsAndKeepStateButtonsDistinct() {
+        val page = DeckPage(
+            id = "pg1",
+            buttons = listOf(
+                button("plain", control = null),
+                button("", control = null),
+                button(
+                    "state-with-control",
+                    type = "obs",
+                    mode = null,
+                    target = "inputVolume",
+                    state = StateBindingDto(type = "obs", target = "inputVolume"),
+                ),
+            ),
+        )
+
+        assertEquals(
+            listOf("state-with-control"),
             ControlStateStore.statefulControlIds(page),
         )
     }
@@ -272,6 +311,96 @@ class ControlStateStoreTest {
     }
 
     @Test
+    fun plainTileStateShowsDetailAndActiveFallback() {
+        val streaming = StateBindingDto(type = "obs", target = "streaming")
+        assertEquals(
+            "LIVE",
+            ControlStateStore.stateTileText(
+                streaming,
+                state("stream", 3, detail = "LIVE", active = true),
+                stateCapable = true,
+            ),
+        )
+        // A sparse desktop update without a detail still gets an active cue.
+        assertEquals(
+            "LIVE",
+            ControlStateStore.stateTileText(
+                streaming,
+                state("stream", 4, detail = null, active = true),
+                stateCapable = true,
+            ),
+        )
+        assertEquals(
+            "OFF",
+            ControlStateStore.stateTileText(
+                streaming,
+                state("stream", 5, detail = null, active = false),
+                stateCapable = true,
+            ),
+        )
+        // No entry yet: nothing on an old desktop, a placeholder once the
+        // desktop advertises control-state-v1.
+        assertNull(ControlStateStore.stateTileText(streaming, null, stateCapable = false))
+        assertEquals(
+            ControlStateStore.NO_STATE,
+            ControlStateStore.stateTileText(streaming, null, stateCapable = true),
+        )
+        assertNull(ControlStateStore.stateTileText(null, null, stateCapable = true))
+        assertFalse(ControlStateStore.stateTileActive(null))
+        assertTrue(
+            ControlStateStore.stateTileActive(
+                state("stream", 6, detail = "LIVE", active = true),
+            ),
+        )
+    }
+
+    @Test
+    fun stateTileTextMapsEveryObsStatusCue() {
+        fun text(
+            target: String,
+            detail: String? = null,
+            active: Boolean? = null,
+            available: Boolean = true,
+            muted: Boolean = false,
+            value: Float? = null,
+            scene: String? = null,
+        ) = ControlStateStore.stateTileText(
+            StateBindingDto(type = "obs", target = target, scene = scene),
+            ControlStateEntryDto(
+                controlId = "tile",
+                revision = 1,
+                value = value,
+                muted = muted,
+                available = available,
+                detail = detail,
+                active = active,
+            ),
+            stateCapable = true,
+        )
+
+        assertEquals("LIVE", text("streaming", detail = "LIVE", active = true))
+        assertEquals("REC", text("recording", detail = "REC", active = true))
+        assertEquals("REPLAY", text("replay", detail = "REPLAY", active = true))
+        assertEquals("VCAM", text("virtualCam", detail = "VCAM", active = true))
+        assertEquals("OFF", text("recording", detail = "OFF", active = false))
+        assertEquals("REC", text("recording", active = true))
+        assertEquals("OFF", text("streaming", active = false))
+        assertEquals("MUTED", text("inputMute", detail = "MUTED", active = true))
+        assertEquals(
+            "MUTED",
+            text("inputMute", detail = "ON", active = true, muted = true),
+        )
+        assertEquals("42%", text("inputVolume", detail = "42%"))
+        assertEquals("63%", text("inputVolume", value = 0.63f))
+        assertEquals(
+            "SCENE: Game",
+            text("scene", detail = "Game", active = true, scene = "Game"),
+        )
+        assertEquals("NO SCENE", text("scene", detail = "NO SCENE", available = true))
+        assertEquals("NO OBS", text("streaming", detail = "NO OBS", available = false))
+    }
+
+    @Test
     fun normalizedStateMapsToTheControlRangeAndStep() {
         assertEquals(
             42f,
@@ -331,13 +460,17 @@ class ControlStateStoreTest {
         revision: Int,
         value: Float? = null,
         available: Boolean = true,
+        detail: String? = null,
+        muted: Boolean = false,
+        active: Boolean? = null,
     ) = ControlStateEntryDto(
         controlId = id,
         revision = revision,
         value = value,
-        muted = false,
+        muted = muted,
         available = available,
-        detail = value?.let { "${(it * 100).toInt()}%" },
+        detail = detail ?: value?.let { "${(it * 100).toInt()}%" },
+        active = active,
     )
 
     private fun button(
@@ -352,5 +485,6 @@ class ControlStateStoreTest {
             emit = emit,
             binding = ControlBindingDto(type = type, mode = mode, target = target),
         ),
-    ) = DeckButton(id = id, control = control)
+        state: StateBindingDto? = null,
+    ) = DeckButton(id = id, control = control, state = state)
 }

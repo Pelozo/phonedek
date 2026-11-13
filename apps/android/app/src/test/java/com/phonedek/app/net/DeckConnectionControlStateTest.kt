@@ -25,13 +25,15 @@ class DeckConnectionControlStateTest {
                       "muted": true,
                       "available": true,
                       "detail": "42%",
+                      "active": true,
                       "futureField": 1
                     },
                     {
                       "controlId": "btn-wheel",
                       "revision": 4,
                       "available": false,
-                      "detail": "no device"
+                      "detail": "no device",
+                      "active": false
                     }
                   ]
                 }
@@ -49,11 +51,13 @@ class DeckConnectionControlStateTest {
         assertTrue(volume.muted!!)
         assertTrue(volume.available)
         assertEquals("42%", volume.detail)
+        assertTrue(volume.active!!)
 
         val wheel = message.states.last()
         assertEquals("btn-wheel", wheel.controlId)
         assertNull(wheel.value)
         assertFalse(wheel.available)
+        assertFalse(wheel.active!!)
     }
 
     @Test
@@ -167,6 +171,60 @@ class DeckConnectionControlStateTest {
         assertEquals("NO INPUT", states.getValue("obs-missing").detail)
         assertFalse(states.getValue("obs-switching").available)
         assertEquals("SWITCHING", states.getValue("obs-switching").detail)
+    }
+
+    @Test
+    fun parsesObsStatusActiveCuesAndSceneNames() {
+        val message = DeckJson.parseControlState(
+            """
+                {
+                  "type": "controlState",
+                  "profileId": "p1",
+                  "pageId": "pg1",
+                  "states": [
+                    {
+                      "controlId": "btn-stream",
+                      "revision": 20,
+                      "available": true,
+                      "detail": "LIVE",
+                      "active": true
+                    },
+                    {
+                      "controlId": "btn-record",
+                      "revision": 21,
+                      "available": true,
+                      "detail": "OFF",
+                      "active": false
+                    },
+                    {
+                      "controlId": "btn-scene",
+                      "revision": 22,
+                      "available": true,
+                      "detail": "Game",
+                      "active": true
+                    },
+                    {
+                      "controlId": "btn-mute",
+                      "revision": 23,
+                      "available": true,
+                      "detail": "MUTED",
+                      "muted": true,
+                      "active": true
+                    }
+                  ]
+                }
+            """.trimIndent(),
+        )
+
+        assertNotNull(message)
+        val states = message!!.states.associateBy { it.controlId }
+        assertEquals(4, states.size)
+        assertTrue(states.getValue("btn-stream").active!!)
+        assertFalse(states.getValue("btn-record").active!!)
+        assertEquals("Game", states.getValue("btn-scene").detail)
+        assertTrue(states.getValue("btn-scene").active!!)
+        assertTrue(states.getValue("btn-mute").muted!!)
+        assertTrue(states.getValue("btn-mute").active!!)
     }
 
     @Test
