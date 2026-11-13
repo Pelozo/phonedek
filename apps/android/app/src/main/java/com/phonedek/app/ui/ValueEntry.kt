@@ -64,9 +64,12 @@ object ValueEntry {
         )
     }
 
-    /** Readout text such as `42%` or `42.5%` (unit stays flush). */
-    fun formatValue(value: Float, unit: String): String =
-        formatNumber(value) + unit
+    /** Readout text such as `42%` or `250 mired` (word units take a space). */
+    fun formatValue(value: Float, unit: String): String {
+        val number = formatNumber(value)
+        val separator = if (unit.isNotEmpty() && unit.first().isLetter()) " " else ""
+        return number + separator + unit
+    }
 
     /** Range line such as `0–100 %` or `0–200 %`. */
     fun rangeText(minValue: Float, maxValue: Float, unit: String): String {

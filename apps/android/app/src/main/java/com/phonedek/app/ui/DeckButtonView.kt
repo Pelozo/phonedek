@@ -213,7 +213,9 @@ fun DeckButtonView(
                 externalValue = controlState?.value,
                 stateAvailable = controlState?.available == true,
                 statePresent = controlState != null &&
-                    (control.binding.type == "mic" || control.binding.type == "obs"),
+                    (control.binding.type == "mic" ||
+                        control.binding.type == "obs" ||
+                        control.binding.type == "light"),
                 stateMuted = controlState?.muted == true,
                 stateDetail = controlState?.detail,
                 stateRevision = controlState?.revision ?: -1,

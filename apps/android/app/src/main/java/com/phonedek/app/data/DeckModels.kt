@@ -104,6 +104,8 @@ data class DeckButton(
  *   `scene` target; `input` selects an OBS input for mute/volume.
  * - `twitch`: `live`, `viewers`, `uptime`, `title`, `game`. The desktop reads
  *   the Helix field and sends it as `detail`; no scene/input applies.
+ * - `light`: `power`, `brightness`, `temperature`. `light` selects a configured
+ *   Elgato device; omitted means the desktop's first configured light.
  *
  * Kept as one forgiving wire shape so old OBS-only configs still parse.
  */
@@ -113,6 +115,8 @@ data class StateBindingDto(
     val target: String = "",
     val scene: String? = null,
     val input: String? = null,
+    /** Local-light device id (`type == "light"`); omitted = first light. */
+    val light: String? = null,
 )
 
 @Serializable
@@ -153,6 +157,9 @@ data class ControlBindingDto(
     val naturalScroll: Boolean? = null,
     val tapToClick: Boolean? = null,
     val dragLock: Boolean? = null,
+    // Local Elgato light binding (`type == "light"`). `target` selects the
+    // value the slider/dial writes; `light` selects a configured device.
+    val light: String? = null,
     // Shortcut/key-wheel binding (`type == "shortcut"`). The desktop maps
     // deltas to key chords; the phone only renders what one detent sends.
     val keys: List<String> = emptyList(),
@@ -519,6 +526,22 @@ private fun StateBindingDto.normalized(): StateBindingDto? =
             StateBindingDto(type = "twitch", target = safeTarget)
         }
 
+        "light" -> {
+            // Local Elgato status tiles use the same closed target set as the
+            // value controls. The device id is optional (= first configured).
+            val safeTarget = when (target.trim().lowercase()) {
+                "power" -> "power"
+                "brightness" -> "brightness"
+                "temperature" -> "temperature"
+                else -> return null
+            }
+            StateBindingDto(
+                type = "light",
+                target = safeTarget,
+                light = light?.trim()?.take(128)?.takeIf { it.isNotEmpty() },
+            )
+        }
+
         else -> null
     }
 
@@ -566,6 +589,23 @@ private fun ControlBindingDto.normalized(): ControlBindingDto? {
                     input = input?.trim()?.take(128)?.takeIf { it.isNotEmpty() },
                 )
             }
+        }
+
+        // Local Elgato light value controls are always absolute. The target is
+        // one of the three device channels; `light` optionally selects a
+        // configured device (omitted = first configured light).
+        "light" -> {
+            val lightTarget = when (target?.trim()?.lowercase()) {
+                "power" -> "power"
+                "brightness" -> "brightness"
+                "temperature" -> "temperature"
+                else -> return null
+            }
+            ControlBindingDto(
+                type = "light",
+                target = lightTarget,
+                light = light?.trim()?.take(128)?.takeIf { it.isNotEmpty() },
+            )
         }
 
         "pointer" -> ControlBindingDto(
@@ -638,28 +678,85 @@ private fun ControlDto.normalized(): ControlDto? {
         safeBinding.type == "scroll" -> controlEmit == "delta"
         safeBinding.type == "mic" -> controlEmit == "value"
         safeBinding.type == "obs" -> controlEmit == "value"
+        safeBinding.type == "light" -> controlEmit == "value"
         safeBinding.type == "shortcut" -> controlEmit == "delta"
         else -> false
     }
     if (!emitMatchesBinding) return null
 
     val isObs = safeBinding.type == "obs"
+    val isLight = safeBinding.type == "light"
+    // Light ranges are device-native: brightness/power are 0..100 (power snaps
+    // to the endpoints by step 100), while Elgato white balance is 143..344
+    // mired. An explicit range is honored but clamped to the device limits.
+    val lightDefaults = when (safeBinding.target) {
+        "temperature" -> LightDefaults(
+            min = 143f,
+            max = 344f,
+            step = 1f,
+            initial = 250f,
+            unit = "mired",
+        )
+
+        "power" -> LightDefaults(
+            min = 0f,
+            max = 100f,
+            step = 100f,
+            initial = 100f,
+            unit = "%",
+        )
+
+        else -> LightDefaults(
+            min = 0f,
+            max = 100f,
+            step = 1f,
+            initial = 50f,
+            unit = "%",
+        )
+    }
     // OBS uses a 0..200 % range (100 % = 0 dB) and starts at unity instead of
     // the midpoint used by the generic slider. Accept an explicit max so a
     // future 0..2000 control still renders, but never a nonzero minimum: the
     // desktop maps the normalized value directly to inputVolumeMul.
-    val defaultMax = if (isObs) 200f else 100f
-    val safeMin = if (isObs) 0f else (min?.takeIf { it.isFinite() } ?: 0f)
-    var safeMax = max?.takeIf { it.isFinite() } ?: defaultMax
-    if (safeMax <= safeMin) safeMax = safeMin + defaultMax
+    val defaultMax = when {
+        isObs -> 200f
+        isLight -> lightDefaults.max
+        else -> 100f
+    }
+    var safeMin = when {
+        isObs -> 0f
+        isLight -> (min?.takeIf { it.isFinite() } ?: lightDefaults.min)
+            .coerceIn(lightDefaults.min, lightDefaults.max)
+
+        else -> min?.takeIf { it.isFinite() } ?: 0f
+    }
+    var safeMax = when {
+        isLight -> (max?.takeIf { it.isFinite() } ?: lightDefaults.max)
+            .coerceIn(lightDefaults.min, lightDefaults.max)
+
+        else -> max?.takeIf { it.isFinite() } ?: defaultMax
+    }
+    if (safeMax <= safeMin) {
+        if (isLight) {
+            safeMin = lightDefaults.min
+            safeMax = lightDefaults.max
+        } else {
+            safeMax = safeMin + defaultMax
+        }
+    }
     val safeStep = step?.takeIf { it.isFinite() && it > 0f }
         ?: when {
             safeBinding.type == "volume" && safeBinding.mode == "relative" ->
                 safeBinding.stepPercent!!.toFloat()
 
+            isLight -> lightDefaults.step
             else -> 1f
         }
-    val defaultInitial = if (isObs) 100f else (safeMin + safeMax) / 2f
+    val defaultInitial = when {
+        isObs -> 100f
+        isLight -> lightDefaults.initial
+        else -> (safeMin + safeMax) / 2f
+    }
     val safeInitial = (initial?.takeIf { it.isFinite() } ?: defaultInitial)
         .coerceIn(safeMin, safeMax)
     val safeAxis = if (axis?.trim()?.lowercase() == "vertical") "vertical" else "horizontal"
@@ -668,14 +765,13 @@ private fun ControlDto.normalized(): ControlDto? {
         null
     } else {
         (unit?.trim()?.takeIf { it.isNotEmpty() }?.take(16))
-            ?: if (
+            ?: when {
+                isLight -> lightDefaults.unit
                 safeBinding.type == "volume" ||
-                safeBinding.type == "mic" ||
-                safeBinding.type == "obs"
-            ) {
-                "%"
-            } else {
-                null
+                    safeBinding.type == "mic" ||
+                    safeBinding.type == "obs" -> "%"
+
+                else -> null
             }
     }
 
@@ -692,6 +788,15 @@ private fun ControlDto.normalized(): ControlDto? {
         haptics = haptics,
     )
 }
+
+/** Default range/step/unit for one local-light channel. */
+private data class LightDefaults(
+    val min: Float,
+    val max: Float,
+    val step: Float,
+    val initial: Float,
+    val unit: String,
+)
 
 private fun uniqueId(raw: String, fallback: String, used: MutableSet<String>): String {
     val base = raw.ifBlank { fallback }

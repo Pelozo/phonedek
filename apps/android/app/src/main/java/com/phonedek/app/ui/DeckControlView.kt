@@ -94,6 +94,7 @@ fun DeckControlView(
     val isVolume = control.binding.type == "volume"
     val isMic = control.binding.type == "mic"
     val isObs = control.binding.type == "obs"
+    val isLight = control.binding.type == "light"
     val scrollControl = control.binding.type == "scroll"
     // Shortcut wheels are delta-only: the readout is a chord badge, not a
     // numeric value, and there is no live desktop state to follow.
@@ -226,6 +227,11 @@ fun DeckControlView(
             stateMuted = stateMuted,
             stateDetail = stateDetail,
             interacting = interacting,
+            unavailableText = if (isLight) {
+                ControlStateStore.NO_LIGHT
+            } else {
+                ControlStateStore.NO_INPUT
+            },
         )
     }
     val muted = !isShortcut && statePresent && stateAvailable &&

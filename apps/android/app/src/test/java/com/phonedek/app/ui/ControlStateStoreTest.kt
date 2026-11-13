@@ -533,6 +533,258 @@ class ControlStateStoreTest {
     }
 
     @Test
+    fun watchIdsIncludeLightControlsAndLightStateButtons() {
+        val page = DeckPage(
+            id = "pg1",
+            buttons = listOf(
+                button("plain", control = null),
+                button("bright", type = "light", mode = null, target = "brightness"),
+                button("temp-wheel", kind = "dial", type = "light", mode = null, target = "temperature"),
+                button("power-value", type = "light", mode = null, target = "power"),
+                button(
+                    "light-delta",
+                    type = "light",
+                    mode = null,
+                    target = "brightness",
+                    emit = "delta",
+                ),
+                button(
+                    "light-power-tile",
+                    control = null,
+                    state = StateBindingDto(type = "light", target = "power"),
+                ),
+                button(
+                    "light-temp-tile",
+                    control = null,
+                    state = StateBindingDto(type = "light", target = "temperature", light = "desk"),
+                ),
+                button(
+                    "light-with-control",
+                    type = "light",
+                    mode = null,
+                    target = "brightness",
+                    state = StateBindingDto(type = "light", target = "brightness"),
+                ),
+                button("", control = null, state = StateBindingDto(type = "light", target = "power")),
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                "bright",
+                "temp-wheel",
+                "power-value",
+                "light-power-tile",
+                "light-temp-tile",
+                "light-with-control",
+            ),
+            ControlStateStore.statefulControlIds(page),
+        )
+        assertTrue(
+            ControlStateStore.hasLightStateBinding(
+                DeckButton(state = StateBindingDto(type = "light", target = "power")),
+            ),
+        )
+        assertFalse(
+            ControlStateStore.hasLightStateBinding(
+                DeckButton(state = StateBindingDto(type = "obs", target = "streaming")),
+            ),
+        )
+        assertTrue(
+            ControlStateStore.hasLightAction(
+                listOf(ActionDto(type = "light", action = "togglePower")),
+            ),
+        )
+        assertFalse(
+            ControlStateStore.hasLightAction(
+                listOf(ActionDto(type = "obs", action = "toggleMute")),
+            ),
+        )
+        assertTrue(
+            ControlStateStore.isLightValueControl(
+                ControlDto(
+                    kind = "slider",
+                    emit = "value",
+                    binding = ControlBindingDto(type = "light", target = "brightness"),
+                ),
+            ),
+        )
+        assertFalse(
+            ControlStateStore.isLightValueControl(
+                ControlDto(
+                    kind = "slider",
+                    emit = "delta",
+                    binding = ControlBindingDto(type = "light", target = "brightness"),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun lightStateTilesShowOnOffPercentMiredAndQuietOutages() {
+        fun text(
+            target: String,
+            detail: String? = null,
+            active: Boolean? = null,
+            available: Boolean = true,
+            value: Float? = null,
+        ) = ControlStateStore.stateTileText(
+            StateBindingDto(type = "light", target = target),
+            ControlStateEntryDto(
+                controlId = "tile",
+                revision = 1,
+                value = value,
+                available = available,
+                detail = detail,
+                active = active,
+            ),
+            stateCapable = true,
+        )
+
+        assertEquals("ON", text("power", detail = "ON", active = true))
+        assertEquals("OFF", text("power", detail = "OFF", active = false))
+        assertEquals("42%", text("brightness", detail = "42%", active = true))
+        assertEquals("250", text("temperature", detail = "250", active = true))
+        assertEquals("OFF", text("brightness", detail = "OFF", active = false))
+        assertEquals("OFF", text("temperature", detail = "OFF", active = false))
+
+        // Sparse updates derive the short form from the normalized value.
+        assertEquals("ON", text("power", active = true))
+        assertEquals("OFF", text("power", active = false))
+        assertEquals("63%", text("brightness", value = 0.63f))
+        assertEquals("0%", text("brightness", value = 0f))
+        assertEquals("244", text("temperature", value = 0.5f))
+        assertEquals("143", text("temperature", value = 0f))
+        assertEquals("344", text("temperature", value = 1f))
+        assertEquals("OFF", text("brightness", active = false))
+
+        // Missing/unreachable lights are quiet tile text, never toasts.
+        assertEquals("NO LIGHT", text("power", detail = "NO LIGHT", available = false))
+        assertEquals("OFFLINE", text("brightness", detail = "OFFLINE", available = false))
+        assertEquals(
+            ControlStateStore.NO_LIGHT,
+            text("temperature", available = false, detail = null),
+        )
+
+        assertNull(
+            ControlStateStore.stateTileText(
+                StateBindingDto(type = "light", target = "power"),
+                null,
+                stateCapable = false,
+            ),
+        )
+        assertEquals(
+            ControlStateStore.NO_STATE,
+            ControlStateStore.stateTileText(
+                StateBindingDto(type = "light", target = "power"),
+                null,
+                stateCapable = true,
+            ),
+        )
+    }
+
+    @Test
+    fun lightValueControlsShowDetailAndUnavailableTextWithoutToasts() {
+        assertEquals(
+            "42%",
+            ControlStateStore.displayText(
+                localText = "50%",
+                statePresent = true,
+                stateAvailable = true,
+                stateMuted = false,
+                stateDetail = "42%",
+                interacting = false,
+                unavailableText = ControlStateStore.NO_LIGHT,
+            ),
+        )
+        assertEquals(
+            "250",
+            ControlStateStore.displayText(
+                localText = "250 mired",
+                statePresent = true,
+                stateAvailable = true,
+                stateMuted = false,
+                stateDetail = "250",
+                interacting = false,
+                unavailableText = ControlStateStore.NO_LIGHT,
+            ),
+        )
+        assertEquals(
+            "OFF",
+            ControlStateStore.displayText(
+                localText = "50%",
+                statePresent = true,
+                stateAvailable = true,
+                stateMuted = false,
+                stateDetail = "OFF",
+                interacting = false,
+                unavailableText = ControlStateStore.NO_LIGHT,
+            ),
+        )
+        assertEquals(
+            ControlStateStore.NO_LIGHT,
+            ControlStateStore.displayText(
+                localText = "250 mired",
+                statePresent = true,
+                stateAvailable = false,
+                stateMuted = false,
+                stateDetail = "Unavailable",
+                interacting = false,
+                unavailableText = ControlStateStore.NO_LIGHT,
+            ),
+        )
+        assertEquals(
+            ControlStateStore.OFFLINE,
+            ControlStateStore.displayText(
+                localText = "50%",
+                statePresent = true,
+                stateAvailable = false,
+                stateMuted = false,
+                stateDetail = "OFFLINE",
+                interacting = false,
+                unavailableText = ControlStateStore.NO_LIGHT,
+            ),
+        )
+        // Dragging keeps the local value even while the light is unreachable.
+        assertEquals(
+            "73%",
+            ControlStateStore.displayText(
+                localText = "73%",
+                statePresent = true,
+                stateAvailable = false,
+                stateMuted = false,
+                stateDetail = "NO LIGHT",
+                interacting = true,
+                unavailableText = ControlStateStore.NO_LIGHT,
+            ),
+        )
+    }
+
+    @Test
+    fun lightActiveTreatmentRequiresAnAvailableLightThatIsOn() {
+        assertTrue(
+            ControlStateStore.stateTileActive(
+                state("light", 1, detail = "ON", active = true),
+            ),
+        )
+        assertFalse(
+            ControlStateStore.stateTileActive(
+                state("light", 2, detail = "OFF", active = false),
+            ),
+        )
+        assertFalse(
+            ControlStateStore.stateTileActive(
+                state("light", 3, detail = "NO LIGHT", available = false),
+            ),
+        )
+        assertTrue(
+            ControlStateStore.stateTileActive(
+                state("light", 4, detail = "42%", active = true),
+            ),
+        )
+    }
+
+    @Test
     fun normalizedStateMapsToTheControlRangeAndStep() {
         assertEquals(
             42f,
@@ -563,6 +815,22 @@ class ControlStateStoreTest {
         assertEquals(
             100f,
             ControlStateStore.valueFromNormalized(0.5f, 0f, 200f, 1f),
+            0.0001f,
+        )
+        // Light temperature maps normalized state onto the Elgato mired range.
+        assertEquals(
+            244f,
+            ControlStateStore.valueFromNormalized(0.5f, 143f, 344f, 1f),
+            0.0001f,
+        )
+        assertEquals(
+            143f,
+            ControlStateStore.valueFromNormalized(-1f, 143f, 344f, 1f),
+            0.0001f,
+        )
+        assertEquals(
+            344f,
+            ControlStateStore.valueFromNormalized(2f, 143f, 344f, 1f),
             0.0001f,
         )
     }

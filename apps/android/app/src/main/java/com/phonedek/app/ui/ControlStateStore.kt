@@ -17,16 +17,33 @@ object ControlStateStore {
     const val NO_INPUT = "NO INPUT"
     const val NO_OBS = "NO OBS"
     const val NO_TWITCH = "NO TWITCH"
+    const val NO_LIGHT = "NO LIGHT"
+    const val OFFLINE = "OFFLINE"
     const val MUTED = "MUTED"
     const val SWITCHING = "SWITCHING"
     const val NO_STATE = "—"
 
-    private val unavailableDetails = setOf(NO_INPUT, NO_OBS, SWITCHING, "NO SCENE", "NO SOURCE")
+    private const val LIGHT_TEMPERATURE_MIN = 143f
+    private const val LIGHT_TEMPERATURE_MAX = 344f
+
+    private val unavailableDetails = setOf(
+        NO_INPUT,
+        NO_OBS,
+        NO_LIGHT,
+        OFFLINE,
+        SWITCHING,
+        "NO SCENE",
+        "NO SOURCE",
+    )
 
     /**
      * Text shown in a control header. The local value stays usable while the
-     * desktop reports that no capture/OBS source exists, and a muted source is
-     * always explicit even if the desktop omits its detail string.
+     * desktop reports that no capture/OBS/light source exists, and a muted
+     * source is always explicit even if the desktop omits its detail string.
+     *
+     * [unavailableText] is the fallback when the entry is unavailable and the
+     * desktop did not send one of the known short details (light uses
+     * `NO LIGHT`; everything else keeps the historical `NO INPUT`).
      */
     fun displayText(
         localText: String,
@@ -35,6 +52,7 @@ object ControlStateStore {
         stateMuted: Boolean,
         stateDetail: String?,
         interacting: Boolean,
+        unavailableText: String = NO_INPUT,
     ): String {
         if (interacting || !statePresent) return localText
         val detail = stateDetail?.trim()?.takeIf { it.isNotEmpty() }
@@ -43,9 +61,24 @@ object ControlStateStore {
         // every unavailable source into NO INPUT.
         if (detail != null && detail in unavailableDetails) return detail
         if (stateMuted || detail == MUTED) return MUTED
-        if (!stateAvailable) return NO_INPUT
+        if (!stateAvailable) return unavailableText
         return detail ?: localText
     }
+
+    /** True for a local-light value control (slider or dial). */
+    fun isLightValueControl(control: ControlDto?): Boolean =
+        control != null &&
+            control.kind != "trackpad" &&
+            control.emit == "value" &&
+            control.binding.type == "light"
+
+    /** True when a button carries a local-light action (power on/off/toggle). */
+    fun hasLightAction(actions: List<ActionDto>): Boolean =
+        actions.any { it.type.trim().lowercase() == "light" }
+
+    /** True for a normal tile with a read-only local-light status binding. */
+    fun hasLightStateBinding(button: DeckButton?): Boolean =
+        button?.state?.type == "light"
 
     /** True for an OBS input-volume value control (slider or dial). */
     fun isObsValueControl(control: ControlDto?): Boolean =
@@ -85,6 +118,7 @@ object ControlStateStore {
     ): String? = when (binding?.type) {
         "obs" -> obsStateTileText(binding, state, stateCapable)
         "twitch" -> twitchStateTileText(binding, state, stateCapable)
+        "light" -> lightStateTileText(binding, state, stateCapable)
         else -> null
     }
 
@@ -150,22 +184,68 @@ object ControlStateStore {
         return null
     }
 
+    /**
+     * Local-light tiles are detail-driven like Twitch: the desktop sends
+     * `ON`/`OFF` for power, `42%` for brightness and `250` for temperature
+     * (mired). `NO LIGHT` (nothing configured) and `OFFLINE` (unreachable)
+     * arrive as unavailable details and are shown quietly; the accent only
+     * applies while the light is on.
+     */
+    private fun lightStateTileText(
+        binding: StateBindingDto,
+        state: ControlStateDto?,
+        stateCapable: Boolean,
+    ): String? {
+        if (state == null) return if (stateCapable) NO_STATE else null
+        val detail = state.detail?.trim()?.takeIf { it.isNotEmpty() }
+        if (!state.available) return detail ?: NO_LIGHT
+        if (detail != null) return detail
+        // Sparse update without a detail: derive the same short form from the
+        // normalized value, or fall back to the on/off cue.
+        return when (binding.target) {
+            "power" -> when (state.active) {
+                true -> "ON"
+                false -> "OFF"
+                null -> null
+            }
+
+            "brightness" -> state.value?.let { value ->
+                "${(value.coerceIn(0f, 1f) * 100).roundToInt()}%"
+            } ?: when (state.active) {
+                false -> "OFF"
+                else -> null
+            }
+
+            "temperature" -> state.value?.let { value ->
+                val raw = LIGHT_TEMPERATURE_MIN +
+                    value.coerceIn(0f, 1f) * (LIGHT_TEMPERATURE_MAX - LIGHT_TEMPERATURE_MIN)
+                raw.roundToInt().toString()
+            } ?: when (state.active) {
+                false -> "OFF"
+                else -> null
+            }
+
+            else -> null
+        }
+    }
+
     /** True when the state chip should use the active/accent treatment. */
     fun stateTileActive(state: ControlStateDto?): Boolean =
         state?.available == true && state.active == true
 
     /**
      * Ids with a desktop live-state producer: absolute output volume,
-     * microphone gain, OBS input volume, and normal buttons with an OBS or
-     * Twitch read-only `state` binding. Relative volume, scroll and trackpads
-     * stay open-loop.
+     * microphone gain, OBS input volume, local-light controls, and normal
+     * buttons with an OBS/Twitch/light read-only `state` binding. Relative
+     * volume, scroll and trackpads stay open-loop.
      */
     fun statefulControlIds(page: DeckPage): List<String> =
         page.buttons
             .asSequence()
             .filter { button ->
                 // A status tile uses the same channel, even without a control.
-                if (button.state?.type == "obs" || button.state?.type == "twitch") {
+                val stateType = button.state?.type
+                if (stateType == "obs" || stateType == "twitch" || stateType == "light") {
                     return@filter true
                 }
                 val control = button.control ?: return@filter false
@@ -179,6 +259,7 @@ object ControlStateStore {
                     "volume" -> control.binding.mode == "absolute"
                     "mic" -> control.binding.mode == "gain"
                     "obs" -> control.binding.target == "inputVolume"
+                    "light" -> true
                     else -> false
                 }
             }

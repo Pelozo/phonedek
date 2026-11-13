@@ -1233,6 +1233,259 @@ class DeckModelsTest {
     }
 
     @Test
+    fun parsesLightControlsWithDeviceDefaultsAndOptionalLight() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [
+                    {
+                      "id": "bright",
+                      "slot": 0,
+                      "label": "Bright",
+                      "control": {
+                        "kind": "slider",
+                        "emit": "value",
+                        "binding": { "type": "light", "target": "brightness", "light": "key-light" }
+                      }
+                    },
+                    {
+                      "id": "temp",
+                      "slot": 1,
+                      "label": "Temp",
+                      "control": {
+                        "kind": "slider",
+                        "emit": "value",
+                        "binding": { "type": "light", "target": "temperature" }
+                      }
+                    },
+                    {
+                      "id": "power",
+                      "slot": 2,
+                      "label": "Power",
+                      "control": {
+                        "kind": "dial",
+                        "emit": "value",
+                        "binding": { "type": "light", "target": "power", "light": "   " }
+                      }
+                    }
+                  ]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val buttons = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons
+        val bright = buttons.first { it.id == "bright" }.control!!
+        assertEquals("slider", bright.kind)
+        assertEquals("value", bright.emit)
+        assertEquals("light", bright.binding.type)
+        assertEquals("brightness", bright.binding.target)
+        assertEquals("key-light", bright.binding.light)
+        assertEquals(0f, bright.min!!, 0.001f)
+        assertEquals(100f, bright.max!!, 0.001f)
+        assertEquals(1f, bright.step!!, 0.001f)
+        assertEquals(50f, bright.initial!!, 0.001f)
+        assertEquals("%", bright.unit)
+
+        val temp = buttons.first { it.id == "temp" }.control!!
+        assertEquals("temperature", temp.binding.target)
+        assertNull(temp.binding.light)
+        assertEquals(143f, temp.min!!, 0.001f)
+        assertEquals(344f, temp.max!!, 0.001f)
+        assertEquals(1f, temp.step!!, 0.001f)
+        assertEquals(250f, temp.initial!!, 0.001f)
+        assertEquals("mired", temp.unit)
+
+        val power = buttons.first { it.id == "power" }.control!!
+        assertEquals("dial", power.kind)
+        assertEquals("power", power.binding.target)
+        assertNull(power.binding.light)
+        assertEquals(0f, power.min!!, 0.001f)
+        assertEquals(100f, power.max!!, 0.001f)
+        assertEquals(100f, power.step!!, 0.001f)
+        assertEquals(100f, power.initial!!, 0.001f)
+        assertEquals("%", power.unit)
+    }
+
+    @Test
+    fun lightControlsKeepExplicitRangesAndClampToDeviceLimits() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [
+                    {
+                      "id": "custom-bright",
+                      "slot": 0,
+                      "control": {
+                        "kind": "slider",
+                        "emit": "value",
+                        "binding": { "type": "light", "target": "brightness" },
+                        "min": 10,
+                        "max": 90,
+                        "step": 5,
+                        "initial": 60,
+                        "unit": "pct"
+                      }
+                    },
+                    {
+                      "id": "wide-temp",
+                      "slot": 1,
+                      "control": {
+                        "kind": "slider",
+                        "emit": "value",
+                        "binding": { "type": "light", "target": "temperature" },
+                        "min": 0,
+                        "max": 900,
+                        "step": 2,
+                        "initial": 500
+                      }
+                    }
+                  ]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val controls = DeckJson.parse(raw)!!.profiles.single().pages.single()
+            .buttons.associateBy { it.id }
+        val bright = controls.getValue("custom-bright").control!!
+        assertEquals(10f, bright.min!!, 0.001f)
+        assertEquals(90f, bright.max!!, 0.001f)
+        assertEquals(5f, bright.step!!, 0.001f)
+        assertEquals(60f, bright.initial!!, 0.001f)
+        assertEquals("pct", bright.unit)
+
+        // Out-of-device values cannot move the mired range past Elgato's limits.
+        val temp = controls.getValue("wide-temp").control!!
+        assertEquals(143f, temp.min!!, 0.001f)
+        assertEquals(344f, temp.max!!, 0.001f)
+        assertEquals(344f, temp.initial!!, 0.001f)
+        assertEquals("mired", temp.unit)
+    }
+
+    @Test
+    fun lightControlsRequireValueEmitAndKnownTarget() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [
+                    {
+                      "id": "delta",
+                      "slot": 0,
+                      "control": {
+                        "kind": "slider",
+                        "emit": "delta",
+                        "binding": { "type": "light", "target": "brightness" }
+                      }
+                    },
+                    {
+                      "id": "unknown-target",
+                      "slot": 1,
+                      "icon": "?",
+                      "control": {
+                        "kind": "slider",
+                        "emit": "value",
+                        "binding": { "type": "light", "target": "color" }
+                      }
+                    }
+                  ]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val buttons = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons
+        assertNull(buttons.first { it.id == "delta" }.control)
+        assertNull(buttons.first { it.id == "unknown-target" }.control)
+        assertEquals("?", buttons.first { it.id == "unknown-target" }.icon)
+    }
+
+    @Test
+    fun parsesEveryLightStateTargetOnPlainButtons() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [
+                    { "id": "power", "slot": 0, "state": { "type": "light", "target": "power", "light": "key-light" } },
+                    { "id": "bright", "slot": 1, "state": { "type": "light", "target": "brightness" } },
+                    { "id": "temp", "slot": 2, "state": { "type": "light", "target": "temperature" } }
+                  ]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val buttons = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons
+        assertEquals(listOf("power", "brightness", "temperature"), buttons.map { it.state!!.target })
+        assertTrue(buttons.all { it.state!!.type == "light" })
+        assertEquals("key-light", buttons.first { it.id == "power" }.state!!.light)
+        assertNull(buttons.first { it.id == "bright" }.state!!.light)
+        assertTrue(buttons.all { it.control == null })
+    }
+
+    @Test
+    fun rejectsUnknownLightStateTargetsAndTypes() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [
+                    { "id": "bad-target", "slot": 0, "label": "Keep", "state": { "type": "light", "target": "hue" } },
+                    { "id": "bad-type", "slot": 1, "label": "Keep", "state": { "type": "elgato", "target": "power" } }
+                  ]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val buttons = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons
+        buttons.forEach { button ->
+            assertNull("expected ${button.id} state to be dropped", button.state)
+            assertEquals("Keep", button.label)
+        }
+    }
+
+    @Test
+    fun oldConfigsWithoutLightFieldsStillParse() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [
+                    { "id": "vol", "slot": 0, "control": { "kind": "slider", "emit": "value", "binding": { "type": "volume", "mode": "absolute" } } },
+                    { "id": "stream", "slot": 1, "state": { "type": "obs", "target": "streaming" } },
+                    { "id": "live", "slot": 2, "state": { "type": "twitch", "target": "live" } }
+                  ]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val page = DeckJson.parse(raw)!!.profiles.single().pages.single()
+        assertEquals("absolute", page.buttons.first { it.id == "vol" }.control!!.binding.mode)
+        assertEquals("streaming", page.buttons.first { it.id == "stream" }.state!!.target)
+        assertEquals("live", page.buttons.first { it.id == "live" }.state!!.target)
+        assertNull(page.buttons.first { it.id == "vol" }.state)
+        assertNull(page.buttons.first { it.id == "stream" }.control)
+    }
+
+    @Test
     fun endpointParserAcceptsCommonForms() {
         assertEquals(parseEndpoint("192.168.1.4")!!.port, 47654)
         assertEquals(parseEndpoint("192.168.1.4:5000")!!.port, 5000)

@@ -258,9 +258,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     // OBS being closed or an input disappearing is reflected in
                     // the tile's live state (NO OBS / NO INPUT). Twitch being
                     // disabled, disconnected or unauthorized likewise arrives
-                    // as NO TWITCH / TWITCH OFF state. Do not raise a
-                    // deck-level toast for either; the press fails quietly.
-                    if (isObsButton(buttonId) || isTwitchButton(buttonId)) {
+                    // as NO TWITCH / TWITCH OFF state. Lights that are missing
+                    // or offline arrive as NO LIGHT / OFFLINE. Do not raise a
+                    // deck-level toast for any of them; the press fails quietly.
+                    if (isObsButton(buttonId) || isTwitchButton(buttonId) ||
+                        isLightButton(buttonId)
+                    ) {
                         Diag.w("State action rejected button=$buttonId error=\"$failure\"")
                     } else {
                         emit(failure)
@@ -280,8 +283,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (!ok) {
                     val failure = error?.takeIf { it.isNotBlank() }
                         ?: "The desktop could not run that control."
-                    if (isObsControl(controlId)) {
-                        Diag.w("OBS input rejected control=$controlId error=\"$failure\"")
+                    if (isObsControl(controlId) || isLightControl(controlId)) {
+                        Diag.w("State input rejected control=$controlId error=\"$failure\"")
                     } else {
                         emit(failure)
                     }
@@ -1430,6 +1433,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun isObsControl(controlId: String): Boolean =
         ControlStateStore.isObsValueControl(activeButton(controlId)?.control)
 
+    private fun isLightControl(controlId: String): Boolean =
+        ControlStateStore.isLightValueControl(activeButton(controlId)?.control)
+
     private fun isObsButton(buttonId: String): Boolean {
         val button = activeButton(buttonId) ?: return false
         return ControlStateStore.hasObsAction(button.actions) ||
@@ -1440,6 +1446,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val button = activeButton(buttonId) ?: return false
         return ControlStateStore.hasTwitchAction(button.actions) ||
             ControlStateStore.hasTwitchStateBinding(button)
+    }
+
+    private fun isLightButton(buttonId: String): Boolean {
+        val button = activeButton(buttonId) ?: return false
+        return ControlStateStore.hasLightAction(button.actions) ||
+            ControlStateStore.hasLightStateBinding(button)
     }
 
     fun onButtonPressed(button: DeckButton) {
