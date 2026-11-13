@@ -149,6 +149,44 @@ describe('SettingsStore pointer control switch', () => {
   })
 })
 
+describe('SettingsStore keyboard control switch', () => {
+  it('defaults allowKeyboardControl to true', () => {
+    const settings = new SettingsStore(tempDir())
+    expect(settings.get().allowKeyboardControl).toBe(true)
+    expect(defaultSettings().allowKeyboardControl).toBe(true)
+  })
+
+  it('keeps old settings files valid and defaults a missing field to true', () => {
+    const dir = tempDir()
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ port: 49005, discovery: false }))
+    const settings = new SettingsStore(dir)
+    expect(settings.get().allowKeyboardControl).toBe(true)
+    expect(settings.get().discovery).toBe(false)
+    expect(settings.get().port).toBe(49005)
+  })
+
+  it('falls back to true when the persisted value is not a boolean', () => {
+    const dir = tempDir()
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ allowKeyboardControl: 'no' }))
+    expect(new SettingsStore(dir).get().allowKeyboardControl).toBe(true)
+  })
+
+  it('persists false and keeps unrelated settings intact', () => {
+    const dir = tempDir()
+    const settings = new SettingsStore(dir)
+    settings.update({ allowKeyboardControl: false })
+    settings.update({ port: 49006 })
+
+    const reloaded = new SettingsStore(dir)
+    expect(reloaded.get().allowKeyboardControl).toBe(false)
+    expect(reloaded.get().allowPointerControl).toBe(true)
+    expect(reloaded.get().port).toBe(49006)
+
+    reloaded.update({ allowKeyboardControl: true })
+    expect(new SettingsStore(dir).get().allowKeyboardControl).toBe(true)
+  })
+})
+
 describe('SettingsStore Twitch settings', () => {
   it('defaults Twitch to disabled with no bundled client ID', () => {
     delete process.env['PHONEDEK_TWITCH_CLIENT_ID']

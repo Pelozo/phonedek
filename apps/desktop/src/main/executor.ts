@@ -1,6 +1,6 @@
 import { basename } from 'node:path'
 import { actionsToPlan, isScreenshotShortcut } from '@phonedek/shared'
-import type { PlannableAction, KeyboardPlanStep, PressResult } from '@phonedek/shared'
+import type { ConfigAction, KeyboardPlanStep, PressResult } from '@phonedek/shared'
 import type { HostActions } from './host-actions'
 import type { KeySender } from './key-sender'
 import type { Logger } from './logger'
@@ -34,7 +34,7 @@ export class ActionExecutor {
     this.onScreenshot = options.onScreenshot
   }
 
-  execute(actions: readonly PlannableAction[], label = 'button'): Promise<PressResult> {
+  execute(actions: readonly ConfigAction[], label = 'button'): Promise<PressResult> {
     const task = this.queue.then(() => this.run(actions, label))
     this.queue = task.then(
       () => undefined,
@@ -115,7 +115,7 @@ export class ActionExecutor {
     }
   }
 
-  private async run(actions: readonly PlannableAction[], label: string): Promise<PressResult> {
+  private async run(actions: readonly ConfigAction[], label: string): Promise<PressResult> {
     const plan = actionsToPlan(actions)
     if (plan.length === 0) {
       this.logger?.info(`Pressed "${label}" (no actions)`)

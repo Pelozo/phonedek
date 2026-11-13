@@ -290,6 +290,16 @@ export type LightAction =
   | { type: 'light'; action: 'togglePower'; light?: string }
 
 /**
+ * Phone-local keyboard launcher. Tapping a button with this action opens the
+ * phone's keyboard panel; it never runs on the desktop, so `actionsToPlan`
+ * omits it and the executor stays untouched.
+ */
+export interface KeyboardAction {
+  type: 'keyboard'
+  action: 'open'
+}
+
+/**
  * Everything the host can execute. `MicAction` and `TwitchAction` are accepted
  * by ActionSchema and the plan builder but deliberately stay out of `Action`
  * so older renderers do not have to handle them.
@@ -297,11 +307,18 @@ export type LightAction =
 export type ExecutableAction = Action | MicAction | TwitchAction
 
 /**
- * Host-executable actions plus the newer local-light family. Kept separate from
- * `ExecutableAction` so a renderer that keys maps by `ExecutableAction['type']`
- * compiles unchanged until it adds light UI.
+ * Everything the host can execute plus the newer local-light family. Kept
+ * separate from `ExecutableAction` so a renderer that keys maps by
+ * `ExecutableAction['type']` compiles unchanged until it adds that UI.
  */
 export type PlannableAction = ExecutableAction | LightAction
+
+/**
+ * Every action a config button may carry, including phone-local launchers that
+ * never reach the desktop plan. Renderers can keep consuming
+ * `PlannableAction` until they add keyboard UI.
+ */
+export type ConfigAction = PlannableAction | KeyboardAction
 
 /** Footprint of a button measured in grid cells. */
 export interface CellSpan {

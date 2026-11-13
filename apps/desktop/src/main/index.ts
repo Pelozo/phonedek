@@ -27,6 +27,8 @@ import { createHostActions } from './host-actions'
 import { ControlInputRouter } from './control-input'
 import { ControlStateService } from './control-state'
 import { createKeySender, type KeySender } from './key-sender'
+import { KeyboardRouter, keyboardInputAllowed } from './keyboard-input'
+import { createKeyboardSender, type KeyboardSender } from './keyboard-sender'
 import { createLogger, type Logger } from './logger'
 import { lanAddresses, primaryLanAddress, urlsForPort } from './lan'
 import { keyboardHelperPath } from './platform'
@@ -101,8 +103,10 @@ let twitchSource: TwitchStateSource | null = null
 let lightSource: LightStateSource | null = null
 let pointerSender: PointerSender | null = null
 let pointerRouter: PointerRouter | null = null
+let keyboardSender: KeyboardSender | null = null
+let keyboardRouter: KeyboardRouter | null = null
 /** A native import/destructive dialog is waiting for a decision. */
-let pointerDialogOpen = false
+let dialogOpen = false
 let updater: UpdateService
 let serverError: string | null = null
 let pairCache: { key: string; value: PairView } | null = null
@@ -225,6 +229,7 @@ async function buildServerInfo(): Promise<ServerInfoView> {
       launchAtLogin: currentSettings.launchAtLogin,
       minimizeToTray: currentSettings.minimizeToTray,
       allowPointerControl: currentSettings.allowPointerControl,
+      allowKeyboardControl: currentSettings.allowKeyboardControl,
       pairHost: currentSettings.pairHost,
       screenshotDirectory: currentSettings.screenshotDirectory,
       obsEnabled: currentSettings.obsEnabled,
@@ -300,6 +305,7 @@ async function buildState(): Promise<AppState> {
       launchAtLogin: settings.get().launchAtLogin,
       minimizeToTray: settings.get().minimizeToTray,
       allowPointerControl: settings.get().allowPointerControl,
+      allowKeyboardControl: settings.get().allowKeyboardControl,
       pairHost: settings.get().pairHost,
       screenshotDirectory: settings.get().screenshotDirectory,
       obsEnabled: settings.get().obsEnabled,
@@ -315,15 +321,15 @@ async function buildState(): Promise<AppState> {
   }
 }
 
-function applyPointerGate(): void {
-  pointerRouter?.setBlocked(
-    !pointerInputAllowed(settings.get().allowPointerControl, pointerDialogOpen),
-  )
+/** Recompute both input gates after the master switch or a native dialog changes. */
+function applyInputGates(): void {
+  pointerRouter?.setBlocked(!pointerInputAllowed(settings.get().allowPointerControl, dialogOpen))
+  keyboardRouter?.setBlocked(!keyboardInputAllowed(settings.get().allowKeyboardControl, dialogOpen))
 }
 
-function setPointerDialogOpen(open: boolean): void {
-  pointerDialogOpen = open
-  applyPointerGate()
+function setDialogOpen(open: boolean): void {
+  dialogOpen = open
+  applyInputGates()
 }
 
 function trayIconPath(): string {
@@ -944,7 +950,24 @@ function registerIpc(): void {
         return { ok: false, error: 'Pointer control must be true or false', state: await buildState() }
       }
       settings.update({ allowPointerControl: enabled })
-      applyPointerGate()
+      applyInputGates()
+      await pushServerInfo()
+      return { ok: true, state: await buildState() }
+    },
+  )
+
+  ipcMain.handle(
+    IPC.setAllowKeyboardControl,
+    async (_event, enabled: unknown): Promise<OperationResult> => {
+      if (typeof enabled !== 'boolean') {
+        return {
+          ok: false,
+          error: 'Keyboard control must be true or false',
+          state: await buildState(),
+        }
+      }
+      settings.update({ allowKeyboardControl: enabled })
+      applyInputGates()
       await pushServerInfo()
       return { ok: true, state: await buildState() }
     },
@@ -1388,7 +1411,18 @@ async function bootstrap(): Promise<void> {
     const support = pointerPlatformSupport()
     logger.info(`Pointer control disabled: ${support.reason ?? 'not supported on this host'}`)
   }
-  applyPointerGate()
+
+  keyboardSender = createKeyboardSender(process.platform, helperPath(), logger)
+  keyboardRouter = keyboardSender
+    ? new KeyboardRouter({
+        sender: keyboardSender,
+        logger,
+      })
+    : null
+  if (keyboardRouter) {
+    logger.info(`Keyboard control enabled on ${process.platform}`)
+  }
+  applyInputGates()
 
   server = new DeckServer({
     port: settings.get().port,
@@ -1407,6 +1441,8 @@ async function bootstrap(): Promise<void> {
         clientId: client.id,
       }),
     pointerSupported: pointerRouter !== null,
+    keyboardSupported: () =>
+      keyboardRouter !== null && settings.get().allowKeyboardControl,
     controlState: controlState ?? undefined,
     controlStateSupported: controlState !== null,
     obsSupported: () => obsClient?.connected === true,
@@ -1426,8 +1462,23 @@ async function bootstrap(): Promise<void> {
         context ? { control: context.control, label: context.label } : undefined,
       )
     },
+    onKeyboard: async (client, message, context) => {
+      if (!keyboardRouter) {
+        return {
+          seq: message.seq,
+          ok: false,
+          error: 'Keyboard control is not supported by this desktop.',
+        }
+      }
+      return keyboardRouter.handle(
+        client.id,
+        message,
+        context ? { button: context.button, label: context.label } : undefined,
+      )
+    },
     onClientClosed: (client) => {
       pointerRouter?.clientDisconnected(client.id)
+      keyboardRouter?.clientDisconnected(client.id)
       inputRouter?.clientDisconnected(client.id)
     },
     importBackup: async (filePath, preview) => {
@@ -1463,7 +1514,7 @@ async function bootstrap(): Promise<void> {
       mainWindow.focus()
       mainWindow.setAlwaysOnTop(true, 'screen-saver')
       logger.info(`Showing phone import approval dialog for "${preview.serverName}"`)
-      setPointerDialogOpen(true)
+      setDialogOpen(true)
       const choice = await (async () => {
         try {
           return await dialog.showMessageBox(mainWindow, {
@@ -1478,7 +1529,7 @@ async function bootstrap(): Promise<void> {
           })
         } finally {
           mainWindow.setAlwaysOnTop(false)
-          setPointerDialogOpen(false)
+          setDialogOpen(false)
         }
       })()
       logger.info(`Phone import approval: ${choice.response === 0 ? 'approved' : 'cancelled'}`)
@@ -1515,6 +1566,18 @@ async function bootstrap(): Promise<void> {
     onClientsChanged: () => {
       void pushServerInfo()
     },
+  })
+
+  // Helper failures arrive asynchronously; report them on the message's seq so
+  // the phone can show TX ERR. Error strings never contain typed text.
+  keyboardSender?.setErrorHandler?.((error, meta) => {
+    if (!meta?.clientId || meta.seq === undefined) return
+    server?.sendToClient(meta.clientId, {
+      type: 'keyboardResult',
+      seq: meta.seq,
+      ok: false,
+      error: error.message.slice(0, 240),
+    })
   })
 
   discovery = new DiscoveryService({
@@ -1622,6 +1685,8 @@ if (!gotLock) {
         volumeProbe?.dispose()
         pointerRouter?.dispose()
         pointerSender?.dispose()
+        keyboardRouter?.dispose()
+        keyboardSender?.dispose()
         keySender?.dispose?.()
         discovery?.stop()
         await server?.stop()

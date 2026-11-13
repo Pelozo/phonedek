@@ -233,6 +233,12 @@ const lightSchema = z.union([
   }),
 ])
 
+/** Phone-local launcher; no desktop executor plan step. */
+const keyboardSchema = z.object({
+  type: z.literal('keyboard'),
+  action: z.literal('open'),
+})
+
 export const MacroStepSchema = z.discriminatedUnion('type', [
   hotkeySchema,
   textSchema,
@@ -263,6 +269,7 @@ export const ActionSchema = z.union([
   obsSchema,
   twitchSchema,
   lightSchema,
+  keyboardSchema,
 ])
 
 export const GridSchema = z.object({

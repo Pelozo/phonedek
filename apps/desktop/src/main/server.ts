@@ -8,6 +8,7 @@ import { WebSocket, WebSocketServer } from 'ws'
 import {
   BRIGHTNESS_CAPABILITY,
   CONTROL_STATE_CAPABILITY,
+  KEYBOARD_CAPABILITY,
   LIGHT_CAPABILITY,
   OBS_CAPABILITY,
   POINTER_CAPABILITY,
@@ -26,6 +27,8 @@ import type {
   DeckProfile,
   InputMessage,
   InputResult,
+  KeyboardMessage,
+  KeyboardResult,
   PointerMessage,
   PointerResult,
   PressMessage,
@@ -35,6 +38,7 @@ import type {
 } from '@phonedek/shared'
 import type { AssetStore } from './assets'
 import { resolveStateControls, type ControlStateSubscription } from './control-state'
+import { isKeyboardLauncher } from './keyboard-input'
 import {
   previewBackup,
   readBackupFile,
@@ -50,6 +54,7 @@ export const SERVER_CAPABILITIES = [
   'input-v1',
   BRIGHTNESS_CAPABILITY,
   POINTER_CAPABILITY,
+  KEYBOARD_CAPABILITY,
   CONTROL_STATE_CAPABILITY,
   OBS_CAPABILITY,
   TWITCH_CAPABILITY,
@@ -58,9 +63,10 @@ export const SERVER_CAPABILITIES = [
 
 /**
  * Capabilities for a specific host. Wayland/unsupported platforms must not
- * advertise `pointer-v1`, a host with no volume/mic/OBS/Twitch state reader must
- * not advertise `control-state-v1`, and `obs-v1`/`twitch-v1` are dynamic: they
- * are advertised only while that integration is identified/authorized.
+ * advertise `pointer-v1` or `keyboard-v1`, a host with no volume/mic/OBS/Twitch
+ * state reader must not advertise `control-state-v1`, and `obs-v1`/`twitch-v1`
+ * are dynamic: they are advertised only while that integration is
+ * identified/authorized.
  */
 export function serverCapabilities(
   pointerSupported: boolean,
@@ -68,9 +74,11 @@ export function serverCapabilities(
   obsSupported = false,
   twitchSupported = false,
   lightSupported = false,
+  keyboardSupported = false,
 ): string[] {
   return SERVER_CAPABILITIES.filter((capability) => {
     if (capability === POINTER_CAPABILITY) return pointerSupported
+    if (capability === KEYBOARD_CAPABILITY) return keyboardSupported
     if (capability === CONTROL_STATE_CAPABILITY) return stateSupported
     if (capability === OBS_CAPABILITY) return obsSupported
     if (capability === TWITCH_CAPABILITY) return twitchSupported
@@ -87,37 +95,50 @@ export interface ControlStateHub {
 
 interface ControlNeeds {
   pointer: boolean
+  keyboard: boolean
   input: boolean
 }
 
 function controlNeeds(config: DeckConfig): ControlNeeds {
   let pointer = false
+  let keyboard = false
   let input = false
   for (const profile of config.profiles) {
     for (const page of profile.pages) {
       for (const button of page.buttons) {
+        if (button.actions.some((action) => {
+          const candidate = action as { type?: string; action?: string }
+          return candidate.type === 'keyboard' && candidate.action === 'open'
+        })) {
+          keyboard = true
+        }
         if (!button.control) continue
         if (button.control.kind === 'trackpad') pointer = true
         else input = true
       }
     }
   }
-  return { pointer, input }
+  return { pointer, keyboard, input }
 }
 
 /**
  * Friendly mismatch notice for an old phone app. The phone cannot discover
- * capabilities it does not know about (an old app silently drops trackpad and
- * control tiles), so the desktop tells it once per connection/config.
+ * capabilities it does not know about (an old app silently drops trackpad,
+ * keyboard and control tiles), so the desktop tells it once per
+ * connection/config.
  */
 export function outdatedClientMessage(
   config: DeckConfig,
   capabilities: readonly string[],
   serverSupportsPointer: boolean,
+  serverSupportsKeyboard = false,
 ): string | null {
   const needs = controlNeeds(config)
   if (needs.pointer && serverSupportsPointer && !capabilities.includes(POINTER_CAPABILITY)) {
     return 'This deck uses the Trackpad. Update the PhoneDeck app on your phone to use it.'
+  }
+  if (needs.keyboard && serverSupportsKeyboard && !capabilities.includes(KEYBOARD_CAPABILITY)) {
+    return 'This deck uses the Keyboard. Update the PhoneDeck app on your phone to use it.'
   }
   if (needs.input && !capabilities.includes('input-v1')) {
     return 'This deck uses continuous controls. Update the PhoneDeck app on your phone to use them.'
@@ -141,6 +162,12 @@ export interface PointerContext {
   label: string
 }
 
+/** Keyboard launcher button resolved from the `start` message. */
+export interface KeyboardContext {
+  button: DeckButton
+  label: string
+}
+
 export interface DeckServerOptions {
   port: number
   token: string
@@ -155,8 +182,15 @@ export interface DeckServerOptions {
     message: PointerMessage,
     context: PointerContext | null,
   ) => Promise<PointerResult>
+  onKeyboard?: (
+    client: ConnectedClient,
+    message: KeyboardMessage,
+    context: KeyboardContext | null,
+  ) => Promise<KeyboardResult>
   /** Set false on Wayland/unsupported hosts so `pointer-v1` is not advertised. */
   pointerSupported?: boolean
+  /** Dynamic: advertise `keyboard-v1` only while supported and enabled. */
+  keyboardSupported?: () => boolean
   /** Volume readback service; omitted when this host has no reader. */
   controlState?: ControlStateHub
   /** Advertise `control-state-v1`; true only when a reader was built. */
@@ -415,6 +449,7 @@ export class DeckServer {
       this.options.obsSupported?.() === true,
       this.options.twitchSupported?.() === true,
       this.options.lightSupported?.() === true,
+      this.options.keyboardSupported?.() === true,
     )
   }
 
@@ -696,6 +731,9 @@ export class DeckServer {
       case 'pointer':
         await this.handlePointer(record, message)
         break
+      case 'keyboard':
+        await this.handleKeyboard(record, message)
+        break
       case 'watch':
         await this.handleWatch(record, message)
         break
@@ -945,6 +983,76 @@ export class DeckServer {
     // errors are reported immediately.
     if (message.phase === 'end' || message.phase === 'cancel' || !result.ok) {
       this.sendPointerResult(record, message, { ...result, seq: message.seq })
+    }
+  }
+
+  private sendKeyboardResult(
+    record: ClientRecord,
+    message: KeyboardMessage,
+    result: KeyboardResult,
+  ): void {
+    this.send(record.ws, {
+      type: 'keyboardResult',
+      seq: message.seq,
+      ok: result.ok,
+      ...(result.error ? { error: result.error } : {}),
+    })
+  }
+
+  private async handleKeyboard(record: ClientRecord, message: KeyboardMessage): Promise<void> {
+    let context: KeyboardContext | null = null
+    if (message.phase === 'start') {
+      const config = this.options.getConfig()
+      const profile = config.profiles.find((item) => item.id === message.profileId)
+      const page = profile?.pages.find((item) => item.id === message.pageId)
+      const button = page?.buttons.find((item) => item.id === message.controlId)
+      if (!profile || !page || !button) {
+        this.sendKeyboardResult(record, message, {
+          seq: message.seq,
+          ok: false,
+          error: 'Keyboard button not found. Refresh the deck.',
+        })
+        return
+      }
+      if (!isKeyboardLauncher(button)) {
+        this.sendKeyboardResult(record, message, {
+          seq: message.seq,
+          ok: false,
+          error: 'This button does not open the phone keyboard.',
+        })
+        return
+      }
+      context = { button, label: button.label }
+    }
+
+    let result: KeyboardResult
+    if (!this.options.onKeyboard) {
+      result = {
+        seq: message.seq,
+        ok: false,
+        error: 'Keyboard control is not supported by this desktop.',
+      }
+    } else {
+      try {
+        result = await this.options.onKeyboard(record.info, message, context)
+      } catch (error) {
+        result = {
+          seq: message.seq,
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        }
+      }
+    }
+
+    // Text/key successes are silent (the phone echoes locally); start, end,
+    // cancel and every error are acknowledged.
+    if (
+      message.phase === 'start' ||
+      message.phase === 'end' ||
+      message.phase === 'cancel' ||
+      !result.ok
+    ) {
+      this.sendKeyboardResult(record, message, { ...result, seq: message.seq })
     }
   }
 
@@ -1331,6 +1439,7 @@ export class DeckServer {
       this.options.getConfig(),
       record.info.capabilities,
       this.capabilities.includes(POINTER_CAPABILITY),
+      this.capabilities.includes(KEYBOARD_CAPABILITY),
     )
     if (message === record.outdatedNotice) return
     record.outdatedNotice = message

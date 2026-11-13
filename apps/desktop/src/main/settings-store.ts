@@ -27,6 +27,8 @@ export interface AppSettings {
   minimizeToTray: boolean
   /** Let paired phones move the cursor and click. Off suspends all pointer input. */
   allowPointerControl: boolean
+  /** Let paired phones type text and keys. Off suspends all keyboard input. */
+  allowKeyboardControl: boolean
   /** Optional LAN address to advertise in the QR code. Empty = auto. */
   pairHost: string
   /** macOS full-screen capture folder. Empty = OS Desktop. */
@@ -166,6 +168,7 @@ export function defaultSettings(): AppSettings {
     launchAtLogin: false,
     minimizeToTray: false,
     allowPointerControl: true,
+    allowKeyboardControl: true,
     pairHost: '',
     screenshotDirectory: '',
     obsEnabled: false,
@@ -215,6 +218,10 @@ function sanitize(input: Partial<AppSettings> | null | undefined): AppSettings {
       typeof input.allowPointerControl === 'boolean'
         ? input.allowPointerControl
         : defaults.allowPointerControl,
+    allowKeyboardControl:
+      typeof input.allowKeyboardControl === 'boolean'
+        ? input.allowKeyboardControl
+        : defaults.allowKeyboardControl,
     pairHost,
     screenshotDirectory,
     obsEnabled:

@@ -36,6 +36,8 @@ export interface SettingsView {
   minimizeToTray: boolean
   /** Paired phones may move the cursor and click. */
   allowPointerControl: boolean
+  /** Paired phones may type text and keys. */
+  allowKeyboardControl: boolean
   pairHost: string
   /** macOS capture folder; empty = OS Desktop. */
   screenshotDirectory: string
@@ -251,6 +253,7 @@ export interface PhoneDeckApi {
   setLaunchAtLogin(enabled: boolean): Promise<OperationResult>
   setMinimizeToTray(enabled: boolean): Promise<OperationResult>
   setAllowPointerControl(enabled: boolean): Promise<OperationResult>
+  setAllowKeyboardControl(enabled: boolean): Promise<OperationResult>
   setPairHost(host: string): Promise<OperationResult>
   setPhoneBrightness(clientId: string, level: number | null): Promise<OperationResult>
   setScreenshotDirectory(path: string): Promise<OperationResult>
@@ -299,6 +302,7 @@ export const IPC = {
   setLaunchAtLogin: 'phonedek:set-launch-at-login',
   setMinimizeToTray: 'phonedek:set-minimize-to-tray',
   setAllowPointerControl: 'phonedek:set-allow-pointer-control',
+  setAllowKeyboardControl: 'phonedek:set-allow-keyboard-control',
   setPairHost: 'phonedek:set-pair-host',
   setPhoneBrightness: 'phonedek:set-phone-brightness',
   setScreenshotDirectory: 'phonedek:set-screenshot-directory',

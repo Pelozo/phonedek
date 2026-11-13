@@ -43,6 +43,8 @@ const api: PhoneDeckApi = {
     ipcRenderer.invoke(IPC.setMinimizeToTray, enabled),
   setAllowPointerControl: (enabled: boolean): Promise<OperationResult> =>
     ipcRenderer.invoke(IPC.setAllowPointerControl, enabled),
+  setAllowKeyboardControl: (enabled: boolean): Promise<OperationResult> =>
+    ipcRenderer.invoke(IPC.setAllowKeyboardControl, enabled),
   setPairHost: (host: string): Promise<OperationResult> => ipcRenderer.invoke(IPC.setPairHost, host),
   setPhoneBrightness: (clientId: string, level: number | null): Promise<OperationResult> =>
     ipcRenderer.invoke(IPC.setPhoneBrightness, clientId, level),

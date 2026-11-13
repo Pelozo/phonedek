@@ -309,7 +309,7 @@ export class MacKeySender extends HelperKeySender {
   }
 }
 
-const LINUX_KEYS: Record<string, string> = {
+export const LINUX_KEYS: Record<string, string> = {
   CTRL: 'ctrl',
   ALT: 'alt',
   SHIFT: 'shift',

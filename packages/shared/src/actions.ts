@@ -1,5 +1,6 @@
 import type {
   Action,
+  ConfigAction,
   ControlSpec,
   ExecutableAction,
   KeyboardPlanStep,
@@ -174,7 +175,7 @@ function lightActionToPlan(action: LightAction): LightPlanStep {
  * Page actions are returned as units; the phone normally handles them locally,
  * while the desktop executor ignores them.
  */
-export function actionsToPlan(actions: readonly PlannableAction[], options: PlanOptions = {}): PlanStep[] {
+export function actionsToPlan(actions: readonly ConfigAction[], options: PlanOptions = {}): PlanStep[] {
   const plan: PlanStep[] = []
   for (const action of actions) {
     switch (action.type) {
@@ -226,16 +227,20 @@ export function actionsToPlan(actions: readonly PlannableAction[], options: Plan
       case 'light':
         plan.push(lightActionToPlan(action))
         break
+      case 'keyboard':
+        // Phone-local launcher: the phone opens its keyboard panel without a
+        // press, and the desktop never sees a plan step for it.
+        break
     }
   }
   return plan
 }
 
-export function pageActions(actions: readonly PlannableAction[]): PagePlanStep[] {
+export function pageActions(actions: readonly ConfigAction[]): PagePlanStep[] {
   return actionsToPlan(actions).filter((step): step is PagePlanStep => step.kind === 'page')
 }
 
-export function hasHostActions(actions: readonly PlannableAction[]): boolean {
+export function hasHostActions(actions: readonly ConfigAction[]): boolean {
   return actionsToPlan(actions).some((step) => step.kind !== 'page')
 }
 
