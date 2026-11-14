@@ -168,7 +168,7 @@ const obsSchema = z.union([
   }),
   z.object({
     type: z.literal('obs'),
-    action: z.enum(['startReplay', 'stopReplay', 'saveReplay']),
+    action: z.enum(['startReplay', 'stopReplay', 'toggleReplay', 'saveReplay']),
   }),
   z.object({ type: z.literal('obs'), action: z.literal('toggleVirtualCam') }),
   z.object({

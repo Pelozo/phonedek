@@ -242,6 +242,7 @@ const OBS_ACTION_TITLES: Record<ObsAction['action'], string> = {
   stopRecord: 'OBS recording',
   startReplay: 'OBS replay',
   stopReplay: 'OBS replay',
+  toggleReplay: 'OBS replay',
   saveReplay: 'OBS replay',
   toggleVirtualCam: 'OBS virtual cam',
   setSourceVisibility: 'OBS source',
@@ -279,6 +280,7 @@ export function obsActionVariant(action: ObsAction, next: ObsAction['action']): 
     case 'stopRecord':
     case 'startReplay':
     case 'stopReplay':
+    case 'toggleReplay':
     case 'saveReplay':
     case 'toggleVirtualCam':
       return { type: 'obs', action: next }

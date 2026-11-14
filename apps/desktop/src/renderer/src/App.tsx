@@ -466,6 +466,7 @@ function AppContent() {
       | 'media',
     obsInput?: string,
     shortcutId?: ShortcutPresetId,
+    obsInitialLevel?: number,
   ): void => {
     if (!config || !profile || !page) return
     const preset = kind === 'shortcut' ? (shortcutId ? shortcutPreset(shortcutId) : null) : null
@@ -616,7 +617,9 @@ function AppContent() {
                   min: 0,
                   max: 200,
                   step: 1,
-                  initial: 100,
+                  initial: obsInitialLevel !== undefined
+                    ? Math.max(0, Math.min(200, obsInitialLevel))
+                    : 100,
                   unit: '%',
                   haptics: true,
                 }
@@ -841,7 +844,13 @@ function AppContent() {
 
   const addObsInput = (input: ObsInputView): void => {
     setObsPickerOpen(false)
-    addNewControl('obs', input.name)
+    void (async () => {
+      // Seed the control with the level OBS already has instead of 100%.
+      const reading = window.phonedek.getObsInputLevel
+        ? await window.phonedek.getObsInputLevel(input.name).catch(() => null)
+        : null
+      addNewControl('obs', input.name, undefined, reading?.level)
+    })()
   }
 
   const handleConfigImported = (next: DeckConfig): void => {

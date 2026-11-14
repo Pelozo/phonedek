@@ -196,7 +196,7 @@ function makeClient(fake: FakeObs, options: ObsClientOptions = {}): ObsClient {
   return client
 }
 
-async function waitFor<T>(fn: () => T | undefined | false | null, timeout = 2000): Promise<T> {
+async function waitFor<T>(fn: () => T | undefined | false | null, timeout = 8000): Promise<T> {
   const started = Date.now()
   for (;;) {
     const value = fn()

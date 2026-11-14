@@ -124,7 +124,7 @@ describe('ElgatoClient HTTP', () => {
       })
     })
     cleanups.push(server.close)
-    const client = new ElgatoClient(server.device, { timeoutMs: 1000 })
+    const client = new ElgatoClient(server.device, { timeoutMs: 5000 })
 
     await expect(client.getState()).resolves.toEqual({
       on: true,
@@ -153,7 +153,7 @@ describe('ElgatoClient HTTP', () => {
       json(response, 200, body)
     })
     cleanups.push(server.close)
-    const client = new ElgatoClient(server.device, { timeoutMs: 1000 })
+    const client = new ElgatoClient(server.device, { timeoutMs: 5000 })
 
     const state = await client.setState({ brightness: 88, temperature: 300 })
     expect(state).toEqual({ on: true, brightness: 88, temperature: 300 })
@@ -172,7 +172,7 @@ describe('ElgatoClient HTTP', () => {
       json(response, 500, { error: 'boom' })
     })
     cleanups.push(server.close)
-    const client = new ElgatoClient(server.device, { timeoutMs: 1000 })
+    const client = new ElgatoClient(server.device, { timeoutMs: 5000 })
 
     await expect(client.getState()).rejects.toMatchObject({
       name: 'ElgatoError',

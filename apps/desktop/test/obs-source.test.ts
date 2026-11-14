@@ -361,6 +361,7 @@ describe('ObsStateSource actions', () => {
       { kind: 'obs', action: 'toggleRecord' },
       { kind: 'obs', action: 'startReplay' },
       { kind: 'obs', action: 'stopReplay' },
+      { kind: 'obs', action: 'toggleReplay' },
       { kind: 'obs', action: 'toggleVirtualCam' },
     ]
 
@@ -375,6 +376,7 @@ describe('ObsStateSource actions', () => {
       'ToggleRecord',
       'StartReplayBuffer',
       'StopReplayBuffer',
+      'ToggleReplayBuffer',
       'ToggleVirtualCam',
     ])
   })

@@ -181,10 +181,10 @@ describe('OBS status helpers', () => {
     expect(button.span).toBeUndefined()
   })
 
-  it('replay status saves the buffer and VCam toggles the camera', () => {
+  it('replay status toggles the buffer and VCam toggles the camera', () => {
     const replay = createObsStatusButton(OBS_STATUS_TILES[2]!, 0)
     expect(replay.state?.target).toBe('replay')
-    expect(replay.actions).toEqual([{ type: 'obs', action: 'saveReplay' }])
+    expect(replay.actions).toEqual([{ type: 'obs', action: 'toggleReplay' }])
     const vcam = createObsStatusButton(OBS_STATUS_TILES[3]!, 1)
     expect(vcam.actions).toEqual([{ type: 'obs', action: 'toggleVirtualCam' }])
   })

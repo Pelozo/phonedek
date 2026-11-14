@@ -396,6 +396,9 @@ export class ObsStateSource implements ObsStateReader {
       case 'stopReplay':
         await this.setOutput('replay', 'stop')
         break
+      case 'toggleReplay':
+        await this.setOutput('replay', 'toggle')
+        break
       case 'saveReplay':
         await this.saveReplay()
         break

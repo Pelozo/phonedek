@@ -45,9 +45,9 @@ export const OBS_STATUS_TILES: readonly ObsStatusTilePreset[] = [
     icon: '🔁',
     menuIcon: 'refresh',
     target: 'replay',
-    action: { type: 'obs', action: 'saveReplay' },
+    action: { type: 'obs', action: 'toggleReplay' },
     menuLabel: 'OBS replay status',
-    menuDescription: '1 × 1 · REPLAY tile, tap saves the buffer',
+    menuDescription: '1 × 1 · REPLAY tile, tap starts/stops the buffer',
   },
   {
     id: 'obs-status-vcam',

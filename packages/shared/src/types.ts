@@ -247,7 +247,7 @@ export type ObsAction =
   | { type: 'obs'; action: 'setScene'; scene?: string }
   | { type: 'obs'; action: 'toggleStream' | 'startStream' | 'stopStream' }
   | { type: 'obs'; action: 'toggleRecord' | 'startRecord' | 'stopRecord' }
-  | { type: 'obs'; action: 'startReplay' | 'stopReplay' | 'saveReplay' }
+  | { type: 'obs'; action: 'startReplay' | 'stopReplay' | 'toggleReplay' | 'saveReplay' }
   | { type: 'obs'; action: 'toggleVirtualCam' }
   | {
       type: 'obs'
@@ -739,7 +739,7 @@ export type ObsPlanStep =
   | { kind: 'obs'; action: 'setScene'; scene?: string }
   | { kind: 'obs'; action: 'toggleStream' | 'startStream' | 'stopStream' }
   | { kind: 'obs'; action: 'toggleRecord' | 'startRecord' | 'stopRecord' }
-  | { kind: 'obs'; action: 'startReplay' | 'stopReplay' | 'saveReplay' }
+  | { kind: 'obs'; action: 'startReplay' | 'stopReplay' | 'toggleReplay' | 'saveReplay' }
   | { kind: 'obs'; action: 'toggleVirtualCam' }
   | {
       kind: 'obs'

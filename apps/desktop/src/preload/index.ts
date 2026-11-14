@@ -57,6 +57,11 @@ const api: PhoneDeckApi = {
   setObsSettings: (input: ObsSettingsInput): Promise<OperationResult> =>
     ipcRenderer.invoke(IPC.setObsSettings, input),
   listObsInputs: (): Promise<ObsInputsResult> => ipcRenderer.invoke(IPC.listObsInputs),
+  getObsInputLevel: (input?: string) =>
+    ipcRenderer.invoke(IPC.getObsInputLevel, input) as Promise<{
+      level: number
+      muted: boolean
+    } | null>,
   testObsInputVolume: (input: string | undefined, percent: number): Promise<PressResult> =>
     ipcRenderer.invoke(IPC.testObsInputVolume, input, percent),
   testObsMute: (input?: string): Promise<PressResult> =>

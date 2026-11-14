@@ -770,6 +770,20 @@ function registerIpc(): void {
   })
 
   ipcMain.handle(
+    IPC.getObsInputLevel,
+    async (_event, input: unknown): Promise<{ level: number; muted: boolean } | null> => {
+      if (input !== undefined && typeof input !== 'string') return null
+      if (!obsSource) return null
+      try {
+        const reading = await obsSource.read(input)
+        return { level: reading.level, muted: reading.muted }
+      } catch {
+        return null
+      }
+    },
+  )
+
+  ipcMain.handle(
     IPC.testObsInputVolume,
     async (_event, input: unknown, percent: unknown): Promise<PressResult> => {
       if (input !== undefined && typeof input !== 'string') {

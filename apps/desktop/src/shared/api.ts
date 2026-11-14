@@ -286,6 +286,8 @@ export interface PhoneDeckApi {
   getObsStatus(): Promise<ObsStatusView>
   setObsSettings(input: ObsSettingsInput): Promise<OperationResult>
   listObsInputs(): Promise<ObsInputsResult>
+  /** Current level for one OBS input, used to seed a new control. */
+  getObsInputLevel(input?: string): Promise<{ level: number; muted: boolean } | null>
   testObsInputVolume(input: string | undefined, percent: number): Promise<PressResult>
   testObsMute(input?: string): Promise<PressResult>
   getTwitchStatus(): Promise<TwitchStatusView>
@@ -340,6 +342,7 @@ export const IPC = {
   getObsStatus: 'phonedek:obs-get-status',
   setObsSettings: 'phonedek:obs-set-settings',
   listObsInputs: 'phonedek:obs-list-inputs',
+  getObsInputLevel: 'phonedek:obs-input-level',
   testObsInputVolume: 'phonedek:obs-test-volume',
   testObsMute: 'phonedek:obs-test-mute',
   getTwitchStatus: 'phonedek:twitch-get-status',

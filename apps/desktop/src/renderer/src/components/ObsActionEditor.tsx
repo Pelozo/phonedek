@@ -40,6 +40,7 @@ const OPERATION_GROUPS: Array<{
     options: [
       { value: 'startReplay', label: 'Start replay buffer' },
       { value: 'stopReplay', label: 'Stop replay buffer' },
+      { value: 'toggleReplay', label: 'Toggle replay buffer' },
       { value: 'saveReplay', label: 'Save replay buffer' },
     ],
   },
@@ -273,6 +274,7 @@ export function ObsActionEditor({
         action.action === 'stopRecord' ||
         action.action === 'startReplay' ||
         action.action === 'stopReplay' ||
+        action.action === 'toggleReplay' ||
         action.action === 'saveReplay' ||
         action.action === 'toggleVirtualCam') && (
         <p className="hint">

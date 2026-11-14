@@ -74,6 +74,7 @@ function obsIconName(action: ObsAction): IconName {
       return 'record'
     case 'startReplay':
     case 'stopReplay':
+    case 'toggleReplay':
     case 'saveReplay':
       return 'refresh'
     case 'toggleVirtualCam':

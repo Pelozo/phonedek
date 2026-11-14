@@ -112,6 +112,7 @@ function obsActionToPlan(action: ObsAction): ObsPlanStep {
     case 'stopRecord':
     case 'startReplay':
     case 'stopReplay':
+    case 'toggleReplay':
     case 'saveReplay':
     case 'toggleVirtualCam':
       return { kind: 'obs', action: action.action }
@@ -635,6 +636,8 @@ export function describeAction(action: PlannableAction | AppVolumeAction, platfo
           return 'Start OBS replay buffer'
         case 'stopReplay':
           return 'Stop OBS replay buffer'
+        case 'toggleReplay':
+          return 'Toggle OBS replay buffer'
         case 'saveReplay':
           return 'Save OBS replay buffer'
         case 'toggleVirtualCam':
