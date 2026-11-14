@@ -5,6 +5,10 @@ import type {
   AppState,
   AssetPickResult,
   AutoProfileSettingsInput,
+  HueDiscoveryResult,
+  HueLightResult,
+  HuePairInput,
+  HuePairResult,
   LightSettingsInput,
   LightStatusView,
   ObsInputsResult,
@@ -75,6 +79,14 @@ const api: PhoneDeckApi = {
   setLightSettings: (input: LightSettingsInput): Promise<OperationResult> =>
     ipcRenderer.invoke(IPC.setLightSettings, input),
   getLightStatuses: (): Promise<LightStatusView[]> => ipcRenderer.invoke(IPC.getLightStatuses),
+  pairHueLight: (input: HuePairInput): Promise<HuePairResult> =>
+    ipcRenderer.invoke(IPC.pairHueLight, input),
+  listHueLights: (deviceId: string): Promise<HueLightResult> =>
+    ipcRenderer.invoke(IPC.listHueLights, deviceId),
+  discoverHueBridges: (): Promise<HueDiscoveryResult> =>
+    ipcRenderer.invoke(IPC.discoverHueBridges),
+  testLight: (deviceId: string): Promise<LightStatusView | null> =>
+    ipcRenderer.invoke(IPC.testLight, deviceId),
   getMixerSnapshot: (): Promise<MixerSnapshot> => ipcRenderer.invoke(IPC.getMixerSnapshot),
   setMixerVolume: (sessionId: string, volume: number): Promise<PressResult> =>
     ipcRenderer.invoke(IPC.setMixerVolume, sessionId, volume),

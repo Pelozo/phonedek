@@ -1,6 +1,10 @@
 import {
   ELGATO_TEMPERATURE_MAX,
   ELGATO_TEMPERATURE_MIN,
+  HUE_COLOR_TEMPERATURE_MAX,
+  HUE_COLOR_TEMPERATURE_MIN,
+  NANOLEAF_TEMPERATURE_MAX_KELVIN,
+  NANOLEAF_TEMPERATURE_MIN_KELVIN,
   type LightTarget,
 } from './types'
 
@@ -48,6 +52,62 @@ export function miredToKelvin(mired: number): number {
 
 /** Kelvin → Elgato mired (rounded, clamped to 143..344). */
 export function kelvinToMired(kelvin: number): number {
+  if (!Number.isFinite(kelvin) || kelvin <= 0) throw new Error('Kelvin value must be positive')
+  return Math.max(
+    ELGATO_TEMPERATURE_MIN,
+    Math.min(ELGATO_TEMPERATURE_MAX, Math.round(1_000_000 / kelvin)),
+  )
+}
+
+/**
+ * App brightness (0..100) → Hue CLIP v1 `bri` (1..254).
+ *
+ * Hue has no zero-brightness value; 0% is sent as the dimmest legal step and
+ * power is turned off through `on` instead.
+ */
+export function hueBrightnessFromPercent(percent: number): number {
+  if (!Number.isFinite(percent)) throw new Error('Brightness must be finite')
+  const clamped = Math.max(0, Math.min(100, percent))
+  return Math.max(1, Math.min(254, Math.round((clamped / 100) * 254)))
+}
+
+/** Hue `bri` (1..254) → app brightness (0..100). */
+export function percentFromHueBrightness(bri: number): number {
+  if (!Number.isFinite(bri)) throw new Error('Hue brightness must be finite')
+  const clamped = Math.max(1, Math.min(254, bri))
+  return Math.round((clamped / 254) * 100)
+}
+
+/** App mireds → Hue `ct` (153..500 mireds). */
+export function hueColorTemperatureFromMired(mired: number): number {
+  if (!Number.isFinite(mired)) throw new Error('Mired value must be finite')
+  return Math.max(
+    HUE_COLOR_TEMPERATURE_MIN,
+    Math.min(HUE_COLOR_TEMPERATURE_MAX, Math.round(mired)),
+  )
+}
+
+/** Hue `ct` → app mireds, clamped to the Elgato slider range. */
+export function miredFromHueColorTemperature(ct: number): number {
+  if (!Number.isFinite(ct)) throw new Error('Hue color temperature must be finite')
+  return Math.max(
+    ELGATO_TEMPERATURE_MIN,
+    Math.min(ELGATO_TEMPERATURE_MAX, Math.round(ct)),
+  )
+}
+
+/** App mireds → Nanoleaf `ct` in Kelvin (1200..6500 K). */
+export function nanoleafKelvinFromMired(mired: number): number {
+  if (!Number.isFinite(mired) || mired <= 0) throw new Error('Mired value must be positive')
+  const kelvin = 1_000_000 / mired
+  return Math.max(
+    NANOLEAF_TEMPERATURE_MIN_KELVIN,
+    Math.min(NANOLEAF_TEMPERATURE_MAX_KELVIN, Math.round(kelvin)),
+  )
+}
+
+/** Nanoleaf Kelvin → app mireds in the Elgato slider range. */
+export function miredFromNanoleafKelvin(kelvin: number): number {
   if (!Number.isFinite(kelvin) || kelvin <= 0) throw new Error('Kelvin value must be positive')
   return Math.max(
     ELGATO_TEMPERATURE_MIN,

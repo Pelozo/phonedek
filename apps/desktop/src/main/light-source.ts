@@ -1,10 +1,18 @@
 import {
   denormalizeLightValue,
   normalizeLightValue,
+  type LightDeviceType,
   type LightPlanStep,
   type LightTarget,
 } from '@phonedek/shared'
-import { ElgatoClient, type ElgatoLightState } from './light-client'
+import {
+  ElgatoClient,
+  type LightDeviceClient,
+  type LightDeviceState,
+} from './light-client'
+import { HueClient } from './hue-client'
+import { NanoleafClient } from './nanoleaf-client'
+import type { LightCredentialReader, LightCredentials } from './light-credentials'
 import type { Logger } from './logger'
 import type { LightDeviceSettings } from './settings-store'
 
@@ -21,10 +29,12 @@ export interface LightStatusReading {
 export interface LightDeviceStatus {
   id: string
   name: string
+  type: LightDeviceType
   host: string
   port: number
+  lightId?: string
   available: boolean
-  state?: ElgatoLightState
+  state?: LightDeviceState
   error?: string
 }
 
@@ -44,8 +54,13 @@ export interface LightStateSourceOptions {
   ttlMs?: number
   now?: () => number
   logger?: Logger
+  /** Per-device credential lookup. Omit in tests that inject clients. */
+  credentials?: LightCredentialReader
   /** Test seam / custom client factory. */
-  createClient?: (device: LightDeviceSettings) => ElgatoClient
+  createClient?: (
+    device: LightDeviceSettings,
+    credentials: LightCredentials,
+  ) => LightDeviceClient
 }
 
 const DEFAULT_TTL_MS = 900
@@ -55,33 +70,63 @@ function message(error: unknown): string {
 }
 
 interface CacheEntry {
-  state: ElgatoLightState
+  state: LightDeviceState
   at: number
 }
 
 /**
- * Cached Elgato reads plus action/level writes for the first local-light
- * provider. It never polls on its own: control-state drives reads only while a
- * light control/tile is watched, and the TTL collapses a page of tiles into a
- * single GET per device.
+ * Build the provider adapter for one device. A missing credential becomes a
+ * client error rather than a configure-time throw, so one unpaired Hue bridge
+ * does not disable every other light.
+ */
+export function createDefaultLightClient(
+  device: LightDeviceSettings,
+  credentials: LightCredentials,
+): LightDeviceClient {
+  switch (device.type) {
+    case 'hue':
+      return new HueClient(device, {
+        username: credentials.username ?? '',
+        timeoutMs: 3000,
+      })
+    case 'nanoleaf':
+      return new NanoleafClient(device, {
+        token: credentials.token ?? '',
+        timeoutMs: 3000,
+      })
+    default:
+      return new ElgatoClient(device, { timeoutMs: 3000 })
+  }
+}
+
+/**
+ * Unified cached reads plus action/level writes for Elgato, Hue and Nanoleaf.
+ * It never polls on its own: control-state drives reads only while a light
+ * control/tile is watched, and the TTL collapses a page of tiles into a single
+ * GET per device. Writes are latest-wins inside each provider client.
  */
 export class LightStateSource implements LightStateReader {
   private readonly ttlMs: number
   private readonly now: () => number
   private readonly logger?: Logger
-  private readonly createClient: (device: LightDeviceSettings) => ElgatoClient
+  private readonly credentials?: LightCredentialReader
+  private readonly createClient: (
+    device: LightDeviceSettings,
+    credentials: LightCredentials,
+  ) => LightDeviceClient
   private devices: LightDeviceSettings[] = []
-  private clients = new Map<string, ElgatoClient>()
+  private clients = new Map<string, LightDeviceClient>()
+  private clientErrors = new Map<string, Error>()
   private readonly cache = new Map<string, CacheEntry>()
-  private readonly inFlight = new Map<string, Promise<ElgatoLightState>>()
+  private readonly inFlight = new Map<string, Promise<LightDeviceState>>()
   private readonly listeners = new Set<(lightId?: string) => void>()
 
   constructor(options: LightStateSourceOptions = {}) {
     this.ttlMs = Math.max(0, options.ttlMs ?? DEFAULT_TTL_MS)
     this.now = options.now ?? Date.now
     this.logger = options.logger
-    this.createClient =
-      options.createClient ?? ((device) => new ElgatoClient(device, { timeoutMs: 3000 }))
+    this.credentials = options.credentials
+    this.createClient = options.createClient ?? createDefaultLightClient
   }
 
   get configured(): boolean {
@@ -94,9 +139,18 @@ export class LightStateSource implements LightStateReader {
 
   configure(devices: readonly LightDeviceSettings[]): void {
     this.devices = devices.map((device) => ({ ...device }))
-    this.clients = new Map(
-      this.devices.map((device) => [device.id, this.createClient(device)]),
-    )
+    this.clients = new Map()
+    this.clientErrors = new Map()
+    for (const device of this.devices) {
+      try {
+        const credentials = this.credentials?.get(device.id) ?? {}
+        this.clients.set(device.id, this.createClient(device, credentials))
+      } catch (error) {
+        // Keep the device visible in Settings with a useful error instead of
+        // failing the whole list because one credential is missing.
+        this.clientErrors.set(device.id, error instanceof Error ? error : new Error(String(error)))
+      }
+    }
     this.cache.clear()
     this.inFlight.clear()
   }
@@ -193,30 +247,14 @@ export class LightStateSource implements LightStateReader {
   }
 
   async listStatuses(): Promise<LightDeviceStatus[]> {
-    return Promise.all(
-      this.devices.map(async (device) => {
-        try {
-          const state = await this.readState(device)
-          return {
-            id: device.id,
-            name: device.name,
-            host: device.host,
-            port: device.port,
-            available: true,
-            state,
-          }
-        } catch (error) {
-          return {
-            id: device.id,
-            name: device.name,
-            host: device.host,
-            port: device.port,
-            available: false,
-            error: message(error).slice(0, 200),
-          }
-        }
-      }),
-    )
+    return Promise.all(this.devices.map((device) => this.statusFor(device)))
+  }
+
+  /** Connection test for one configured device (Settings "Test" button). */
+  async test(lightId: string | undefined): Promise<LightDeviceStatus> {
+    const device = this.resolveDevice(lightId)
+    this.invalidateStatus(device.id)
+    return this.statusFor(device)
   }
 
   dispose(): void {
@@ -224,6 +262,7 @@ export class LightStateSource implements LightStateReader {
     this.cache.clear()
     this.inFlight.clear()
     this.clients.clear()
+    this.clientErrors.clear()
     this.devices = []
   }
 
@@ -235,29 +274,52 @@ export class LightStateSource implements LightStateReader {
     return device
   }
 
-  private requireClient(id: string): ElgatoClient {
+  private requireClient(id: string): LightDeviceClient {
     const client = this.clients.get(id)
-    if (!client) throw new Error(`Light "${id}" is not configured.`)
-    return client
+    if (client) return client
+    const error = this.clientErrors.get(id)
+    if (error) throw error
+    throw new Error(`Light "${id}" is not configured.`)
   }
 
-  private remember(id: string, state: ElgatoLightState): void {
+  private remember(id: string, state: LightDeviceState): void {
     this.cache.set(id, { state, at: this.now() })
   }
 
-  private async readState(device: LightDeviceSettings): Promise<ElgatoLightState> {
+  private async statusFor(device: LightDeviceSettings): Promise<LightDeviceStatus> {
+    const base = {
+      id: device.id,
+      name: device.name,
+      type: device.type,
+      host: device.host,
+      port: device.port,
+      ...(device.lightId ? { lightId: device.lightId } : {}),
+    }
+    try {
+      const state = await this.readState(device)
+      return { ...base, available: true, state }
+    } catch (error) {
+      return {
+        ...base,
+        available: false,
+        error: message(error).slice(0, 200),
+      }
+    }
+  }
+
+  private async readState(device: LightDeviceSettings): Promise<LightDeviceState> {
     const cached = this.cache.get(device.id)
     if (cached && this.now() - cached.at < this.ttlMs) return cached.state
     const pending = this.inFlight.get(device.id)
     if (pending) return pending
 
-    const run = (async (): Promise<ElgatoLightState> => {
+    const run = (async (): Promise<LightDeviceState> => {
       try {
         const state = await this.requireClient(device.id).getState()
         this.remember(device.id, state)
         return state
       } catch (error) {
-        this.logger?.warn(`Elgato read failed for ${device.name}: ${message(error)}`)
+        this.logger?.warn(`${device.type} read failed for ${device.name}: ${message(error)}`)
         throw error
       } finally {
         this.inFlight.delete(device.id)

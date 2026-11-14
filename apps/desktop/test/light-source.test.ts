@@ -2,9 +2,19 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   ElgatoClient,
   type ElgatoLightState,
+  type LightDeviceClient,
+  type LightDeviceState,
+  type LightStatePatch,
 } from '../src/main/light-client'
-import { LightStateSource } from '../src/main/light-source'
+import {
+  LightStateSource,
+  createDefaultLightClient,
+} from '../src/main/light-source'
+import { HueClient } from '../src/main/hue-client'
+import { NanoleafClient } from '../src/main/nanoleaf-client'
+import type { LightCredentialReader, LightCredentials } from '../src/main/light-credentials'
 import type { LightDeviceSettings } from '../src/main/settings-store'
+import type { LightTarget } from '@phonedek/shared'
 
 interface Call {
   method: string
@@ -189,6 +199,195 @@ describe('LightStateSource reads', () => {
     expect(statuses[0]!.state?.brightness).toBe(42)
     expect(statuses[1]).toMatchObject({ id: 'fill-1', available: false })
     expect(statuses[1]!.error).toMatch(/ECONNREFUSED/)
+  })
+})
+
+describe('LightStateSource providers', () => {
+  const hue: LightDeviceSettings = {
+    id: 'hue-1',
+    name: 'Hue Desk',
+    type: 'hue',
+    host: '10.0.0.20',
+    port: 443,
+    lightId: '4',
+  }
+  const nanoleaf: LightDeviceSettings = {
+    id: 'nl-1',
+    name: 'Nanoleaf',
+    type: 'nanoleaf',
+    host: '10.0.0.21',
+    port: 16021,
+  }
+
+  function providerCredentials(): LightCredentialReader {
+    return {
+      get: (id) =>
+        id === 'hue-1'
+          ? { username: 'hue-key' }
+          : id === 'nl-1'
+            ? { token: 'nl-token' }
+            : null,
+      has: (id) => id === 'hue-1' || id === 'nl-1',
+    }
+  }
+
+  function providerClient(
+    state: LightDeviceState,
+    writes: Array<{ target: LightTarget | 'power'; value: number }> = [],
+    reads?: { count: number },
+  ): LightDeviceClient {
+    let current = { ...state }
+    return {
+      getState: async () => {
+        if (reads) reads.count += 1
+        return { ...current }
+      },
+      setState: async (patch: LightStatePatch) => {
+        current = { ...current, ...patch }
+        return { ...current }
+      },
+      setTarget: async (target, value) => {
+        writes.push({ target, value })
+        if (target === 'power') current.on = value >= 50
+        else if (target === 'brightness') current.brightness = value
+        else current.temperature = value
+        return { ...current }
+      },
+    }
+  }
+
+  it('dispatches each configured provider through the default factory', () => {
+    expect(createDefaultLightClient(hue, { username: 'hue-key' })).toBeInstanceOf(HueClient)
+    expect(createDefaultLightClient(nanoleaf, { token: 'nl-token' })).toBeInstanceOf(
+      NanoleafClient,
+    )
+    expect(
+      createDefaultLightClient(
+        { id: 'e', name: 'Elgato', type: 'elgato', host: '10.0.0.1', port: 9123 },
+        {},
+      ),
+    ).toBeInstanceOf(ElgatoClient)
+  })
+
+  it('passes each device its own credentials and caches per-device reads', async () => {
+    const seen: Array<[string, LightCredentials]> = []
+    const hueReads = { count: 0 }
+    const nanoleafReads = { count: 0 }
+    const source = new LightStateSource({
+      ttlMs: 900,
+      credentials: providerCredentials(),
+      createClient: (device, credentials) => {
+        seen.push([device.id, credentials])
+        return device.id === 'hue-1'
+          ? providerClient({ on: true, brightness: 37, temperature: 250 }, [], hueReads)
+          : providerClient({ on: false, brightness: 80, temperature: 200 }, [], nanoleafReads)
+      },
+    })
+    sources.push(source)
+    source.configure([hue, nanoleaf])
+
+    expect(seen).toEqual([
+      ['hue-1', { username: 'hue-key' }],
+      ['nl-1', { token: 'nl-token' }],
+    ])
+
+    await expect(source.readStatus('hue-1', 'brightness')).resolves.toMatchObject({
+      active: true,
+      value: 0.37,
+      available: true,
+      detail: '37%',
+    })
+    await expect(source.readStatus('hue-1', 'brightness')).resolves.toMatchObject({
+      detail: '37%',
+    })
+    expect(hueReads.count).toBe(1)
+
+    await expect(source.readStatus('nl-1', 'power')).resolves.toMatchObject({
+      active: false,
+      value: 0,
+      detail: 'OFF',
+    })
+    await expect(source.readStatus('nl-1', 'temperature')).resolves.toMatchObject({
+      active: false,
+      detail: 'OFF',
+    })
+    expect(nanoleafReads.count).toBe(1)
+  })
+
+  it('keeps one unavailable provider from hiding the others', async () => {
+    const source = new LightStateSource({
+      ttlMs: 0,
+      credentials: providerCredentials(),
+      createClient: (device) =>
+        device.id === 'hue-1'
+          ? providerClient({ on: true, brightness: 50, temperature: 250 })
+          : {
+              ...providerClient({ on: false, brightness: 0, temperature: 250 }),
+              getState: async () => {
+                throw new Error('Nanoleaf at 10.0.0.21:16021 timed out after 3000 ms')
+              },
+            },
+    })
+    sources.push(source)
+    source.configure([hue, nanoleaf])
+
+    const statuses = await source.listStatuses()
+    expect(statuses[0]).toMatchObject({
+      id: 'hue-1',
+      type: 'hue',
+      lightId: '4',
+      available: true,
+    })
+    expect(statuses[1]).toMatchObject({
+      id: 'nl-1',
+      type: 'nanoleaf',
+      available: false,
+    })
+    expect(statuses[1]!.error).toMatch(/timed out/)
+  })
+
+  it('reports a missing credential as a quiet NO LIGHT condition', async () => {
+    const source = new LightStateSource({
+      credentials: { get: () => null, has: () => false },
+    })
+    sources.push(source)
+    source.configure([hue])
+
+    await expect(source.readStatus('hue-1', 'power')).rejects.toThrow(
+      /application key is missing/,
+    )
+    await expect(source.listStatuses()).resolves.toMatchObject([
+      { id: 'hue-1', available: false, error: expect.stringMatching(/application key is missing/) },
+    ])
+    await expect(source.test('hue-1')).resolves.toMatchObject({
+      id: 'hue-1',
+      available: false,
+    })
+  })
+
+  it('routes raw levels and power through each provider client', async () => {
+    const writes = new Map<string, Array<{ target: LightTarget | 'power'; value: number }>>()
+    const source = new LightStateSource({
+      ttlMs: 0,
+      credentials: providerCredentials(),
+      createClient: (device) => {
+        const target: Array<{ target: LightTarget | 'power'; value: number }> = []
+        writes.set(device.id, target)
+        return providerClient({ on: true, brightness: 50, temperature: 250 }, target)
+      },
+    })
+    sources.push(source)
+    source.configure([hue, nanoleaf])
+
+    await source.setLevel('hue-1', 'brightness', 73)
+    await source.setPower('nl-1', false)
+    await source.setNormalizedLevel('nl-1', 'temperature', 0.5)
+
+    expect(writes.get('hue-1')).toEqual([{ target: 'brightness', value: 73 }])
+    expect(writes.get('nl-1')).toEqual([
+      { target: 'power', value: 0 },
+      { target: 'temperature', value: expect.any(Number) },
+    ])
   })
 })
 

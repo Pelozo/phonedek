@@ -10,7 +10,9 @@ import {
   sanitizeLightDevices,
   sanitizeLightHost,
   sanitizeLightPort,
+  sanitizeLightTarget,
 } from '../src/main/settings-store'
+import { lightDefaultPort } from '@phonedek/shared'
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), 'phonedek-lights-test-'))
@@ -93,12 +95,20 @@ describe('light settings sanitization', () => {
       { id: 'key-1', name: 'Key', type: 'elgato', host: 'key.local', port: 9123 },
       { id: 'bad id!', name: 'Second', type: 'elgato', host: '10.0.0.2' },
       { type: 'elgato', host: 'http://nope' },
-      { type: 'hue', host: '10.0.0.3' },
+      { type: 'hue', host: '10.0.0.3', lightId: '4' },
       { id: 'key-1', name: 'Duplicate id', type: 'elgato', host: '10.0.0.4' },
     ])
     expect(devices).toEqual([
       { id: 'key-1', name: 'Key', type: 'elgato', host: 'key.local', port: 9123 },
       { id: 'light-2', name: 'Second', type: 'elgato', host: '10.0.0.2', port: 9123 },
+      {
+        id: 'light-4',
+        name: 'Light 4',
+        type: 'hue',
+        host: '10.0.0.3',
+        port: 443,
+        lightId: '4',
+      },
       { id: 'key-1-2', name: 'Duplicate id', type: 'elgato', host: '10.0.0.4', port: 9123 },
     ])
 
@@ -109,6 +119,57 @@ describe('light settings sanitization', () => {
       host: `10.0.0.${index + 1}`,
     }))
     expect(sanitizeLightDevices(many)).toHaveLength(MAX_LIGHT_DEVICES)
+  })
+
+  it('accepts Hue and Nanoleaf devices with provider default ports', () => {
+    expect(lightDefaultPort('elgato')).toBe(9123)
+    expect(lightDefaultPort('hue')).toBe(443)
+    expect(lightDefaultPort('nanoleaf')).toBe(16021)
+    expect(lightDefaultPort(undefined)).toBe(9123)
+
+    const devices = sanitizeLightDevices([
+      { id: 'hue-1', name: 'Bridge', type: 'hue', host: '10.0.0.3' },
+      { id: 'nl-1', name: 'Panels', type: 'nanoleaf', host: '10.0.0.4', port: 16022 },
+      { id: 'nl-2', name: 'HTTP', type: 'nanoleaf', host: 'http://bad' },
+      { id: 'x', name: 'Unknown', type: 'lifx', host: '10.0.0.5' },
+    ])
+    expect(devices).toEqual([
+      { id: 'hue-1', name: 'Bridge', type: 'hue', host: '10.0.0.3', port: 443 },
+      { id: 'nl-1', name: 'Panels', type: 'nanoleaf', host: '10.0.0.4', port: 16022 },
+    ])
+  })
+
+  it('keeps pre-provider settings as Elgato devices', () => {
+    const devices = sanitizeLightDevices([
+      { id: 'old-1', name: 'Old', host: '10.0.0.2', port: 9123 },
+    ])
+    expect(devices).toEqual([
+      { id: 'old-1', name: 'Old', type: 'elgato', host: '10.0.0.2', port: 9123 },
+    ])
+  })
+
+  it('sanitizes provider-side light ids and never persists credential fields', () => {
+    expect(sanitizeLightTarget('4')).toBe('4')
+    expect(sanitizeLightTarget('light.4-a')).toBe('light.4-a')
+    expect(sanitizeLightTarget('bad/id')).toBeUndefined()
+    expect(sanitizeLightTarget('')).toBeUndefined()
+
+    const devices = sanitizeLightDevices([
+      {
+        id: 'hue-1',
+        name: 'Bridge',
+        type: 'hue',
+        host: '10.0.0.3',
+        username: 'hue-application-key',
+        token: 'nanoleaf-token',
+        lightId: '../etc',
+      },
+    ])
+    expect(devices).toEqual([
+      { id: 'hue-1', name: 'Bridge', type: 'hue', host: '10.0.0.3', port: 443 },
+    ])
+    expect(JSON.stringify(devices)).not.toContain('hue-application-key')
+    expect(JSON.stringify(devices)).not.toContain('nanoleaf-token')
   })
 
   it('repairs a hand-edited settings file without losing other fields', () => {

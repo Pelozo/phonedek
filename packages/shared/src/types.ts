@@ -32,12 +32,45 @@ export const LIGHT_CAPABILITY = 'light-v1' as const
 /** Desktop capability for per-application audio volume/mute control. */
 export const MIXER_CAPABILITY = 'mixer-v1' as const
 
+/** Local-light providers supported by the desktop adapters. */
+export type LightDeviceType = 'elgato' | 'hue' | 'nanoleaf'
+
+export const LIGHT_DEVICE_TYPES: readonly LightDeviceType[] = ['elgato', 'hue', 'nanoleaf']
+
 /** Elgato Key Light / Key Light Air / Key Light Mini default HTTP port. */
 export const LIGHT_DEFAULT_PORT = 9123
+/** Philips Hue bridge CLIP v1 HTTPS port. */
+export const HUE_DEFAULT_PORT = 443
+/** Nanoleaf OpenAPI HTTP port. */
+export const NANOLEAF_DEFAULT_PORT = 16021
+
+/** Default port for a provider; unknown values fall back to Elgato's port. */
+export function lightDefaultPort(type: LightDeviceType | undefined): number {
+  switch (type) {
+    case 'hue':
+      return HUE_DEFAULT_PORT
+    case 'nanoleaf':
+      return NANOLEAF_DEFAULT_PORT
+    default:
+      return LIGHT_DEFAULT_PORT
+  }
+}
 
 /** Elgato's white-balance range, expressed in mireds (1e6 / Kelvin). */
 export const ELGATO_TEMPERATURE_MIN = 143
 export const ELGATO_TEMPERATURE_MAX = 344
+
+/**
+ * Philips Hue CLIP v1 color-temperature range in mireds. The app's slider is
+ * still expressed in Elgato's 143..344 mired range; values are clamped when
+ * they cross the bridge API boundary.
+ */
+export const HUE_COLOR_TEMPERATURE_MIN = 153
+export const HUE_COLOR_TEMPERATURE_MAX = 500
+
+/** Nanoleaf OpenAPI color temperature is expressed in Kelvin. */
+export const NANOLEAF_TEMPERATURE_MIN_KELVIN = 1200
+export const NANOLEAF_TEMPERATURE_MAX_KELVIN = 6500
 
 export const DEFAULT_HTTP_PORT = 47654
 export const DISCOVERY_PORT = 47655

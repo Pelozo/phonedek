@@ -287,6 +287,31 @@ describe('light control state service', () => {
     })
   })
 
+  it('keeps a missing Hue/Nanoleaf credential quiet as NO LIGHT', async () => {
+    const { config, profileId, pageId, powerId } = fixture()
+    const reader = new FakeLightReader()
+    reader.failure = new Error(
+      'Hue application key is missing for Desk. Pair the bridge again.',
+    )
+    const service = createService(reader)
+    const messages: ControlStateMessage[] = []
+    const controls = resolveStateControls(config, profileId, pageId, [powerId])!
+
+    await service.subscribe('client-1', {
+      profileId,
+      pageId,
+      controlIds: [powerId],
+      controls,
+      intervalMs: 1000,
+      send: (message) => messages.push(message),
+    })
+
+    expect(messages.at(-1)!.states[0]).toMatchObject({
+      available: false,
+      detail: 'NO LIGHT',
+    })
+  })
+
   it('does not advance revisions when the state is unchanged', async () => {
     const { config, profileId, pageId, brightnessId } = fixture()
     const reader = new FakeLightReader()

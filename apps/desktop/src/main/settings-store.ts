@@ -1,7 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { randomInt } from 'node:crypto'
-import { DEFAULT_HTTP_PORT, LIGHT_DEFAULT_PORT, normalizeProfileId } from '@phonedek/shared'
+import {
+  DEFAULT_HTTP_PORT,
+  LIGHT_DEFAULT_PORT,
+  lightDefaultPort,
+  normalizeProfileId,
+  type LightDeviceType,
+} from '@phonedek/shared'
 import type { Logger } from './logger'
 import { builtinTwitchClientId, sanitizeTwitchClientId } from './twitch-auth'
 
@@ -15,17 +21,28 @@ export interface AutoProfileRule {
   profileId: string
 }
 
-/** One local light device. Elgato is the only provider in this MVP. */
+/**
+ * One local light device.
+ *
+ * Credentials are deliberately absent: Hue application keys and Nanoleaf
+ * tokens live in the encrypted SecretStore, keyed by this device id. The
+ * renderer and the phone only ever see `hasCredential`.
+ */
 export interface LightDeviceSettings {
   /** Stable id referenced by bindings/actions; unique within the list. */
   id: string
   /** Display name. */
   name: string
-  type: 'elgato'
+  type: LightDeviceType
   /** Hostname or IPv4/IPv6 literal, no scheme/path. */
   host: string
-  /** HTTP port; Elgato's default is 9123. */
+  /** HTTP/HTTPS port. Defaults to 9123 (Elgato), 443 (Hue) or 16021 (Nanoleaf). */
   port: number
+  /**
+   * Optional provider-side light id (a Hue light id, for example). Omitted
+   * means the adapter picks the first light the device reports.
+   */
+  lightId?: string
 }
 
 export interface AppSettings {
@@ -76,8 +93,10 @@ export const DEFAULT_LIGHT_PORT = LIGHT_DEFAULT_PORT
 export const MAX_LIGHT_DEVICES = 8
 export const MAX_AUTO_PROFILE_RULES = 16
 const LIGHT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
+const LIGHT_TARGET_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
 const RULE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
 const LIGHT_HOST_PATTERN = /^[A-Za-z0-9][A-Za-z0-9.-]*$/
+const LIGHT_DEVICE_TYPES = new Set<LightDeviceType>(['elgato', 'hue', 'nanoleaf'])
 
 /**
  * Normalize an executable name to the form used by process snapshots:
@@ -172,10 +191,17 @@ export function sanitizeLightHost(value: unknown): string | null {
   return host
 }
 
-export function sanitizeLightPort(value: unknown): number {
+export function sanitizeLightPort(value: unknown, fallback = DEFAULT_LIGHT_PORT): number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 65535
     ? value
-    : DEFAULT_LIGHT_PORT
+    : fallback
+}
+
+/** A provider-side light/panel id, or undefined when it is not safe to use. */
+export function sanitizeLightTarget(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const target = value.trim()
+  return LIGHT_TARGET_PATTERN.test(target) ? target : undefined
 }
 
 function lightName(value: unknown, index: number): string {
@@ -190,6 +216,10 @@ function lightName(value: unknown, index: number): string {
  * Sanitize the persisted device list: drop invalid hosts/providers, cap at 8,
  * and make ids stable, valid and unique. An id is derived from the list index
  * when it is missing or malformed, so a hand-edited settings.json still loads.
+ *
+ * A missing type is treated as `elgato`: every pre-Hue settings file keeps
+ * working unchanged. Credential fields (`username`, `token`) are ignored here;
+ * only the IPC handler consumes them and writes them to the SecretStore.
  */
 export function sanitizeLightDevices(input: unknown): LightDeviceSettings[] {
   if (!Array.isArray(input)) return []
@@ -199,8 +229,9 @@ export function sanitizeLightDevices(input: unknown): LightDeviceSettings[] {
     if (devices.length >= MAX_LIGHT_DEVICES) break
     if (typeof item !== 'object' || item === null || Array.isArray(item)) continue
     const candidate = item as Record<string, unknown>
-    const type = candidate.type
-    if (type !== undefined && type !== 'elgato') continue
+    const type: LightDeviceType =
+      candidate.type === undefined ? 'elgato' : (candidate.type as LightDeviceType)
+    if (!LIGHT_DEVICE_TYPES.has(type)) continue
     const host = sanitizeLightHost(candidate.host)
     if (!host) continue
 
@@ -213,12 +244,14 @@ export function sanitizeLightDevices(input: unknown): LightDeviceSettings[] {
     }
     used.add(id)
 
+    const target = sanitizeLightTarget(candidate.lightId)
     devices.push({
       id,
       name: lightName(candidate.name, index),
-      type: 'elgato',
+      type,
       host,
-      port: sanitizeLightPort(candidate.port),
+      port: sanitizeLightPort(candidate.port, lightDefaultPort(type)),
+      ...(target ? { lightId: target } : {}),
     })
   }
   return devices

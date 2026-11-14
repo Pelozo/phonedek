@@ -7,10 +7,17 @@ import {
   actionsToPlan,
   denormalizeLightValue,
   describeAction,
+  hueBrightnessFromPercent,
+  hueColorTemperatureFromMired,
   kelvinToMired,
   lightControlDefaults,
+  lightDefaultPort,
+  miredFromHueColorTemperature,
+  miredFromNanoleafKelvin,
   miredToKelvin,
+  nanoleafKelvinFromMired,
   normalizeLightValue,
+  percentFromHueBrightness,
   validateConfig,
 } from '../src'
 import { createDefaultConfig } from '../src/defaults'
@@ -182,6 +189,32 @@ describe('light value helpers', () => {
     expect(miredToKelvin(344)).toBe(2907)
     expect(kelvinToMired(7000)).toBe(143)
     expect(kelvinToMired(2900)).toBe(344)
+  })
+
+  it('maps provider brightness and color-temperature ranges', () => {
+    expect(lightDefaultPort('elgato')).toBe(9123)
+    expect(lightDefaultPort('hue')).toBe(443)
+    expect(lightDefaultPort('nanoleaf')).toBe(16021)
+
+    expect(hueBrightnessFromPercent(0)).toBe(1)
+    expect(hueBrightnessFromPercent(50)).toBe(127)
+    expect(hueBrightnessFromPercent(100)).toBe(254)
+    expect(percentFromHueBrightness(1)).toBe(0)
+    expect(percentFromHueBrightness(127)).toBe(50)
+    expect(percentFromHueBrightness(254)).toBe(100)
+
+    expect(hueColorTemperatureFromMired(143)).toBe(153)
+    expect(hueColorTemperatureFromMired(250)).toBe(250)
+    expect(hueColorTemperatureFromMired(600)).toBe(500)
+    expect(miredFromHueColorTemperature(153)).toBe(153)
+    expect(miredFromHueColorTemperature(500)).toBe(344)
+
+    expect(nanoleafKelvinFromMired(143)).toBe(6500)
+    expect(nanoleafKelvinFromMired(250)).toBe(4000)
+    expect(nanoleafKelvinFromMired(344)).toBe(2907)
+    expect(miredFromNanoleafKelvin(1200)).toBe(344)
+    expect(miredFromNanoleafKelvin(4000)).toBe(250)
+    expect(miredFromNanoleafKelvin(6500)).toBe(154)
   })
 
   it('normalizes and denormalizes brightness, temperature and power', () => {

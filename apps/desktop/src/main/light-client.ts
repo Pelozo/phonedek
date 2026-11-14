@@ -6,8 +6,13 @@ import {
 } from '@phonedek/shared'
 import type { LightDeviceSettings } from './settings-store'
 
-/** The subset of `/elgato/lights` the app reads and writes. */
-export interface ElgatoLightState {
+/**
+ * Provider-neutral light state used by the unified source.
+ *
+ * Brightness is 0..100 and temperature is always expressed in the app's mired
+ * range (143..344). Each adapter converts to its own wire format.
+ */
+export interface LightDeviceState {
   on: boolean
   /** 0..100 */
   brightness: number
@@ -15,7 +20,65 @@ export interface ElgatoLightState {
   temperature: number
 }
 
-export type ElgatoLightPatch = Partial<ElgatoLightState>
+export type LightStatePatch = Partial<LightDeviceState>
+
+/** The subset of `/elgato/lights` the app reads and writes. */
+export type ElgatoLightState = LightDeviceState
+export type ElgatoLightPatch = LightStatePatch
+
+/** Common surface for the Elgato, Hue and Nanoleaf adapters. */
+export interface LightDeviceClient {
+  getState(): Promise<LightDeviceState>
+  /** Latest-wins write of a partial state. */
+  setState(patch: LightStatePatch): Promise<LightDeviceState>
+  /** Set one raw app value: brightness 0..100, mired, or power 0/100. */
+  setTarget(target: LightTarget | 'power', value: number): Promise<LightDeviceState>
+}
+
+/**
+ * Collapse concurrent slider ticks into at most one in-flight request plus one
+ * merged pending request. Every caller whose patch was merged resolves with
+ * the final state. The provider writer applies the patch to its own latest
+ * state, so a queued brightness tick cannot resurrect a stale power value.
+ */
+export class LatestWinsQueue {
+  private pending: LightStatePatch | null = null
+  private running: Promise<LightDeviceState> | null = null
+
+  constructor(
+    private readonly write: (patch: LightStatePatch) => Promise<LightDeviceState>,
+  ) {}
+
+  submit(patch: LightStatePatch): Promise<LightDeviceState> {
+    if (this.running) {
+      this.pending = { ...this.pending, ...patch }
+      return this.running
+    }
+
+    const run = (async (): Promise<LightDeviceState> => {
+      try {
+        let next = patch
+        let state = await this.write(next)
+        while (this.pending) {
+          next = this.pending
+          this.pending = null
+          state = await this.write(next)
+        }
+        return state
+      } catch (error) {
+        // A failed write invalidates every patch merged while it was in flight;
+        // their callers already share this rejection.
+        this.pending = null
+        throw error
+      }
+    })()
+
+    this.running = run
+    return run.finally(() => {
+      if (this.running === run) this.running = null
+    })
+  }
+}
 
 export interface ElgatoClientOptions {
   /** Per-request timeout. Defaults to 3000 ms. */
@@ -100,7 +163,7 @@ export function elgatoPutBody(state: ElgatoLightState): {
 }
 
 /** HTTP client for one Elgato Key Light. No auth; the LAN is the trust boundary. */
-export class ElgatoClient {
+export class ElgatoClient implements LightDeviceClient {
   readonly device: LightDeviceSettings
   private readonly timeoutMs: number
   private readonly fetchImpl: typeof fetch

@@ -3,6 +3,7 @@ import type {
   AssetKind,
   ConnectedClient,
   DeckConfig,
+  LightDeviceType,
   MixerSnapshot,
   PressResult,
 } from '@phonedek/shared'
@@ -72,17 +73,24 @@ export interface SettingsView {
 export interface LightDeviceView {
   id: string
   name: string
-  type: 'elgato'
+  type: LightDeviceType
   host: string
   port: number
+  /** Provider-side light id (Hue light), when the user pinned one. */
+  lightId?: string
+  /** True when a Hue application key or Nanoleaf token is stored. */
+  hasCredential?: boolean
 }
 
 /** Live per-device availability for the Settings test row. */
 export interface LightStatusView {
   id: string
   name: string
+  /** Optional for older renderer fixtures; real statuses always include it. */
+  type?: LightDeviceType
   host: string
   port: number
+  lightId?: string
   available: boolean
   on?: boolean
   brightness?: number
@@ -94,15 +102,73 @@ export interface LightStatusView {
 export interface LightDeviceInput {
   id: string
   name: string
-  type?: 'elgato'
+  type?: LightDeviceType
   host: string
   port?: number
+  /** Provider-side light id (Hue); omitted = the bridge's first light. */
+  lightId?: string
+  /**
+   * Write-only Hue application key. Stored in the SecretStore and never
+   * returned in `LightDeviceView`. An empty string clears it.
+   */
+  username?: string
+  /**
+   * Write-only Nanoleaf OpenAPI token. Stored in the SecretStore and never
+   * returned in `LightDeviceView`. An empty string clears it.
+   */
+  token?: string
 }
 
 export interface LightSettingsInput {
   enabled?: boolean
   /** Full replacement list (max 8). Omit to change only `enabled`. */
   lights?: LightDeviceInput[]
+}
+
+/** Minimal Hue light metadata for a future pairing/picker UI. */
+export interface HueLightView {
+  id: string
+  name: string
+  on: boolean
+  brightness: number
+  /** Mireds, 143..344. */
+  temperature: number
+}
+
+export interface HueBridgeView {
+  id: string
+  host: string
+  port: number
+}
+
+export interface HuePairInput {
+  /** Bare bridge hostname or IP address (manual entry or discovery result). */
+  host: string
+  port?: number
+  /** Existing configured bridge to attach the credential to. */
+  deviceId?: string
+  /** Display name when a new device is created. */
+  name?: string
+  /** Hue light id to control; omitted = the bridge's first light. */
+  lightId?: string
+}
+
+export interface HuePairResult extends OperationResult {
+  deviceId?: string
+  /** Lights exposed by the bridge, for the follow-up picker. No credentials. */
+  lights?: HueLightView[]
+}
+
+export interface HueLightResult {
+  ok: boolean
+  lights: HueLightView[]
+  error?: string
+}
+
+export interface HueDiscoveryResult {
+  ok: boolean
+  bridges: HueBridgeView[]
+  error?: string
 }
 
 /** One auto-profile rule as exposed to the renderer. */
@@ -297,6 +363,14 @@ export interface PhoneDeckApi {
   disconnectTwitch(): Promise<OperationResult>
   setLightSettings(input: LightSettingsInput): Promise<OperationResult>
   getLightStatuses(): Promise<LightStatusView[]>
+  /** Pair a Hue bridge after the user presses its physical link button. */
+  pairHueLight(input: HuePairInput): Promise<HuePairResult>
+  /** Lights on a configured Hue bridge, for the device picker. */
+  listHueLights(deviceId: string): Promise<HueLightResult>
+  /** Optional cloud discovery; manual host entry is the fallback. */
+  discoverHueBridges(): Promise<HueDiscoveryResult>
+  /** Force a read of one configured light (connection test). */
+  testLight(deviceId: string): Promise<LightStatusView | null>
   /** Per-app mixer snapshot for a future full-screen mixer (no UI yet). */
   getMixerSnapshot(): Promise<MixerSnapshot>
   setMixerVolume(sessionId: string, volume: number): Promise<PressResult>
@@ -352,6 +426,10 @@ export const IPC = {
   disconnectTwitch: 'phonedek:twitch-disconnect',
   setLightSettings: 'phonedek:lights-set-settings',
   getLightStatuses: 'phonedek:lights-get-statuses',
+  pairHueLight: 'phonedek:lights-pair-hue',
+  listHueLights: 'phonedek:lights-list-hue',
+  discoverHueBridges: 'phonedek:lights-discover-hue',
+  testLight: 'phonedek:lights-test',
   getMixerSnapshot: 'phonedek:mixer-get-snapshot',
   setMixerVolume: 'phonedek:mixer-set-volume',
   setMixerMute: 'phonedek:mixer-set-mute',

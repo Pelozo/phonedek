@@ -404,6 +404,11 @@ function appVolumeUnavailableDetail(error: string): string {
 
 function lightUnavailableDetail(error: string): string {
   if (/no lights? are configured|not configured/i.test(error)) return 'NO LIGHT'
+  // Missing/expired Hue application keys and Nanoleaf tokens are a setup
+  // problem, not an outage. Keep the tile quiet instead of surfacing secrets.
+  if (/credential|application key|token|pair the bridge|unauthorized/i.test(error)) {
+    return 'NO LIGHT'
+  }
   if (/timed out|timeout|unreachable|econn|network|refused|not reachable/i.test(error)) {
     return 'OFFLINE'
   }

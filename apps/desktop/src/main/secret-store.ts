@@ -152,7 +152,7 @@ export class SecretStore {
     if (this.warned) return
     this.warned = true
     this.logger?.warn(
-      'safeStorage encryption is unavailable; Twitch tokens are stored in a 0600 file without OS encryption.',
+      'safeStorage encryption is unavailable; tokens and credentials are stored in a 0600 file without OS encryption.',
     )
   }
 }

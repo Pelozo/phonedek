@@ -16,7 +16,13 @@ import type { MenuItemConstructorOptions, OpenDialogOptions, SaveDialogOptions }
 import { existsSync } from 'node:fs'
 import { basename, isAbsolute, join } from 'node:path'
 import { z } from 'zod'
-import { ActionSchema, controlToActions, lightControlDefaults, validateConfig } from '@phonedek/shared'
+import {
+  ActionSchema,
+  controlToActions,
+  HUE_DEFAULT_PORT,
+  lightControlDefaults,
+  validateConfig,
+} from '@phonedek/shared'
 import type {
   Action,
   AssetKind,
@@ -50,12 +56,17 @@ import { createPairInfo } from './qr'
 import { DeckServer, type PressContext } from './server'
 import {
   MAX_AUTO_PROFILE_RULES,
+  MAX_LIGHT_DEVICES,
   SettingsStore,
   sanitizeAutoProfileRules,
   sanitizeLightDevices,
+  sanitizeLightHost,
+  sanitizeLightPort,
+  sanitizeLightTarget,
   sanitizeObsHost,
   sanitizeObsPort,
   type AppSettings,
+  type LightDeviceSettings,
 } from './settings-store'
 import { UpdateService } from './updater'
 import { isRunningAppSigned, resolveUpdatePolicy } from './update-policy'
@@ -77,12 +88,20 @@ import { SecretStore } from './secret-store'
 import { TwitchAuth, sanitizeTwitchClientId } from './twitch-auth'
 import { TwitchClient } from './twitch-client'
 import { TwitchStateSource } from './twitch-source'
-import { LightStateSource } from './light-source'
+import { LightStateSource, type LightDeviceStatus } from './light-source'
+import { LightCredentialStore, isValidLightCredential } from './light-credentials'
+import { HueClient, discoverHueBridges, pairHueBridge, type HueLightInfo } from './hue-client'
 import { IPC } from '../shared/api'
 import type {
   AppState,
   AssetPickResult,
   AutoProfileSettingsInput,
+  HueDiscoveryResult,
+  HueLightResult,
+  HueLightView,
+  HuePairInput,
+  HuePairResult,
+  LightDeviceView,
   LightSettingsInput,
   LightStatusView,
   ObsInputsResult,
@@ -126,6 +145,7 @@ let twitchAuth: TwitchAuth | null = null
 let twitchClient: TwitchClient | null = null
 let twitchSource: TwitchStateSource | null = null
 let lightSource: LightStateSource | null = null
+let lightCredentials: LightCredentialStore | null = null
 let pointerSender: PointerSender | null = null
 let pointerRouter: PointerRouter | null = null
 let keyboardSender: KeyboardSender | null = null
@@ -266,7 +286,7 @@ async function buildServerInfo(): Promise<ServerInfoView> {
       twitchClientId: currentSettings.twitchClientId,
       twitchHasToken: twitchAuth?.hasToken === true,
       lightsEnabled: lightsActive(currentSettings),
-      lights: currentSettings.lights.map((device) => ({ ...device })),
+      lights: lightDeviceViews(currentSettings.lights),
       autoProfileEnabled: currentSettings.autoProfileEnabled,
       autoProfileRules: currentSettings.autoProfileRules.map((rule) => ({ ...rule })),
     },
@@ -289,6 +309,57 @@ async function buildServerInfo(): Promise<ServerInfoView> {
 /** Lights are advertised/read only when enabled and at least one device exists. */
 function lightsActive(current: AppSettings): boolean {
   return current.lightsEnabled && current.lights.length > 0
+}
+
+/**
+ * Renderer-safe device list. Credentials only appear as a boolean; the Hue
+ * application key and Nanoleaf token never leave the main process.
+ */
+function lightDeviceViews(devices: readonly LightDeviceSettings[]): LightDeviceView[] {
+  return devices.map((device) => {
+    const stored = lightCredentials?.get(device.id)
+    const hasCredential =
+      device.type === 'hue'
+        ? Boolean(stored?.username)
+        : device.type === 'nanoleaf'
+          ? Boolean(stored?.token)
+          : false
+    return {
+      id: device.id,
+      name: device.name,
+      type: device.type,
+      host: device.host,
+      port: device.port,
+      ...(device.lightId ? { lightId: device.lightId } : {}),
+      hasCredential,
+    }
+  })
+}
+
+function hueLightViews(lights: readonly HueLightInfo[]): HueLightView[] {
+  return lights.map((light) => ({
+    id: light.id,
+    name: light.name,
+    on: light.state.on,
+    brightness: light.state.brightness,
+    temperature: light.state.temperature,
+  }))
+}
+
+function lightStatusView(status: LightDeviceStatus): LightStatusView {
+  return {
+    id: status.id,
+    name: status.name,
+    type: status.type,
+    host: status.host,
+    port: status.port,
+    ...(status.lightId ? { lightId: status.lightId } : {}),
+    available: status.available,
+    ...(status.state?.on === undefined ? {} : { on: status.state.on }),
+    ...(status.state?.brightness === undefined ? {} : { brightness: status.state.brightness }),
+    ...(status.state?.temperature === undefined ? {} : { temperature: status.state.temperature }),
+    ...(status.error ? { error: status.error } : {}),
+  }
 }
 
 /**
@@ -344,7 +415,7 @@ async function buildState(): Promise<AppState> {
       twitchClientId: settings.get().twitchClientId,
       twitchHasToken: twitchAuth?.hasToken === true,
       lightsEnabled: lightsActive(settings.get()),
-      lights: settings.get().lights.map((device) => ({ ...device })),
+      lights: lightDeviceViews(settings.get().lights),
       autoProfileEnabled: settings.get().autoProfileEnabled,
       autoProfileRules: settings.get().autoProfileRules.map((rule) => ({ ...rule })),
     },
@@ -910,20 +981,50 @@ function registerIpc(): void {
         patch.lightsEnabled = value.enabled
       }
 
+      const previousLights = settings.get().lights
       if (value.lights !== undefined) {
         if (!Array.isArray(value.lights)) {
           return { ok: false, error: 'Lights must be a list', state: await buildState() }
         }
-        if (value.lights.length > 8) {
-          return { ok: false, error: 'At most 8 lights can be configured', state: await buildState() }
+        if (value.lights.length > MAX_LIGHT_DEVICES) {
+          return {
+            ok: false,
+            error: `At most ${MAX_LIGHT_DEVICES} lights can be configured`,
+            state: await buildState(),
+          }
         }
         const devices = sanitizeLightDevices(value.lights)
         if (devices.length !== value.lights.length) {
           return {
             ok: false,
             error:
-              'Each light needs an Elgato type, a name and a bare hostname or IP address (no scheme or path).',
+              'Each light needs a supported type, a name and a bare hostname or IP address (no scheme or path).',
             state: await buildState(),
+          }
+        }
+        for (const [index, input] of value.lights.entries()) {
+          const device = devices[index]!
+          if (
+            input.username !== undefined &&
+            (device.type !== 'hue' ||
+              (input.username !== '' && !isValidLightCredential(input.username)))
+          ) {
+            return {
+              ok: false,
+              error: 'Hue application keys may contain letters, numbers, dots, dashes and underscores.',
+              state: await buildState(),
+            }
+          }
+          if (
+            input.token !== undefined &&
+            (device.type !== 'nanoleaf' ||
+              (input.token !== '' && !isValidLightCredential(input.token)))
+          ) {
+            return {
+              ok: false,
+              error: 'Nanoleaf tokens may contain letters, numbers, dots, dashes and underscores.',
+              state: await buildState(),
+            }
           }
         }
         patch.lights = devices
@@ -931,6 +1032,27 @@ function registerIpc(): void {
       }
 
       const updated = settings.update(patch)
+
+      if (value.lights !== undefined && lightCredentials) {
+        const previousById = new Map(previousLights.map((device) => [device.id, device]))
+        for (const [index, input] of value.lights.entries()) {
+          const device = updated.lights[index]!
+          const previous = previousById.get(device.id)
+          // A type switch must not carry the old provider's secret forward.
+          if (previous && previous.type !== device.type) lightCredentials.clear(device.id)
+          if (input.username !== undefined) {
+            lightCredentials.set(device.id, { username: input.username })
+          }
+          if (input.token !== undefined) {
+            lightCredentials.set(device.id, { token: input.token })
+          }
+        }
+        const liveIds = new Set(updated.lights.map((device) => device.id))
+        for (const previous of previousLights) {
+          if (!liveIds.has(previous.id)) lightCredentials.clear(previous.id)
+        }
+      }
+
       lightSource?.configure(updated.lights)
       await controlState?.noteLightChanged()
       await pushServerInfo()
@@ -994,20 +1116,171 @@ function registerIpc(): void {
   ipcMain.handle(IPC.getLightStatuses, async (): Promise<LightStatusView[]> => {
     if (!lightSource) return []
     const statuses = await lightSource.listStatuses()
-    return statuses.map((status) => ({
-      id: status.id,
-      name: status.name,
-      host: status.host,
-      port: status.port,
-      available: status.available,
-      ...(status.state?.on === undefined ? {} : { on: status.state.on }),
-      ...(status.state?.brightness === undefined ? {} : { brightness: status.state.brightness }),
-      ...(status.state?.temperature === undefined
-        ? {}
-        : { temperature: status.state.temperature }),
-      ...(status.error ? { error: status.error } : {}),
-    }))
+    return statuses.map(lightStatusView)
   })
+
+  ipcMain.handle(
+    IPC.pairHueLight,
+    async (_event, input: unknown): Promise<HuePairResult> => {
+      const failed = async (error: string): Promise<HuePairResult> => ({
+        ok: false,
+        error,
+        state: await buildState(),
+      })
+      if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+        return failed('Hue pairing needs a bridge host.')
+      }
+      const value = input as HuePairInput
+      const host = sanitizeLightHost(value.host)
+      if (!host) return failed('Enter the Hue bridge IP address or hostname (no scheme or path).')
+      const port = sanitizeLightPort(value.port, HUE_DEFAULT_PORT)
+      const requestedLightId =
+        value.lightId === undefined ? undefined : sanitizeLightTarget(value.lightId)
+      if (value.lightId !== undefined && !requestedLightId) {
+        return failed('The Hue light id contains unsupported characters.')
+      }
+
+      const current = settings.get().lights
+      const requestedId = typeof value.deviceId === 'string' ? value.deviceId.trim() : ''
+      const existing = requestedId
+        ? current.find((device) => device.id === requestedId)
+        : current.find(
+            (device) => device.type === 'hue' && device.host === host && device.port === port,
+          )
+      if (requestedId && !existing) {
+        return failed('That configured light no longer exists.')
+      }
+      if (existing && existing.type !== 'hue') {
+        return failed('That device is not a Hue bridge.')
+      }
+
+      let paired: Awaited<ReturnType<typeof pairHueBridge>>
+      try {
+        paired = await pairHueBridge(
+          { host, port },
+          { attempts: 30, retryDelayMs: 1000, timeoutMs: 4000 },
+        )
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        logger.warn(`Hue pairing failed for ${host}:${port}: ${reason}`)
+        return failed(reason)
+      }
+
+      let deviceId: string
+      let nextDevices: LightDeviceSettings[]
+      if (existing) {
+        deviceId = existing.id
+        nextDevices = current.map((device) =>
+          device.id === deviceId
+            ? {
+                ...device,
+                type: 'hue',
+                host,
+                port,
+                ...(requestedLightId ? { lightId: requestedLightId } : {}),
+              }
+            : device,
+        )
+      } else {
+        if (current.length >= MAX_LIGHT_DEVICES) {
+          return failed(`At most ${MAX_LIGHT_DEVICES} lights can be configured.`)
+        }
+        let suffix = 1
+        while (current.some((device) => device.id === `hue-${suffix}`)) suffix += 1
+        deviceId = `hue-${suffix}`
+        const rawName = typeof value.name === 'string' ? value.name.trim().slice(0, 40) : ''
+        nextDevices = [
+          ...current,
+          {
+            id: deviceId,
+            name: rawName || `Hue ${host}`,
+            type: 'hue',
+            host,
+            port,
+            ...(requestedLightId ? { lightId: requestedLightId } : {}),
+          },
+        ]
+      }
+
+      lightCredentials?.set(deviceId, { username: paired.username })
+      settings.update({ lights: nextDevices, lightsEnabled: true })
+      lightSource?.configure(settings.get().lights)
+      await controlState?.noteLightChanged()
+      await pushServerInfo()
+
+      let lights: HueLightView[] = []
+      try {
+        const device = settings.get().lights.find((item) => item.id === deviceId)
+        if (device) {
+          lights = hueLightViews(
+            await new HueClient(device, { username: paired.username }).listLights(),
+          )
+        }
+      } catch (error) {
+        // Pairing succeeded even if the follow-up list fails; the UI can retry.
+        logger.warn(
+          `Hue light list failed after pairing ${host}:${port}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        )
+      }
+
+      return {
+        ok: true,
+        deviceId,
+        lights,
+        state: await buildState(),
+      }
+    },
+  )
+
+  ipcMain.handle(IPC.listHueLights, async (_event, deviceId: unknown): Promise<HueLightResult> => {
+    if (typeof deviceId !== 'string') {
+      return { ok: false, lights: [], error: 'Choose a configured Hue bridge.' }
+    }
+    const device = settings.get().lights.find((item) => item.id === deviceId)
+    if (!device || device.type !== 'hue') {
+      return { ok: false, lights: [], error: 'That device is not a Hue bridge.' }
+    }
+    const username = lightCredentials?.get(device.id)?.username
+    if (!username) {
+      return { ok: false, lights: [], error: 'Pair the Hue bridge first.' }
+    }
+    try {
+      const lights = await new HueClient(device, { username }).listLights()
+      return { ok: true, lights: hueLightViews(lights) }
+    } catch (error) {
+      return {
+        ok: false,
+        lights: [],
+        error: (error instanceof Error ? error.message : String(error)).slice(0, 200),
+      }
+    }
+  })
+
+  ipcMain.handle(IPC.discoverHueBridges, async (): Promise<HueDiscoveryResult> => {
+    try {
+      return { ok: true, bridges: await discoverHueBridges() }
+    } catch (error) {
+      return {
+        ok: false,
+        bridges: [],
+        error: (error instanceof Error ? error.message : String(error)).slice(0, 200),
+      }
+    }
+  })
+
+  ipcMain.handle(
+    IPC.testLight,
+    async (_event, deviceId: unknown): Promise<LightStatusView | null> => {
+      if (!lightSource || typeof deviceId !== 'string') return null
+      try {
+        return lightStatusView(await lightSource.test(deviceId))
+      } catch {
+        return null
+      }
+    },
+  )
 
   ipcMain.handle(IPC.getMixerSnapshot, async (): Promise<MixerSnapshot> => {
     if (!appVolumeSource) {
@@ -1410,6 +1683,7 @@ async function bootstrap(): Promise<void> {
     logger.warn(`OS secret encryption is unavailable: ${(error as Error).message}`)
   }
   const secrets = new SecretStore({ dir: userData, safeStorage: secretStorage, logger })
+  lightCredentials = new LightCredentialStore(secrets)
   twitchAuth = new TwitchAuth({
     clientId: settings.get().twitchClientId,
     enabled: settings.get().twitchEnabled,
@@ -1429,7 +1703,10 @@ async function bootstrap(): Promise<void> {
   })
   if (settings.get().twitchEnabled) void twitchAuth.start()
 
-  lightSource = new LightStateSource({ logger })
+  lightSource = new LightStateSource({
+    logger,
+    ...(lightCredentials ? { credentials: lightCredentials } : {}),
+  })
   lightSource.configure(settings.get().lights)
   lightSource.onChange((lightId) => {
     void controlState?.noteLightWritten(lightId)
