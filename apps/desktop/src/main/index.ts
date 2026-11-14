@@ -65,6 +65,7 @@ import {
   createAppVolumeSource,
   type AppVolumeSource,
 } from './app-volume-source'
+import { MixerService } from './mixer-service'
 import {
   createMediaController,
   WindowsMediaProbe,
@@ -118,6 +119,7 @@ let mediaProbe: WindowsMediaProbe | null = null
 let mediaSource: MediaController | null = null
 let microphone: Microphone | null = null
 let appVolumeSource: AppVolumeSource | null = null
+let mixer: MixerService | null = null
 let obsClient: ObsClient | null = null
 let obsSource: ObsStateSource | null = null
 let twitchAuth: TwitchAuth | null = null
@@ -1549,6 +1551,17 @@ async function bootstrap(): Promise<void> {
     logger.info('Live control state disabled: no system volume, microphone or OBS reader on this host')
   }
 
+  mixer = appVolumeSource
+    ? new MixerService({
+        source: appVolumeSource,
+        logger,
+        ...(controlState
+          ? { onWriteApplied: () => controlState?.noteAppVolumeChanged() }
+          : {}),
+      })
+    : null
+  if (mixer) logger.info('Live mixer transport enabled (subscribe + 1 Hz snapshots)')
+
   const router = new ControlInputRouter({
     execute: (actions, label) => executor.execute(actions, label),
     applyMedia: async (control, value, label) => {
@@ -1667,6 +1680,7 @@ async function bootstrap(): Promise<void> {
     keyboardSupported: () =>
       keyboardRouter !== null && settings.get().allowKeyboardControl,
     mixerSupported: () => appVolumeSource !== null,
+    mixer: mixer ?? undefined,
     controlState: controlState ?? undefined,
     controlStateSupported: controlState !== null,
     obsSupported: () => obsClient?.connected === true,
@@ -1704,6 +1718,7 @@ async function bootstrap(): Promise<void> {
       pointerRouter?.clientDisconnected(client.id)
       keyboardRouter?.clientDisconnected(client.id)
       inputRouter?.clientDisconnected(client.id)
+      mixer?.unsubscribe(client.id)
     },
     importBackup: async (filePath, preview) => {
       if (!mainWindow || mainWindow.isDestroyed()) {
@@ -1915,6 +1930,7 @@ if (!gotLock) {
       try {
         await inputRouter?.dispose()
         controlState?.dispose()
+        mixer?.dispose()
         twitchAuth?.dispose()
         obsSource?.dispose()
         obsClient?.dispose()

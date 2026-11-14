@@ -31,6 +31,8 @@ import type {
   InputResult,
   KeyboardMessage,
   KeyboardResult,
+  MixerCommandMessage,
+  MixerStateMessage,
   PointerMessage,
   PointerResult,
   PressMessage,
@@ -40,6 +42,7 @@ import type {
 } from '@phonedek/shared'
 import type { AssetStore } from './assets'
 import { resolveStateControls, type ControlStateSubscription } from './control-state'
+import type { MixerSubscription } from './mixer-service'
 import { isKeyboardLauncher } from './keyboard-input'
 import {
   previewBackup,
@@ -96,6 +99,13 @@ export function serverCapabilities(
 export interface ControlStateHub {
   subscribe(clientId: string, subscription: ControlStateSubscription): void | Promise<void>
   unsubscribe(clientId: string): void
+}
+
+/** Live mixer transport surface used by the server; injected in tests. */
+export interface MixerHub {
+  subscribe(clientId: string, subscription: MixerSubscription): void | Promise<void>
+  unsubscribe(clientId: string): void
+  command(command: MixerCommandMessage): Promise<{ ok: boolean; error?: string }>
 }
 
 interface ControlNeeds {
@@ -200,6 +210,8 @@ export interface DeckServerOptions {
   controlState?: ControlStateHub
   /** Advertise `control-state-v1`; true only when a reader was built. */
   controlStateSupported?: boolean
+  /** Live per-app mixer transport; omitted when this host has no mixer. */
+  mixer?: MixerHub
   /** Dynamic: advertise `obs-v1` only while the OBS client is identified. */
   obsSupported?: () => boolean
   /** Dynamic: advertise `twitch-v1` only while Twitch is authorized. */
@@ -225,6 +237,10 @@ interface ClientRecord {
   brightnessTimes: number[]
   pointerTimes: number[]
   watchTimes: number[]
+  /** `mixer` start/stop attempts, so a flapping client cannot spam the service. */
+  mixerTimes: number[]
+  /** `mixerCommand` writes; a fast fader can legitimately exceed 1/s. */
+  mixerCommandTimes: number[]
   /** Last APP_OUTDATED message sent to this client, to avoid spamming. */
   outdatedNotice: string | null
 }
@@ -241,6 +257,8 @@ const INPUT_RATE_LIMIT = 60
 const POINTER_RATE_LIMIT = 120
 const BRIGHTNESS_RATE_LIMIT = 20
 const WATCH_RATE_LIMIT = 2
+const MIXER_SUBSCRIBE_RATE_LIMIT = 2
+const MIXER_COMMAND_RATE_LIMIT = 25
 const MAX_IMPORT_BYTES = 300 * 1024 * 1024
 const IMPORT_TEMP_PREFIX = 'phonedek-import-'
 
@@ -533,6 +551,11 @@ export class DeckServer {
         // ignore
       }
       try {
+        this.options.mixer?.unsubscribe(record.info.id)
+      } catch {
+        // ignore
+      }
+      try {
         record.ws.close(1001, 'Server stopping')
       } catch {
         // ignore
@@ -670,6 +693,8 @@ export class DeckServer {
       brightnessTimes: [],
       pointerTimes: [],
       watchTimes: [],
+      mixerTimes: [],
+      mixerCommandTimes: [],
       outdatedNotice: null,
     }
     this.clients.set(id, record)
@@ -691,6 +716,11 @@ export class DeckServer {
         this.options.controlState?.unsubscribe(record.info.id)
       } catch (error) {
         this.options.logger?.warn(`Control state cleanup failed: ${String(error)}`)
+      }
+      try {
+        this.options.mixer?.unsubscribe(record.info.id)
+      } catch (error) {
+        this.options.logger?.warn(`Mixer cleanup failed: ${String(error)}`)
       }
       try {
         this.options.onClientClosed?.(record.info)
@@ -727,6 +757,20 @@ export class DeckServer {
 
     const result = parseClientMessage(parsed)
     if (!result.ok) {
+      // A well-shaped mixer command with an out-of-range value still gets a
+      // correlated mixerResult instead of a generic protocol error.
+      const candidate = parsed as { type?: unknown; requestId?: unknown } | null
+      if (
+        candidate !== null &&
+        typeof candidate === 'object' &&
+        candidate.type === 'mixerCommand' &&
+        typeof candidate.requestId === 'string' &&
+        candidate.requestId.length >= 1 &&
+        candidate.requestId.length <= 64
+      ) {
+        this.sendMixerResult(record, candidate.requestId, { ok: false, error: result.error })
+        return
+      }
       this.send(record.ws, { type: 'error', code: 'BAD_MESSAGE', message: result.error })
       return
     }
@@ -756,6 +800,12 @@ export class DeckServer {
         break
       case 'watch':
         await this.handleWatch(record, message)
+        break
+      case 'mixer':
+        await this.handleMixer(record, message)
+        break
+      case 'mixerCommand':
+        await this.handleMixerCommand(record, message)
         break
     }
   }
@@ -816,6 +866,102 @@ export class DeckServer {
         `Could not subscribe to control state: ${error instanceof Error ? error.message : String(error)}`,
       )
     }
+  }
+
+  /**
+   * Client-side gate for the live mixer: the host must support per-app audio
+   * and the phone must have advertised `mixer-v1` in hello. `stop` is always
+   * honoured so a stale subscription is always released.
+   */
+  private async handleMixer(
+    record: ClientRecord,
+    message: Extract<ClientMessage, { type: 'mixer' }>,
+  ): Promise<void> {
+    if (message.phase === 'stop') {
+      try {
+        this.options.mixer?.unsubscribe(record.info.id)
+      } catch (error) {
+        this.options.logger?.warn(`Mixer cleanup failed: ${String(error)}`)
+      }
+      return
+    }
+
+    if (!this.options.mixer || this.options.mixerSupported?.() !== true) return
+    if (!record.info.capabilities?.includes(MIXER_CAPABILITY)) return
+
+    const now = Date.now()
+    record.mixerTimes = record.mixerTimes.filter((time) => now - time < 1000)
+    if (record.mixerTimes.length >= MIXER_SUBSCRIBE_RATE_LIMIT) {
+      this.send(record.ws, {
+        type: 'error',
+        code: 'RATE_LIMITED',
+        message: 'Too many mixer updates, slow down',
+      })
+      return
+    }
+    record.mixerTimes.push(now)
+
+    try {
+      await this.options.mixer.subscribe(record.info.id, {
+        send: (state: MixerStateMessage) => this.send(record.ws, state),
+      })
+    } catch (error) {
+      this.options.logger?.warn(
+        `Could not subscribe to the mixer: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+  }
+
+  private sendMixerResult(
+    record: ClientRecord,
+    requestId: string,
+    result: { ok: boolean; error?: string },
+  ): void {
+    this.send(record.ws, {
+      type: 'mixerResult',
+      requestId,
+      ok: result.ok,
+      ...(result.error ? { error: result.error } : {}),
+    })
+  }
+
+  private async handleMixerCommand(
+    record: ClientRecord,
+    message: MixerCommandMessage,
+  ): Promise<void> {
+    const now = Date.now()
+    record.mixerCommandTimes = record.mixerCommandTimes.filter((time) => now - time < 1000)
+    if (record.mixerCommandTimes.length >= MIXER_COMMAND_RATE_LIMIT) {
+      this.sendMixerResult(record, message.requestId, {
+        ok: false,
+        error: 'Too many mixer commands, slow down',
+      })
+      return
+    }
+    record.mixerCommandTimes.push(now)
+
+    if (!this.options.mixer || this.options.mixerSupported?.() !== true) {
+      this.sendMixerResult(record, message.requestId, {
+        ok: false,
+        error: 'Per-app audio is not available on this desktop.',
+      })
+      return
+    }
+    if (!record.info.capabilities?.includes(MIXER_CAPABILITY)) {
+      this.sendMixerResult(record, message.requestId, {
+        ok: false,
+        error: 'Update the PhoneDeck app on your phone to control the mixer.',
+      })
+      return
+    }
+
+    let result: { ok: boolean; error?: string }
+    try {
+      result = await this.options.mixer.command(message)
+    } catch (error) {
+      result = { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+    this.sendMixerResult(record, message.requestId, result)
   }
 
   private async handlePress(record: ClientRecord, message: PressMessage): Promise<void> {
@@ -1478,6 +1624,11 @@ export class DeckServer {
         }
         try {
           this.options.controlState?.unsubscribe(record.info.id)
+        } catch {
+          // ignore
+        }
+        try {
+          this.options.mixer?.unsubscribe(record.info.id)
         } catch {
           // ignore
         }

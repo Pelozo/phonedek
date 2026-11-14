@@ -212,6 +212,57 @@ export const KeyboardMessageSchema = z
     }
   })
 
+/** One mixer channel on the wire (`mixerState` / IPC snapshots). */
+export const MixerSessionSchema = z.object({
+  id: z.string().min(1).max(512),
+  process: z.string().min(1).max(200),
+  name: z.string().min(1).max(200),
+  volume: z.number().int().min(0).max(100),
+  muted: z.boolean(),
+  available: z.boolean().optional(),
+})
+
+/** Server → subscribed phone: live mixer snapshot (~1 Hz while subscribed). */
+export const MixerStateMessageSchema = z.object({
+  type: z.literal('mixerState'),
+  available: z.boolean(),
+  sessions: z.array(MixerSessionSchema).max(128),
+  reason: z.string().max(300).optional(),
+  updatedAt: z.number().int().min(0),
+})
+
+/** Client subscription to the live mixer; one per connection. */
+export const MixerMessageSchema = z.object({
+  type: z.literal('mixer'),
+  phase: z.enum(['start', 'stop']),
+})
+
+/** Client write of one mixer channel; at least one field is required. */
+export const MixerCommandMessageSchema = z
+  .object({
+    type: z.literal('mixerCommand'),
+    requestId: z.string().min(1).max(64),
+    sessionId: z.string().min(1).max(512),
+    volume: z.number().finite().min(0).max(100).optional(),
+    muted: z.boolean().optional(),
+  })
+  .superRefine((message, ctx) => {
+    if (message.volume === undefined && message.muted === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'mixerCommand requires volume or muted',
+      })
+    }
+  })
+
+/** Server → phone acknowledgement of a `mixerCommand`. */
+export const MixerResultMessageSchema = z.object({
+  type: z.literal('mixerResult'),
+  requestId: z.string().min(1).max(64),
+  ok: z.boolean(),
+  error: z.string().max(300).optional(),
+})
+
 export const ClientMessageSchema = z.union([
   z.object({
     type: z.literal('hello'),
@@ -239,6 +290,8 @@ export const ClientMessageSchema = z.union([
   PointerMessageSchema,
   WatchMessageSchema,
   KeyboardMessageSchema,
+  MixerMessageSchema,
+  MixerCommandMessageSchema,
   z.object({ type: z.literal('ping'), t: z.number().finite() }),
 ])
 
@@ -270,4 +323,14 @@ export function isWatchMessage(message: ClientMessage): message is Extract<Clien
 
 export function isKeyboardMessage(message: ClientMessage): message is Extract<ClientMessage, { type: 'keyboard' }> {
   return message.type === 'keyboard'
+}
+
+export function isMixerMessage(message: ClientMessage): message is Extract<ClientMessage, { type: 'mixer' }> {
+  return message.type === 'mixer'
+}
+
+export function isMixerCommandMessage(
+  message: ClientMessage,
+): message is Extract<ClientMessage, { type: 'mixerCommand' }> {
+  return message.type === 'mixerCommand'
 }

@@ -465,8 +465,9 @@ export interface MixerSession {
 }
 
 /**
- * Full-screen mixer snapshot. Additive IPC/state only; no wire message.
- * `ambiguous` lists process names that produced more than one session.
+ * Full-screen mixer snapshot. `ambiguous` lists process names that produced
+ * more than one live session. Also the shape used by the `mixerState` wire
+ * message (additive, `mixer-v1`).
  */
 export interface MixerSnapshot {
   available: boolean
@@ -475,6 +476,20 @@ export interface MixerSnapshot {
   ambiguous?: string[]
   /** Why the mixer is unavailable (unsupported platform, helper missing). */
   reason?: string
+  updatedAt: number
+}
+
+/**
+ * Live mixer snapshot pushed to a subscribed phone. Old peers that never send
+ * `mixer` simply never receive it.
+ */
+export interface MixerStateMessage {
+  type: 'mixerState'
+  available: boolean
+  sessions: MixerSession[]
+  /** Why the mixer is unavailable (unsupported platform, helper missing). */
+  reason?: string
+  /** Desktop clock in ms when this snapshot was produced. */
   updatedAt: number
 }
 
@@ -880,6 +895,37 @@ export interface KeyboardResult {
   error?: string
 }
 
+/**
+ * Subscribe to the live per-app mixer for this connection. One subscription
+ * per client; `stop` (or closing the socket) releases it. The desktop sends an
+ * immediate `mixerState` snapshot and then polls at ~1 Hz while subscribed.
+ */
+export interface MixerMessage {
+  type: 'mixer'
+  phase: 'start' | 'stop'
+}
+
+/**
+ * Set one mixer channel by session id. At least one of `volume`/`muted` must
+ * be present; both may be sent to apply volume and mute together.
+ */
+export interface MixerCommandMessage {
+  type: 'mixerCommand'
+  requestId: string
+  /** Opaque desktop session id from the latest `mixerState`. 1..512 chars. */
+  sessionId: string
+  /** 0..100 percent; clamped by the desktop. */
+  volume?: number
+  muted?: boolean
+}
+
+/** Acknowledges a `mixerCommand` (success or a human-readable error). */
+export interface MixerResult {
+  requestId: string
+  ok: boolean
+  error?: string
+}
+
 export type ClientMessage =
   | {
       type: 'hello'
@@ -893,6 +939,8 @@ export type ClientMessage =
   | PointerMessage
   | WatchMessage
   | KeyboardMessage
+  | MixerMessage
+  | MixerCommandMessage
   | { type: 'ping'; t: number }
 
 /* ------------------------------------------------------------------ */
@@ -1028,6 +1076,8 @@ export type ServerMessage =
   | BrightnessMessage
   | ProfileMessage
   | ControlStateMessage
+  | MixerStateMessage
+  | ({ type: 'mixerResult' } & MixerResult)
   | ({ type: 'keyboardResult' } & KeyboardResult)
   | { type: 'navigate'; direction: 'next' | 'prev' | 'goto'; pageId?: string }
   | { type: 'error'; code: string; message: string }
