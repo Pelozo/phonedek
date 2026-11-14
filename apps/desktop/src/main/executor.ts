@@ -1,6 +1,6 @@
 import { basename } from 'node:path'
 import { actionsToPlan, isScreenshotShortcut } from '@phonedek/shared'
-import type { ConfigAction, KeyboardPlanStep, PressResult } from '@phonedek/shared'
+import type { AppVolumeAction, ConfigAction, KeyboardPlanStep, PressResult } from '@phonedek/shared'
 import type { HostActions } from './host-actions'
 import type { KeySender } from './key-sender'
 import type { Logger } from './logger'
@@ -34,7 +34,7 @@ export class ActionExecutor {
     this.onScreenshot = options.onScreenshot
   }
 
-  execute(actions: readonly ConfigAction[], label = 'button'): Promise<PressResult> {
+  execute(actions: readonly (ConfigAction | AppVolumeAction)[], label = 'button'): Promise<PressResult> {
     const task = this.queue.then(() => this.run(actions, label))
     this.queue = task.then(
       () => undefined,
@@ -115,7 +115,10 @@ export class ActionExecutor {
     }
   }
 
-  private async run(actions: readonly ConfigAction[], label: string): Promise<PressResult> {
+  private async run(
+    actions: readonly (ConfigAction | AppVolumeAction)[],
+    label: string,
+  ): Promise<PressResult> {
     const plan = actionsToPlan(actions)
     if (plan.length === 0) {
       this.logger?.info(`Pressed "${label}" (no actions)`)
@@ -162,6 +165,12 @@ export class ActionExecutor {
               throw new Error('Local lights are not available on this desktop.')
             }
             await this.host.runLightAction(step)
+            break
+          case 'appVolume':
+            if (!this.host.runAppVolumeAction) {
+              throw new Error('Per-app audio is not available on this desktop.')
+            }
+            await this.host.runAppVolumeAction(step)
             break
           default:
             if (KEYBOARD_KINDS.has(step.kind)) {

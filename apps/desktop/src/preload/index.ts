@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { Action, AssetKind, ConnectedClient, DeckConfig, PressResult } from '@phonedek/shared'
+import type { Action, AssetKind, ConnectedClient, DeckConfig, MixerSnapshot, PressResult } from '@phonedek/shared'
 import { IPC } from '../shared/api'
 import type {
   AppState,
@@ -70,6 +70,11 @@ const api: PhoneDeckApi = {
   setLightSettings: (input: LightSettingsInput): Promise<OperationResult> =>
     ipcRenderer.invoke(IPC.setLightSettings, input),
   getLightStatuses: (): Promise<LightStatusView[]> => ipcRenderer.invoke(IPC.getLightStatuses),
+  getMixerSnapshot: (): Promise<MixerSnapshot> => ipcRenderer.invoke(IPC.getMixerSnapshot),
+  setMixerVolume: (sessionId: string, volume: number): Promise<PressResult> =>
+    ipcRenderer.invoke(IPC.setMixerVolume, sessionId, volume),
+  setMixerMute: (sessionId: string, muted: boolean): Promise<PressResult> =>
+    ipcRenderer.invoke(IPC.setMixerMute, sessionId, muted),
   setAutoProfileSettings: (input: AutoProfileSettingsInput): Promise<OperationResult> =>
     ipcRenderer.invoke(IPC.setAutoProfileSettings, input),
   exportConfig: (): Promise<OperationResult> => ipcRenderer.invoke(IPC.exportConfig),

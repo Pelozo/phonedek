@@ -184,6 +184,53 @@ internal interface IAudioEndpointVolume {
     [PreserveSig] int GetMute([MarshalAs(UnmanagedType.Bool)] out bool mute);
 }
 
+// Per-application sessions. IAudioSessionManager2 inherits the two
+// IAudioSessionManager methods, so they stay first in vtable order.
+[ComImport, Guid("77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IAudioSessionManager2 {
+    [PreserveSig] int GetAudioSessionControl(ref Guid audioSessionGuid, int streamFlags, out IntPtr sessionControl);
+    [PreserveSig] int GetSimpleAudioVolume(ref Guid audioSessionGuid, int streamFlags, out IntPtr audioVolume);
+    [PreserveSig] int GetSessionEnumerator(out IAudioSessionEnumerator sessionEnumerator);
+    [PreserveSig] int RegisterSessionNotification(IntPtr sessionNotification);
+    [PreserveSig] int UnregisterSessionNotification(IntPtr sessionNotification);
+    [PreserveSig] int RegisterDuckNotification(string sessionId, IntPtr duckNotification);
+    [PreserveSig] int UnregisterDuckNotification(IntPtr duckNotification);
+}
+
+[ComImport, Guid("E2F5BB11-0570-40CA-ACDD-3AA01277DEE8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IAudioSessionEnumerator {
+    [PreserveSig] int GetCount(out int sessionCount);
+    [PreserveSig] int GetSession(int sessionIndex, out IAudioSessionControl2 session);
+}
+
+// IAudioSessionControl2 inherits IAudioSessionControl; all nine base methods
+// must be declared first or the process ids land in the wrong slots.
+[ComImport, Guid("BF448B81-5F84-4EB4-ABE7-8CBEA94F9C8A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IAudioSessionControl2 {
+    [PreserveSig] int GetState(out int state);
+    [PreserveSig] int GetDisplayName(out IntPtr name);
+    [PreserveSig] int SetDisplayName(string name, ref Guid eventContext);
+    [PreserveSig] int GetIconPath(out IntPtr path);
+    [PreserveSig] int SetIconPath(string path, ref Guid eventContext);
+    [PreserveSig] int GetGroupingParam(out Guid groupingParam);
+    [PreserveSig] int SetGroupingParam(ref Guid groupingParam, ref Guid eventContext);
+    [PreserveSig] int RegisterAudioSessionNotification(IntPtr notify);
+    [PreserveSig] int UnregisterAudioSessionNotification(IntPtr notify);
+    [PreserveSig] int GetSessionIdentifier(out IntPtr id);
+    [PreserveSig] int GetSessionInstanceIdentifier(out IntPtr id);
+    [PreserveSig] int GetProcessId(out uint processId);
+    [PreserveSig] int IsSystemSoundsSession();
+    [PreserveSig] int SetDuckingPreference([MarshalAs(UnmanagedType.Bool)] bool preference);
+}
+
+[ComImport, Guid("87CE5498-68D6-44E5-9215-6DA47EF883D8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface ISimpleAudioVolume {
+    [PreserveSig] int SetMasterVolume(float level, ref Guid eventContext);
+    [PreserveSig] int GetMasterVolume(out float level);
+    [PreserveSig] int SetMute([MarshalAs(UnmanagedType.Bool)] bool mute, ref Guid eventContext);
+    [PreserveSig] int GetMute([MarshalAs(UnmanagedType.Bool)] out bool mute);
+}
+
 public static class PhoneDeckVolume {
     public static void Set(float scalar) {
         var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject();
@@ -294,6 +341,182 @@ public static class PhoneDeckCapture {
         Get(out level, out muted);
         SetMute(!muted);
         muted = !muted;
+    }
+}
+
+public class AudioSessionInfo {
+    public string Id;
+    public uint Pid;
+    public string Process;
+    public string Name;
+    public double Volume;
+    public bool Muted;
+}
+
+// Per-application render sessions (IAudioSessionManager2 / ISimpleAudioVolume).
+public static class PhoneDeckSessions {
+    private static string TakeString(IntPtr pointer) {
+        if (pointer == IntPtr.Zero) return string.Empty;
+        try { return Marshal.PtrToStringUni(pointer) ?? string.Empty; }
+        finally { Marshal.FreeCoTaskMem(pointer); }
+    }
+
+    private static IMMDeviceEnumerator OpenEnumerator() {
+        return (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject();
+    }
+
+    private static IAudioSessionManager2 OpenManager(out IMMDevice device, out IMMDeviceEnumerator enumerator) {
+        enumerator = OpenEnumerator();
+        int hr = enumerator.GetDefaultAudioEndpoint(0, 1, out device); // eRender, eMultimedia
+        if (hr != 0) {
+            if (Marshal.IsComObject(enumerator)) Marshal.ReleaseComObject(enumerator);
+            Marshal.ThrowExceptionForHR(hr);
+        }
+        Guid iid = typeof(IAudioSessionManager2).GUID;
+        object obj;
+        hr = device.Activate(ref iid, 1, IntPtr.Zero, out obj); // CLSCTX_INPROC_SERVER
+        if (hr != 0) {
+            if (Marshal.IsComObject(device)) Marshal.ReleaseComObject(device);
+            if (Marshal.IsComObject(enumerator)) Marshal.ReleaseComObject(enumerator);
+            Marshal.ThrowExceptionForHR(hr);
+        }
+        return (IAudioSessionManager2)obj;
+    }
+
+    private static void CloseManager(IAudioSessionManager2 manager, IMMDevice device, IMMDeviceEnumerator enumerator) {
+        if (manager != null && Marshal.IsComObject(manager)) Marshal.ReleaseComObject(manager);
+        if (device != null && Marshal.IsComObject(device)) Marshal.ReleaseComObject(device);
+        if (enumerator != null && Marshal.IsComObject(enumerator)) Marshal.ReleaseComObject(enumerator);
+    }
+
+    private static AudioSessionInfo ReadSession(IAudioSessionControl2 control, int index) {
+        int state;
+        if (control.GetState(out state) == 0 && state == 2) return null; // AudioSessionStateExpired
+        if (control.IsSystemSoundsSession() == 0) return null;
+
+        uint pid = 0;
+        control.GetProcessId(out pid);
+
+        string process = string.Empty;
+        try {
+            if (pid > 0) {
+                process = System.Diagnostics.Process.GetProcessById((int)pid).ProcessName;
+            }
+        } catch (Exception) { }
+
+        IntPtr displayPointer;
+        string display = control.GetDisplayName(out displayPointer) == 0 ? TakeString(displayPointer) : string.Empty;
+        if (display.StartsWith("@")) display = string.Empty;
+
+        IntPtr instancePointer;
+        string id = control.GetSessionInstanceIdentifier(out instancePointer) == 0
+            ? TakeString(instancePointer)
+            : string.Empty;
+        if (string.IsNullOrEmpty(id)) id = pid + ":" + index;
+        if (string.IsNullOrEmpty(process)) process = display;
+
+        float level = 1f;
+        bool muted = false;
+        var volume = control as ISimpleAudioVolume;
+        if (volume != null) {
+            if (volume.GetMasterVolume(out level) != 0) level = 1f;
+            if (volume.GetMute(out muted) != 0) muted = false;
+        }
+
+        return new AudioSessionInfo {
+            Id = id,
+            Pid = pid,
+            Process = process,
+            Name = string.IsNullOrEmpty(display) ? process : display,
+            Volume = Math.Max(0.0, Math.Min(1.0, level)),
+            Muted = muted
+        };
+    }
+
+    private static System.Collections.Generic.List<AudioSessionInfo> ReadAll() {
+        var result = new System.Collections.Generic.List<AudioSessionInfo>();
+        IMMDevice device;
+        IMMDeviceEnumerator enumerator;
+        var manager = OpenManager(out device, out enumerator);
+        IAudioSessionEnumerator sessions = null;
+        try {
+            int hr = manager.GetSessionEnumerator(out sessions);
+            if (hr != 0) Marshal.ThrowExceptionForHR(hr);
+            int count;
+            hr = sessions.GetCount(out count);
+            if (hr != 0) Marshal.ThrowExceptionForHR(hr);
+            for (int index = 0; index < count; index++) {
+                IAudioSessionControl2 control;
+                hr = sessions.GetSession(index, out control);
+                if (hr != 0 || control == null) continue;
+                try {
+                    var info = ReadSession(control, index);
+                    if (info != null) result.Add(info);
+                } finally {
+                    if (Marshal.IsComObject(control)) Marshal.ReleaseComObject(control);
+                }
+            }
+        } finally {
+            if (sessions != null && Marshal.IsComObject(sessions)) Marshal.ReleaseComObject(sessions);
+            CloseManager(manager, device, enumerator);
+        }
+        return result;
+    }
+
+    public static AudioSessionInfo[] List() {
+        return ReadAll().ToArray();
+    }
+
+    private static void WithSession(string id, Action<ISimpleAudioVolume> action) {
+        IMMDevice device;
+        IMMDeviceEnumerator enumerator;
+        var manager = OpenManager(out device, out enumerator);
+        IAudioSessionEnumerator sessions = null;
+        try {
+            int hr = manager.GetSessionEnumerator(out sessions);
+            if (hr != 0) Marshal.ThrowExceptionForHR(hr);
+            int count;
+            sessions.GetCount(out count);
+            for (int index = 0; index < count; index++) {
+                IAudioSessionControl2 control;
+                hr = sessions.GetSession(index, out control);
+                if (hr != 0 || control == null) continue;
+                try {
+                    IntPtr instancePointer;
+                    string sessionId = control.GetSessionInstanceIdentifier(out instancePointer) == 0
+                        ? TakeString(instancePointer)
+                        : string.Empty;
+                    if (string.IsNullOrEmpty(sessionId)) sessionId = control.GetProcessId(out uint pid) == 0 ? pid + ":" + index : index.ToString();
+                    if (!string.Equals(sessionId, id, StringComparison.Ordinal)) continue;
+                    var volume = control as ISimpleAudioVolume;
+                    if (volume == null) throw new InvalidOperationException("Audio session has no volume control: " + id);
+                    action(volume);
+                    return;
+                } finally {
+                    if (Marshal.IsComObject(control)) Marshal.ReleaseComObject(control);
+                }
+            }
+            throw new InvalidOperationException("Audio session not found: " + id);
+        } finally {
+            if (sessions != null && Marshal.IsComObject(sessions)) Marshal.ReleaseComObject(sessions);
+            CloseManager(manager, device, enumerator);
+        }
+    }
+
+    public static void SetVolume(string id, float scalar) {
+        WithSession(id, delegate(ISimpleAudioVolume volume) {
+            Guid context = Guid.Empty;
+            int hr = volume.SetMasterVolume(Math.Max(0f, Math.Min(1f, scalar)), ref context);
+            if (hr != 0) Marshal.ThrowExceptionForHR(hr);
+        });
+    }
+
+    public static void SetMute(string id, bool muted) {
+        WithSession(id, delegate(ISimpleAudioVolume volume) {
+            Guid context = Guid.Empty;
+            int hr = volume.SetMute(muted, ref context);
+            if (hr != 0) Marshal.ThrowExceptionForHR(hr);
+        });
     }
 }
 '@
@@ -540,6 +763,29 @@ function Toggle-InputMute {
     return @{ value = [double]$level; muted = [bool]$muted }
 }
 
+function Get-AudioSessions {
+    $list = @()
+    foreach ($session in [PhoneDeckSessions]::List()) {
+        $list += @{
+            id = [string]$session.Id
+            process = [string]$session.Process
+            name = [string]$session.Name
+            volume = [double]$session.Volume
+            muted = [bool]$session.Muted
+        }
+    }
+    return @{ sessions = $list }
+}
+
+function Set-AppSessionVolume([string]$Id, [int]$Level) {
+    $clamped = [Math]::Max(0, [Math]::Min(100, $Level))
+    [PhoneDeckSessions]::SetVolume($Id, [single]($clamped / 100.0))
+}
+
+function Set-AppSessionMute([string]$Id, [bool]$Muted) {
+    [PhoneDeckSessions]::SetMute($Id, $Muted)
+}
+
 function Invoke-Step($Step) {
     switch ($Step.kind) {
         'set-volume' { Set-SystemVolume ([int]$Step.level) }
@@ -548,6 +794,9 @@ function Invoke-Step($Step) {
         'get-input' { return Get-InputState }
         'set-input-mute' { Set-InputMute ([bool]$Step.muted) }
         'toggle-input-mute' { return Toggle-InputMute }
+        'list-audio-sessions' { return Get-AudioSessions }
+        'set-app-volume' { Set-AppSessionVolume ([string]$Step.id) ([int]$Step.level) }
+        'set-app-mute' { Set-AppSessionMute ([string]$Step.id) ([bool]$Step.muted) }
         'keys' { Send-Chord $Step.keys ([int]$Step.holdMs) ([string]$Step.action) }
         'text' { Send-Text ([string]$Step.text) ([int]$Step.perCharMs) }
         'delay' { Start-Sleep -Milliseconds ([Math]::Max(0, [Math]::Min(60000, [int]$Step.ms))) }
@@ -586,7 +835,7 @@ try {
             if ($stepData -is [hashtable]) {
                 foreach ($key in $stepData.Keys) { $response[$key] = $stepData[$key] }
             }
-            $response = $response | ConvertTo-Json -Compress
+            $response = $response | ConvertTo-Json -Compress -Depth 6
         } catch {
             $message = $_.Exception.Message
             if (-not $message) { $message = 'Unknown keyboard helper error' }

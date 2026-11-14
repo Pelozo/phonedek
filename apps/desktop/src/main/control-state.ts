@@ -1,4 +1,6 @@
 import type {
+  AppVolumeMatch,
+  AppVolumeStateTarget,
   ControlStateEntry,
   ControlStateMessage,
   DeckButton,
@@ -15,13 +17,22 @@ import { formatMediaDetail } from './media-source'
 import type { ObsInputReading, ObsStateReader, ObsStatusReading } from './obs-source'
 import type { TwitchStateReader, TwitchStatusReading } from './twitch-source'
 import type { LightStateReader, LightStatusReading } from './light-source'
+import type { AppVolumeReader, AppVolumeReading } from './app-volume-source'
+import { appMatchKey } from './app-volume-source'
 
 /** Minimum allowed watch poll interval, matching the shared protocol schema. */
 export const MIN_WATCH_INTERVAL_MS = 500
 export const DEFAULT_WATCH_INTERVAL_MS = 1000
 const WRITE_GRACE_MS = 1500
 
-export type ControlStateSource = 'volume' | 'mic' | 'media' | 'obs' | 'twitch' | 'light'
+export type ControlStateSource =
+  | 'volume'
+  | 'mic'
+  | 'media'
+  | 'obs'
+  | 'twitch'
+  | 'light'
+  | 'appVolume'
 
 export interface StateControl {
   id: string
@@ -41,6 +52,10 @@ export interface StateControl {
   lightId?: string
   /** Light power/brightness/temperature target (value control or state tile). */
   lightTarget?: LightTarget
+  /** Per-app audio session selector (value control or state tile). */
+  appMatch?: AppVolumeMatch
+  /** Per-app volume vs mute readout on a status tile. */
+  appTarget?: AppVolumeStateTarget
 }
 
 export interface AbsoluteVolumeControl {
@@ -121,6 +136,23 @@ export function isObsVolumeControl(button: DeckButton): boolean {
   )
 }
 
+/** A value-bearing slider/dial that reads and writes one app's audio session. */
+export function isAppVolumeControl(button: DeckButton): boolean {
+  const control = button.control
+  return (
+    control !== undefined &&
+    control.kind !== 'trackpad' &&
+    control.binding.type === 'appVolume' &&
+    control.binding.target === 'volume' &&
+    control.emit === 'value'
+  )
+}
+
+/** A normal button with a per-app volume/mute read-only state binding. */
+export function isAppVolumeStateButton(button: DeckButton): boolean {
+  return button.state?.type === 'appVolume'
+}
+
 /**
  * Resolve the page's absolute-volume controls. Returns null when the profile
  * or page does not exist; unknown requested ids are ignored.
@@ -191,8 +223,20 @@ export function resolveStateControls(
       if (controls.length >= 32) break
       continue
     }
+    if (state?.type === 'appVolume') {
+      controls.push({
+        id: button.id,
+        label: button.label,
+        source: 'appVolume',
+        appTarget: state.target,
+        appMatch: { ...state.match },
+      })
+      if (controls.length >= 32) break
+      continue
+    }
     const obs = isObsVolumeControl(button) ? button.control : null
     const light = isLightControl(button) ? button.control : null
+    const app = isAppVolumeControl(button) ? button.control : null
     const source: ControlStateSource | null = isAbsoluteVolumeControl(button)
       ? 'volume'
       : isMicGainControl(button)
@@ -203,7 +247,9 @@ export function resolveStateControls(
             ? 'obs'
             : light
               ? 'light'
-              : null
+              : app
+                ? 'appVolume'
+                : null
     if (!source) continue
     if (requested !== null && !requested.has(button.id)) continue
     if (source === 'obs' && obs && obs.kind !== 'trackpad' && obs.binding.type === 'obs') {
@@ -221,6 +267,14 @@ export function resolveStateControls(
         source,
         ...(light.binding.light ? { lightId: light.binding.light } : {}),
         lightTarget: light.binding.target,
+      })
+    } else if (source === 'appVolume' && app && app.kind !== 'trackpad' && app.binding.type === 'appVolume') {
+      controls.push({
+        id: button.id,
+        label: button.label,
+        source,
+        appTarget: 'volume',
+        appMatch: { ...app.binding.match },
       })
     } else {
       controls.push({ id: button.id, label: button.label, source })
@@ -248,6 +302,7 @@ export interface ControlStateServiceOptions {
   obsReader?: ObsStateReader | null
   twitchReader?: TwitchStateReader | null
   lightReader?: LightStateReader | null
+  appReader?: AppVolumeReader | null
   logger?: Logger
   now?: () => number
   defaultIntervalMs?: number
@@ -279,6 +334,7 @@ function stateSignature(entry: ControlStateEntry): string {
     entry.playing === undefined ? '' : entry.playing ? '1' : '0',
     entry.title ?? '',
     entry.artist ?? '',
+    entry.error ?? '',
   ].join('|')
 }
 
@@ -290,7 +346,8 @@ function isStatusReading(
     | ObsInputReading
     | ObsStatusReading
     | TwitchStatusReading
-    | LightStatusReading,
+    | LightStatusReading
+    | AppVolumeReading,
 ): reading is ObsStatusReading | TwitchStatusReading | LightStatusReading {
   return typeof (reading as ObsStatusReading).detail === 'string'
 }
@@ -330,7 +387,19 @@ function unavailableDetail(source: ControlStateSource, error: string): string {
   if (source === 'twitch') return twitchUnavailableDetail(error)
   if (source === 'light') return lightUnavailableDetail(error)
   if (source === 'media') return mediaUnavailableDetail(error)
+  if (source === 'appVolume') return appVolumeUnavailableDetail(error)
   return error.slice(0, 60)
+}
+
+function appVolumeUnavailableDetail(error: string): string {
+  if (/no audio session|not found|no session|no longer available|no match/i.test(error)) {
+    return 'NO SESSION'
+  }
+  if (/not available on this desktop|not supported|virtual audio/i.test(error)) {
+    return 'UNSUPPORTED'
+  }
+  if (/pactl|pulseaudio|pipewire|helper|win32|com/i.test(error)) return 'NO MIXER'
+  return error.slice(0, 60) || 'NO SESSION'
 }
 
 function lightUnavailableDetail(error: string): string {
@@ -362,9 +431,11 @@ function readingEntry(
     | ObsStatusReading
     | TwitchStatusReading
     | LightStatusReading
+    | AppVolumeReading
     | null,
   error: string | null,
   max?: number,
+  appTarget?: AppVolumeStateTarget,
 ): ControlStateEntry {
   if (source === 'media') {
     if (error) {
@@ -407,6 +478,23 @@ function readingEntry(
       available: false,
       detail: error ? unavailableDetail(source, error) : 'Unavailable',
       ...(error ? { error: error.slice(0, 200) } : {}),
+    }
+  }
+  if (source === 'appVolume') {
+    const appReading = reading as AppVolumeReading
+    const level = Math.max(0, Math.min(100, Math.round(appReading.level)))
+    const muted = appReading.muted === true
+    return {
+      controlId,
+      revision: 0,
+      value: level / 100,
+      available: true,
+      muted,
+      active: !muted,
+      detail: muted ? 'MUTED' : appTarget === 'mute' ? 'LIVE' : `${level}%`,
+      ...(appReading.ambiguous
+        ? { error: 'Multiple audio sessions match; using the first.' }
+        : {}),
     }
   }
   if (isStatusReading(reading)) {
@@ -462,6 +550,7 @@ export class ControlStateService {
   private readonly obsReader?: ObsStateReader | null
   private readonly twitchReader?: TwitchStateReader | null
   private readonly lightReader?: LightStateReader | null
+  private readonly appReader?: AppVolumeReader | null
   private readonly logger?: Logger
   private readonly now: () => number
   private readonly defaultIntervalMs: number
@@ -486,6 +575,7 @@ export class ControlStateService {
     this.obsReader = options.obsReader
     this.twitchReader = options.twitchReader
     this.lightReader = options.lightReader
+    this.appReader = options.appReader
     this.logger = options.logger
     this.now = options.now ?? Date.now
     this.defaultIntervalMs = clampInterval(options.defaultIntervalMs, DEFAULT_WATCH_INTERVAL_MS)
@@ -660,6 +750,37 @@ export class ControlStateService {
     void lightId
     if (this.disposed) return Promise.resolve()
     return this.enqueue(async () => {
+      this.suppressUntil = Math.max(this.suppressUntil, this.now() + this.writeGraceMs)
+      await this.refresh(undefined, false, true)
+    })
+  }
+
+  /**
+   * A per-app volume/mute write just succeeded. Trust the written value for a
+   * short grace period and send every subscriber a fresh snapshot.
+   */
+  noteAppVolumeWritten(
+    match: AppVolumeMatch,
+    level: number,
+    muted?: boolean,
+  ): Promise<void> {
+    if (this.disposed || !Number.isFinite(level)) return Promise.resolve()
+    const reading: AppVolumeReading = {
+      level: Math.max(0, Math.min(100, Math.round(level))),
+      muted: muted ?? false,
+    }
+    return this.enqueue(async () => {
+      this.appReader?.setKnown?.(match, reading)
+      this.suppressUntil = Math.max(this.suppressUntil, this.now() + this.writeGraceMs)
+      await this.refresh(undefined, true)
+    })
+  }
+
+  /** External/app change or an untrusted mute result: invalidate and refresh. */
+  noteAppVolumeChanged(match?: AppVolumeMatch): Promise<void> {
+    if (this.disposed) return Promise.resolve()
+    return this.enqueue(async () => {
+      this.appReader?.invalidate(match)
       this.suppressUntil = Math.max(this.suppressUntil, this.now() + this.writeGraceMs)
       await this.refresh(undefined, false, true)
     })
@@ -867,6 +988,42 @@ export class ControlStateService {
       }
     }
 
+    const appControls = watched.filter((control) => control.source === 'appVolume')
+    if (appControls.length > 0) {
+      const groups = new Map<string, typeof appControls>()
+      for (const control of appControls) {
+        const key = appMatchKey(control.appMatch ?? {})
+        const group = groups.get(key)
+        if (group) group.push(control)
+        else groups.set(key, [control])
+      }
+      for (const controls of groups.values()) {
+        const first = controls[0]!
+        let reading: AppVolumeReading | null = null
+        let error: string | null = null
+        if (!this.appReader) {
+          error = 'Per-app volume is not available on this desktop.'
+        } else {
+          try {
+            reading = await this.appReader.read(first.appMatch ?? {})
+          } catch (caught) {
+            error = caught instanceof Error ? caught.message : String(caught)
+          }
+        }
+        for (const control of controls) {
+          this.updateEntry(
+            control.key,
+            control.controlId,
+            'appVolume',
+            reading,
+            error,
+            undefined,
+            control.appTarget ?? 'volume',
+          )
+        }
+      }
+    }
+
     const now = this.now()
     for (const sub of [...this.subscriptions.values()]) {
       if (immediate === sub) {
@@ -903,6 +1060,8 @@ export class ControlStateService {
     twitchTarget?: TwitchStateTarget
     lightId?: string
     lightTarget?: LightTarget
+    appMatch?: AppVolumeMatch
+    appTarget?: AppVolumeStateTarget
   }> {
     const controls = new Map<
       string,
@@ -917,6 +1076,8 @@ export class ControlStateService {
         twitchTarget?: TwitchStateTarget
         lightId?: string
         lightTarget?: LightTarget
+        appMatch?: AppVolumeMatch
+        appTarget?: AppVolumeStateTarget
       }
     >()
     for (const sub of this.subscriptions.values()) {
@@ -935,6 +1096,8 @@ export class ControlStateService {
           ...(meta?.twitchTarget ? { twitchTarget: meta.twitchTarget } : {}),
           ...(meta?.lightId ? { lightId: meta.lightId } : {}),
           ...(meta?.lightTarget ? { lightTarget: meta.lightTarget } : {}),
+          ...(meta?.appMatch ? { appMatch: { ...meta.appMatch } } : {}),
+          ...(meta?.appTarget ? { appTarget: meta.appTarget } : {}),
         })
       }
     }
@@ -962,12 +1125,14 @@ export class ControlStateService {
       | ObsStatusReading
       | TwitchStatusReading
       | LightStatusReading
+      | AppVolumeReading
       | null,
     error: string | null,
     max?: number,
+    appTarget?: AppVolumeStateTarget,
   ): void {
     const existing = this.entries.get(key)
-    const candidate = readingEntry(controlId, source, reading, error, max)
+    const candidate = readingEntry(controlId, source, reading, error, max, appTarget)
     if (existing && stateSignature(existing) === stateSignature(candidate)) return
 
     const revision = (existing?.revision ?? this.revisions.get(key) ?? 0) + 1

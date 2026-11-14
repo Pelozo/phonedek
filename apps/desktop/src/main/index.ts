@@ -17,7 +17,14 @@ import { existsSync } from 'node:fs'
 import { basename, isAbsolute, join } from 'node:path'
 import { z } from 'zod'
 import { ActionSchema, controlToActions, lightControlDefaults, validateConfig } from '@phonedek/shared'
-import type { Action, AssetKind, DeckConfig, LightBinding, PressResult } from '@phonedek/shared'
+import type {
+  Action,
+  AssetKind,
+  DeckConfig,
+  LightBinding,
+  MixerSnapshot,
+  PressResult,
+} from '@phonedek/shared'
 import { AssetStore } from './assets'
 import { applyBackupImport, readBackupFile, writeBackupFile } from './backup'
 import { ConfigStore } from './config-store'
@@ -54,6 +61,10 @@ import { UpdateService } from './updater'
 import { isRunningAppSigned, resolveUpdatePolicy } from './update-policy'
 import { createVolumeReader, HelperVolumeProbe, type VolumeReader } from './volume-source'
 import { createMicrophone, parseWindowsInputPayload, type Microphone } from './microphone-source'
+import {
+  createAppVolumeSource,
+  type AppVolumeSource,
+} from './app-volume-source'
 import {
   createMediaController,
   WindowsMediaProbe,
@@ -106,6 +117,7 @@ let volumeProbe: HelperVolumeProbe | null = null
 let mediaProbe: WindowsMediaProbe | null = null
 let mediaSource: MediaController | null = null
 let microphone: Microphone | null = null
+let appVolumeSource: AppVolumeSource | null = null
 let obsClient: ObsClient | null = null
 let obsSource: ObsStateSource | null = null
 let twitchAuth: TwitchAuth | null = null
@@ -593,6 +605,17 @@ function registerIpc(): void {
             return { ok: false, error: error instanceof Error ? error.message : String(error) }
           }
         }
+        if (button.control.binding.type === 'appVolume') {
+          if (!appVolumeSource) return { ok: false, error: 'Per-app volume is not available on this desktop.' }
+          const level = value * 100
+          try {
+            await appVolumeSource.setVolume(button.control.binding.match, level)
+            await controlState?.noteAppVolumeWritten(button.control.binding.match, level)
+            return { ok: true }
+          } catch (error) {
+            return { ok: false, error: error instanceof Error ? error.message : String(error) }
+          }
+        }
         return executor.executeVolume(value * 100, `test ${button.label || 'control'}`)
       }
 
@@ -970,6 +993,59 @@ function registerIpc(): void {
     }))
   })
 
+  ipcMain.handle(IPC.getMixerSnapshot, async (): Promise<MixerSnapshot> => {
+    if (!appVolumeSource) {
+      return {
+        available: false,
+        sessions: [],
+        reason:
+          process.platform === 'darwin'
+            ? 'Per-app audio is not available on macOS without a virtual audio driver.'
+            : 'Per-app audio is not available on this desktop.',
+        updatedAt: Date.now(),
+      }
+    }
+    return appVolumeSource.snapshot()
+  })
+
+  ipcMain.handle(
+    IPC.setMixerVolume,
+    async (_event, sessionId: unknown, volume: unknown): Promise<PressResult> => {
+      if (!appVolumeSource) return { ok: false, error: 'Per-app audio is not available on this desktop.' }
+      if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 512) {
+        return { ok: false, error: 'Invalid mixer session' }
+      }
+      if (typeof volume !== 'number' || !Number.isFinite(volume) || volume < 0 || volume > 100) {
+        return { ok: false, error: 'Mixer volume must be between 0 and 100' }
+      }
+      try {
+        await appVolumeSource.setVolumeById(sessionId, volume)
+        await controlState?.noteAppVolumeChanged()
+        return { ok: true }
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    },
+  )
+
+  ipcMain.handle(
+    IPC.setMixerMute,
+    async (_event, sessionId: unknown, muted: unknown): Promise<PressResult> => {
+      if (!appVolumeSource) return { ok: false, error: 'Per-app audio is not available on this desktop.' }
+      if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 512) {
+        return { ok: false, error: 'Invalid mixer session' }
+      }
+      if (typeof muted !== 'boolean') return { ok: false, error: 'Mixer mute must be a boolean' }
+      try {
+        await appVolumeSource.setMuteById(sessionId, muted)
+        await controlState?.noteAppVolumeChanged()
+        return { ok: true }
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    },
+  )
+
   ipcMain.handle(
     IPC.setScreenshotDirectory,
     async (_event, input: unknown): Promise<OperationResult> => {
@@ -1263,6 +1339,19 @@ async function bootstrap(): Promise<void> {
         }
       : undefined
   microphone = createMicrophone(process.platform, windowsMic ? { windows: windowsMic } : {})
+  appVolumeSource = createAppVolumeSource(process.platform, {
+    ...(process.platform === 'win32' && volumeProbe
+      ? { windowsTransport: volumeProbe }
+      : {}),
+    logger,
+  })
+  if (appVolumeSource && process.platform === 'win32') {
+    logger.info('Per-app audio mixer enabled through the Core Audio helper')
+  } else if (appVolumeSource) {
+    logger.info('Per-app audio mixer enabled through pactl sink inputs')
+  } else if (process.platform === 'darwin') {
+    logger.info('Per-app audio mixer disabled: macOS has no public per-app volume API')
+  }
   if (process.platform === 'win32') {
     mediaProbe = new WindowsMediaProbe(logger)
     mediaSource = createMediaController('win32', { windowsBackend: mediaProbe })
@@ -1376,6 +1465,15 @@ async function bootstrap(): Promise<void> {
       await lightSource.execute(step)
       await controlState?.noteLightWritten(step.light)
     },
+    runAppVolumeAction: async (step) => {
+      if (!appVolumeSource) throw new Error('Per-app audio is not available on this desktop.')
+      if (step.action === 'setMute') {
+        await appVolumeSource.setMute(step.match, step.muted)
+      } else {
+        await appVolumeSource.toggleMute(step.match)
+      }
+      await controlState?.noteAppVolumeChanged(step.match)
+    },
   })
   executor = new ActionExecutor(keySender, host, logger, {
     onScreenshot: (path) => {
@@ -1405,6 +1503,7 @@ async function bootstrap(): Promise<void> {
     volumeReader ||
     microphone ||
     mediaSource ||
+    appVolumeSource ||
     settings.get().obsEnabled ||
     settings.get().twitchEnabled ||
     lightsActive(settings.get())
@@ -1412,6 +1511,7 @@ async function bootstrap(): Promise<void> {
           ...(volumeReader ? { reader: volumeReader } : {}),
           ...(microphone ? { micReader: microphone } : {}),
           ...(mediaSource ? { mediaReader: mediaSource } : {}),
+          ...(appVolumeSource ? { appReader: appVolumeSource } : {}),
           ...(obsSource ? { obsReader: obsSource } : {}),
           ...(twitchSource ? { twitchReader: twitchSource } : {}),
           ...(lightSource ? { lightReader: lightSource } : {}),
@@ -1423,6 +1523,7 @@ async function bootstrap(): Promise<void> {
       volumeReader ? 'volume' : null,
       microphone ? 'microphone' : null,
       mediaSource ? 'media' : null,
+      appVolumeSource ? 'mixer' : null,
       obsSource ? 'OBS' : null,
       twitchSource ? 'Twitch' : null,
       lightSource && lightsActive(settings.get()) ? 'lights' : null,
@@ -1464,6 +1565,20 @@ async function bootstrap(): Promise<void> {
           const input = await obsSource.setVolume(control.binding.input, percent)
           await controlState?.noteObsWritten(input, percent)
           logger.info(`Set OBS input "${input}" to ${Math.round(percent)}% for "${label}"`)
+          return { ok: true }
+        } catch (error) {
+          return { ok: false, error: error instanceof Error ? error.message : String(error) }
+        }
+      }
+      if (control.binding.type === 'appVolume') {
+        if (!appVolumeSource) return { ok: false, error: 'Per-app volume is not available on this desktop.' }
+        const level = Math.max(0, Math.min(100, value * 100))
+        try {
+          await appVolumeSource.setVolume(control.binding.match, level)
+          await controlState?.noteAppVolumeWritten(control.binding.match, level)
+          logger.info(
+            `Set app volume for "${control.binding.match.process ?? 'app'}" to ${Math.round(level)}% for "${label}"`,
+          )
           return { ok: true }
         } catch (error) {
           return { ok: false, error: error instanceof Error ? error.message : String(error) }
@@ -1537,6 +1652,7 @@ async function bootstrap(): Promise<void> {
     pointerSupported: pointerRouter !== null,
     keyboardSupported: () =>
       keyboardRouter !== null && settings.get().allowKeyboardControl,
+    mixerSupported: () => appVolumeSource !== null,
     controlState: controlState ?? undefined,
     controlStateSupported: controlState !== null,
     obsSupported: () => obsClient?.connected === true,

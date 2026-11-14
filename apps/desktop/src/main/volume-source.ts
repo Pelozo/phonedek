@@ -257,7 +257,7 @@ export function createVolumeReader(
 }
 
 interface ProbeCommand {
-  resolve: (payload: { value?: unknown; muted?: unknown }) => void
+  resolve: (payload: { value?: unknown; muted?: unknown; sessions?: unknown }) => void
   reject: (error: Error) => void
   timer: NodeJS.Timeout
 }
@@ -295,12 +295,27 @@ export class HelperVolumeProbe {
     return this.sendStep({ kind: 'get-input' })
   }
 
+  /** Enumerate render audio sessions for the per-app mixer. */
+  listAudioSessions(): Promise<{ sessions?: unknown }> {
+    return this.sendStep({ kind: 'list-audio-sessions' })
+  }
+
+  /** Set one session's volume by opaque helper id (0..100). */
+  async setAppVolume(id: string, level: number): Promise<void> {
+    await this.sendStep({ kind: 'set-app-volume', id, level })
+  }
+
+  /** Set one session's mute by opaque helper id. */
+  async setAppMute(id: string, muted: boolean): Promise<void> {
+    await this.sendStep({ kind: 'set-app-mute', id, muted })
+  }
+
   dispose(): void {
     this.disposed = true
     this.kill()
   }
 
-  private async sendStep(step: object): Promise<{ value?: unknown; muted?: unknown }> {
+  private async sendStep(step: object): Promise<{ value?: unknown; muted?: unknown; sessions?: unknown }> {
     await this.ensureStarted()
     const child = this.child
     if (!child) throw new Error('Volume probe helper is not running')
@@ -416,6 +431,7 @@ export class HelperVolumeProbe {
         error?: string
         value?: unknown
         muted?: unknown
+        sessions?: unknown
       }
       try {
         message = JSON.parse(line) as typeof message
@@ -432,8 +448,13 @@ export class HelperVolumeProbe {
       if (!pending) continue
       this.pending.delete(message.id)
       clearTimeout(pending.timer)
-      if (message.ok) pending.resolve({ value: message.value, muted: message.muted })
-      else pending.reject(new Error(message.error ?? 'Volume probe failed'))
+      if (message.ok) {
+        pending.resolve({
+          value: message.value,
+          muted: message.muted,
+          sessions: message.sessions,
+        })
+      } else pending.reject(new Error(message.error ?? 'Volume probe failed'))
     }
   }
 

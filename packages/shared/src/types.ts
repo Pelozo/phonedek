@@ -29,6 +29,9 @@ export const TWITCH_CAPABILITY = 'twitch-v1' as const
 /** Desktop capability for local smart-light control and readback. */
 export const LIGHT_CAPABILITY = 'light-v1' as const
 
+/** Desktop capability for per-application audio volume/mute control. */
+export const MIXER_CAPABILITY = 'mixer-v1' as const
+
 /** Elgato Key Light / Key Light Air / Key Light Mini default HTTP port. */
 export const LIGHT_DEFAULT_PORT = 9123
 
@@ -404,8 +407,83 @@ export interface LightStateBinding {
   light?: string
 }
 
-/** State binding union; OBS, Twitch and light status tiles. */
-export type StateBinding = ObsStateBinding | TwitchStateBinding | LightStateBinding
+/**
+ * Selects application audio sessions by process/application name.
+ *
+ * Matching is case-insensitive, ignores a leading path and an optional `.exe`
+ * suffix. Omitted = no session matches (the control reports `NO SESSION`).
+ */
+export interface AppVolumeMatch {
+  /** Process or application name, e.g. `discord` or `Google Chrome`. */
+  process?: string
+}
+
+/**
+ * Per-application volume slider/dial.
+ *
+ * The wire value is normalized 0..1; the editor stores `min: 0`, `max: 100`,
+ * `unit: '%'`, so 42% is 0.42 on the phone. When several sessions match the
+ * process, the first one is controlled and the state reports the ambiguity.
+ */
+export interface AppVolumeBinding {
+  type: 'appVolume'
+  target: 'volume'
+  match: AppVolumeMatch
+}
+
+/** What a per-app status tile reads: the session's volume or mute state. */
+export type AppVolumeStateTarget = 'volume' | 'mute'
+
+/** Read-only per-app volume/mute status for a normal button. */
+export interface AppVolumeStateBinding {
+  type: 'appVolume'
+  target: AppVolumeStateTarget
+  match: AppVolumeMatch
+}
+
+/**
+ * Per-app mute actions. `match` is resolved on the desktop at execution time.
+ * Absolute volume is a control value, not an action.
+ */
+export type AppVolumeAction =
+  | { type: 'appVolume'; action: 'setMute'; match: AppVolumeMatch; muted: boolean }
+  | { type: 'appVolume'; action: 'toggleMute'; match: AppVolumeMatch }
+
+/**
+ * One mixer channel. `id` is desktop-defined and opaque (stable while the
+ * session lives); `process` is the normalized match name and `name` is the
+ * display name. `volume` is 0..100.
+ */
+export interface MixerSession {
+  id: string
+  process: string
+  name: string
+  volume: number
+  muted: boolean
+  /** False when the session vanished after the snapshot was requested. */
+  available?: boolean
+}
+
+/**
+ * Full-screen mixer snapshot. Additive IPC/state only; no wire message.
+ * `ambiguous` lists process names that produced more than one session.
+ */
+export interface MixerSnapshot {
+  available: boolean
+  sessions: MixerSession[]
+  /** Normalized process names with more than one live session. */
+  ambiguous?: string[]
+  /** Why the mixer is unavailable (unsupported platform, helper missing). */
+  reason?: string
+  updatedAt: number
+}
+
+/** State binding union; OBS, Twitch, light and per-app status tiles. */
+export type StateBinding =
+  | ObsStateBinding
+  | TwitchStateBinding
+  | LightStateBinding
+  | AppVolumeStateBinding
 
 /**
  * A key wheel: one chord per dial detent or slider slice.
@@ -472,6 +550,7 @@ export type ControlBinding =
     }
   | ObsInputVolumeBinding
   | LightBinding
+  | AppVolumeBinding
   | ShortcutBinding
   | MediaBinding
 
@@ -682,6 +761,10 @@ export type LightPlanStep =
   | { kind: 'light'; action: 'setPower'; light?: string; on: boolean }
   | { kind: 'light'; action: 'togglePower'; light?: string }
 
+export type AppVolumePlanStep =
+  | { kind: 'appVolume'; action: 'setMute'; match: AppVolumeMatch; muted: boolean }
+  | { kind: 'appVolume'; action: 'toggleMute'; match: AppVolumeMatch }
+
 export type PlanStep =
   | KeyPlanStep
   | TextPlanStep
@@ -696,6 +779,7 @@ export type PlanStep =
   | ObsPlanStep
   | TwitchPlanStep
   | LightPlanStep
+  | AppVolumePlanStep
 
 export type KeyboardPlanStep = KeyPlanStep | TextPlanStep | DelayPlanStep | MediaPlanStep | MousePlanStep
 

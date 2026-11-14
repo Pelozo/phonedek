@@ -2,7 +2,12 @@ import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, statSync, accessSync, constants } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { LightPlanStep, ObsPlanStep, TwitchPlanStep } from '@phonedek/shared'
+import type {
+  AppVolumePlanStep,
+  LightPlanStep,
+  ObsPlanStep,
+  TwitchPlanStep,
+} from '@phonedek/shared'
 import type { Logger } from './logger'
 import {
   LINUX_INPUT_COMMAND,
@@ -36,6 +41,8 @@ export interface HostActions {
   runTwitchAction?(step: TwitchPlanStep): Promise<void>
   /** Run any local-light plan step (optional; absent when lights are not wired). */
   runLightAction?(step: LightPlanStep): Promise<void>
+  /** Run any per-app mute plan step (optional; absent without a mixer). */
+  runAppVolumeAction?(step: AppVolumePlanStep): Promise<void>
 }
 
 export interface HostActionOptions {
@@ -62,6 +69,8 @@ export interface HostActionOptions {
   runTwitchAction?: (step: TwitchPlanStep) => Promise<void>
   /** Test seam / shared controller for the full local-light action family. */
   runLightAction?: (step: LightPlanStep) => Promise<void>
+  /** Test seam / shared controller for per-app mute actions. */
+  runAppVolumeAction?: (step: AppVolumePlanStep) => Promise<void>
   /** Overrides the user's home directory (used by tests to avoid touching ~/Desktop). */
   homeDir?: string
   logger?: Logger
@@ -451,6 +460,15 @@ export function createHostActions(options: HostActionOptions = {}): HostActions 
           async runLightAction(step: LightPlanStep) {
             await options.runLightAction!(step)
             logger?.info(`Ran light action: ${step.action}`)
+          },
+        }
+      : {}),
+
+    ...(options.runAppVolumeAction
+      ? {
+          async runAppVolumeAction(step: AppVolumePlanStep) {
+            await options.runAppVolumeAction!(step)
+            logger?.info(`Ran app audio action: ${step.action}`)
           },
         }
       : {}),

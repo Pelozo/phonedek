@@ -1,4 +1,11 @@
-import type { Action, AssetKind, ConnectedClient, DeckConfig, PressResult } from '@phonedek/shared'
+import type {
+  Action,
+  AssetKind,
+  ConnectedClient,
+  DeckConfig,
+  MixerSnapshot,
+  PressResult,
+} from '@phonedek/shared'
 
 export interface PairView {
   host: string
@@ -288,6 +295,10 @@ export interface PhoneDeckApi {
   disconnectTwitch(): Promise<OperationResult>
   setLightSettings(input: LightSettingsInput): Promise<OperationResult>
   getLightStatuses(): Promise<LightStatusView[]>
+  /** Per-app mixer snapshot for a future full-screen mixer (no UI yet). */
+  getMixerSnapshot(): Promise<MixerSnapshot>
+  setMixerVolume(sessionId: string, volume: number): Promise<PressResult>
+  setMixerMute(sessionId: string, muted: boolean): Promise<PressResult>
   setAutoProfileSettings(input: AutoProfileSettingsInput): Promise<OperationResult>
   exportConfig(): Promise<OperationResult>
   importConfig(): Promise<SaveConfigResult>
@@ -338,6 +349,9 @@ export const IPC = {
   disconnectTwitch: 'phonedek:twitch-disconnect',
   setLightSettings: 'phonedek:lights-set-settings',
   getLightStatuses: 'phonedek:lights-get-statuses',
+  getMixerSnapshot: 'phonedek:mixer-get-snapshot',
+  setMixerVolume: 'phonedek:mixer-set-volume',
+  setMixerMute: 'phonedek:mixer-set-mute',
   setAutoProfileSettings: 'phonedek:auto-profile-set-settings',
   exportConfig: 'phonedek:export-config',
   importConfig: 'phonedek:import-config',

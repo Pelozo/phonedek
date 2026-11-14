@@ -1,5 +1,7 @@
 import type {
   Action,
+  AppVolumeAction,
+  AppVolumePlanStep,
   ConfigAction,
   ControlSpec,
   ExecutableAction,
@@ -170,12 +172,34 @@ function lightActionToPlan(action: LightAction): LightPlanStep {
   }
 }
 
+/** Map every per-app volume action variant to its plan step. */
+function appVolumeActionToPlan(action: AppVolumeAction): AppVolumePlanStep {
+  switch (action.action) {
+    case 'setMute':
+      return {
+        kind: 'appVolume',
+        action: 'setMute',
+        match: { ...action.match },
+        muted: action.muted,
+      }
+    case 'toggleMute':
+      return {
+        kind: 'appVolume',
+        action: 'toggleMute',
+        match: { ...action.match },
+      }
+  }
+}
+
 /**
  * Flatten a button's actions into an ordered execution plan.
  * Page actions are returned as units; the phone normally handles them locally,
  * while the desktop executor ignores them.
  */
-export function actionsToPlan(actions: readonly ConfigAction[], options: PlanOptions = {}): PlanStep[] {
+export function actionsToPlan(
+  actions: readonly (ConfigAction | AppVolumeAction)[],
+  options: PlanOptions = {},
+): PlanStep[] {
   const plan: PlanStep[] = []
   for (const action of actions) {
     switch (action.type) {
@@ -227,6 +251,9 @@ export function actionsToPlan(actions: readonly ConfigAction[], options: PlanOpt
       case 'light':
         plan.push(lightActionToPlan(action))
         break
+      case 'appVolume':
+        plan.push(appVolumeActionToPlan(action))
+        break
       case 'keyboard':
         // Phone-local launcher: the phone opens its keyboard panel without a
         // press, and the desktop never sees a plan step for it.
@@ -271,6 +298,7 @@ export function controlToActions(control: ControlSpec, delta: number): Action[] 
   if (control.binding.type === 'mic') return []
   if (control.binding.type === 'obs') return []
   if (control.binding.type === 'light') return []
+  if (control.binding.type === 'appVolume') return []
   if (control.binding.type === 'volume' && control.binding.mode === 'absolute') return []
   const magnitude = Math.ceil(Math.abs(delta))
 
@@ -557,7 +585,7 @@ export function describeStep(step: MacroStep): string {
   }
 }
 
-export function describeAction(action: PlannableAction, platform?: string): string {
+export function describeAction(action: PlannableAction | AppVolumeAction, platform?: string): string {
   switch (action.type) {
     case 'hotkey':
       return formatCombo(action.keys, platform)
@@ -644,5 +672,10 @@ export function describeAction(action: PlannableAction, platform?: string): stri
         case 'togglePower':
           return action.light ? `Toggle light "${action.light}"` : 'Toggle the first light'
       }
+    case 'appVolume': {
+      const target = action.match.process ? `"${action.match.process}"` : 'app audio'
+      if (action.action === 'toggleMute') return `Toggle mute for ${target}`
+      return `${action.muted ? 'Mute' : 'Unmute'} ${target}`
+    }
   }
 }

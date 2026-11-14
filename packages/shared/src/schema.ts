@@ -239,6 +239,26 @@ const keyboardSchema = z.object({
   action: z.literal('open'),
 })
 
+/** Per-app audio session selector; `.exe`, case and path are normalized. */
+const appVolumeMatch = z
+  .object({
+    process: z.string().min(1).max(128).optional(),
+  })
+  .strict()
+const appVolumeSchema = z.union([
+  z.object({
+    type: z.literal('appVolume'),
+    action: z.literal('setMute'),
+    match: appVolumeMatch,
+    muted: z.boolean(),
+  }),
+  z.object({
+    type: z.literal('appVolume'),
+    action: z.literal('toggleMute'),
+    match: appVolumeMatch,
+  }),
+])
+
 export const MacroStepSchema = z.discriminatedUnion('type', [
   hotkeySchema,
   textSchema,
@@ -269,6 +289,7 @@ export const ActionSchema = z.union([
   obsSchema,
   twitchSchema,
   lightSchema,
+  appVolumeSchema,
   keyboardSchema,
 ])
 
@@ -325,6 +346,11 @@ export const ControlBindingSchema = z.union([
     type: z.literal('light'),
     target: z.enum(['power', 'brightness', 'temperature']),
     light: id.optional(),
+  }),
+  z.object({
+    type: z.literal('appVolume'),
+    target: z.literal('volume'),
+    match: appVolumeMatch,
   }),
   shortcutBindingSchema,
   z.object({
@@ -477,6 +503,29 @@ const sliderOrDialControlSchema = z
         }
       }
     }
+    if (control.binding.type === 'appVolume') {
+      if (control.emit !== 'value') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['emit'],
+          message: 'App volume requires emit "value"',
+        })
+      }
+      if (control.min !== undefined && (control.min < 0 || control.min > 100)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['min'],
+          message: 'App volume min must be between 0 and 100',
+        })
+      }
+      if (control.max !== undefined && (control.max < 0 || control.max > 100)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['max'],
+          message: 'App volume max must be between 0 and 100',
+        })
+      }
+    }
     if (control.min !== undefined && control.max !== undefined && control.min >= control.max) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -540,10 +589,18 @@ export const LightStateBindingSchema = z.object({
   light: id.optional(),
 })
 
+/** Read-only per-app volume/mute status tile. */
+export const AppVolumeStateBindingSchema = z.object({
+  type: z.literal('appVolume'),
+  target: z.enum(['volume', 'mute']),
+  match: appVolumeMatch,
+})
+
 export const StateBindingSchema = z.union([
   ObsStateBindingSchema,
   TwitchStateBindingSchema,
   LightStateBindingSchema,
+  AppVolumeStateBindingSchema,
 ])
 
 export const ButtonSchema = z.object({

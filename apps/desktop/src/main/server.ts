@@ -10,6 +10,7 @@ import {
   CONTROL_STATE_CAPABILITY,
   KEYBOARD_CAPABILITY,
   LIGHT_CAPABILITY,
+  MIXER_CAPABILITY,
   OBS_CAPABILITY,
   POINTER_CAPABILITY,
   TWITCH_CAPABILITY,
@@ -60,14 +61,15 @@ export const SERVER_CAPABILITIES = [
   OBS_CAPABILITY,
   TWITCH_CAPABILITY,
   LIGHT_CAPABILITY,
+  MIXER_CAPABILITY,
 ] as const
 
 /**
  * Capabilities for a specific host. Wayland/unsupported platforms must not
  * advertise `pointer-v1` or `keyboard-v1`, a host with no volume/mic/OBS/Twitch
- * state reader must not advertise `control-state-v1`, and `obs-v1`/`twitch-v1`
- * are dynamic: they are advertised only while that integration is
- * identified/authorized.
+ * state reader must not advertise `control-state-v1`, `mixer-v1` is omitted on
+ * macOS (no public per-app volume API), and `obs-v1`/`twitch-v1` are dynamic:
+ * they are advertised only while that integration is identified/authorized.
  */
 export function serverCapabilities(
   pointerSupported: boolean,
@@ -76,6 +78,7 @@ export function serverCapabilities(
   twitchSupported = false,
   lightSupported = false,
   keyboardSupported = false,
+  mixerSupported = false,
 ): string[] {
   return SERVER_CAPABILITIES.filter((capability) => {
     if (capability === POINTER_CAPABILITY) return pointerSupported
@@ -84,6 +87,7 @@ export function serverCapabilities(
     if (capability === OBS_CAPABILITY) return obsSupported
     if (capability === TWITCH_CAPABILITY) return twitchSupported
     if (capability === LIGHT_CAPABILITY) return lightSupported
+    if (capability === MIXER_CAPABILITY) return mixerSupported
     return true
   })
 }
@@ -202,6 +206,8 @@ export interface DeckServerOptions {
   twitchSupported?: () => boolean
   /** Dynamic: advertise `light-v1` while at least one light is configured. */
   lightSupported?: () => boolean
+  /** Dynamic: advertise `mixer-v1` while per-app audio is available. */
+  mixerSupported?: () => boolean
   /** Called when a phone disconnects, so held pointer buttons can be released. */
   onClientClosed?: (client: ConnectedClient) => void
   /** Called only after an uploaded backup validates; show native approval here. */
@@ -451,6 +457,7 @@ export class DeckServer {
       this.options.twitchSupported?.() === true,
       this.options.lightSupported?.() === true,
       this.options.keyboardSupported?.() === true,
+      this.options.mixerSupported?.() === true,
     )
   }
 
