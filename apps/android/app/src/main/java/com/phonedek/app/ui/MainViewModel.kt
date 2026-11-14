@@ -283,14 +283,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (!ok) {
                     val failure = error?.takeIf { it.isNotBlank() }
                         ?: "The desktop could not run that action."
-                    // OBS being closed or an input disappearing is reflected in
-                    // the tile's live state (NO OBS / NO INPUT). Twitch being
-                    // disabled, disconnected or unauthorized likewise arrives
-                    // as NO TWITCH / TWITCH OFF state. Lights that are missing
-                    // or offline arrive as NO LIGHT / OFFLINE. Do not raise a
-                    // deck-level toast for any of them; the press fails quietly.
-                    if (isObsButton(buttonId) || isTwitchButton(buttonId) ||
-                        isLightButton(buttonId)
+                    // Availability failures are already shown by the tile
+                    // (NO OBS / NO TWITCH / NO LIGHT). Functional failures such
+                    // as "replay buffer is not active" need a one-shot toast,
+                    // otherwise an explicit press looks like a dead button.
+                    if (
+                        (isObsButton(buttonId) || isTwitchButton(buttonId) ||
+                            isLightButton(buttonId)) &&
+                        isQuietAvailabilityFailure(failure)
                     ) {
                         Diag.w("State action rejected button=$buttonId error=\"$failure\"")
                     } else {
@@ -1667,6 +1667,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val button = activeButton(buttonId) ?: return false
         return ControlStateStore.hasTwitchAction(button.actions) ||
             ControlStateStore.hasTwitchStateBinding(button)
+    }
+
+    /**
+     * Background integration outages are already visible as tile state
+     * (NO OBS, NO TWITCH, NO LIGHT, OFFLINE). Suppress those toasts, but let
+     * functional rejections (e.g. replay buffer not active) reach the user.
+     */
+    private fun isQuietAvailabilityFailure(message: String): Boolean {
+        val text = message.lowercase()
+        return listOf(
+            "not available",
+            "not connected",
+            "disconnected",
+            "unauthorized",
+            "offline",
+            "no obs",
+            "no twitch",
+            "no light",
+            "not configured",
+            "update phonedek",
+        ).any(text::contains)
     }
 
     private fun isLightButton(buttonId: String): Boolean {
