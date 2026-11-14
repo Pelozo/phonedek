@@ -271,6 +271,21 @@ data class DeviceInfo(
     val appVersion: String,
 )
 
+private val PROFILE_ID_PATTERN = Regex("^[A-Za-z0-9][A-Za-z0-9_-]*$")
+
+/**
+ * Trims and validates a profile id from a server `profile` message.
+ *
+ * Mirrors the shared protocol rule: 1..64 characters, starting with a letter
+ * or digit and continuing with letters, digits, `-` or `_`. Returns null for
+ * null, blank or malformed input so callers can ignore the message quietly.
+ */
+fun normalizeProfileId(raw: String?): String? {
+    val id = raw?.trim() ?: return null
+    if (id.length !in 1..64) return null
+    return id.takeIf { PROFILE_ID_PATTERN.matches(it) }
+}
+
 object DeckJson {
     val format: Json = Json {
         ignoreUnknownKeys = true

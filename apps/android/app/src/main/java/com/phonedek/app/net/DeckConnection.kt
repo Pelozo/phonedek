@@ -6,6 +6,7 @@ import com.phonedek.app.data.DeckJson
 import com.phonedek.app.data.DeviceInfo
 import com.phonedek.app.data.PROTOCOL_VERSION
 import com.phonedek.app.data.PointerButtonEvent
+import com.phonedek.app.data.normalizeProfileId
 import com.phonedek.app.util.Diag
 import java.util.UUID
 import kotlin.math.min
@@ -109,6 +110,8 @@ class DeckConnection(
         )
         fun onServerError(code: String, message: String)
         fun onNavigate(direction: String, pageId: String?)
+        /** Auto-profile: the desktop asked this phone to show [profileId]. */
+        fun onProfileSwitch(profileId: String)
         fun onPong()
     }
 
@@ -548,6 +551,10 @@ class DeckConnection(
                 }
             }
 
+            "profile" -> {
+                parseProfileSwitch(obj)?.let(listener::onProfileSwitch)
+            }
+
             "pong" -> {
                 lastPongAt = SystemClock.elapsedRealtime()
                 listener.onPong()
@@ -782,6 +789,18 @@ internal fun parseKeyboardResult(obj: JsonObject): KeyboardResultPayload = Keybo
 
 internal fun parseCapabilities(obj: JsonObject): Set<String> =
     obj.stringList("capabilities").orEmpty().toSet()
+
+/**
+ * Parses the server's auto-profile `{ type: "profile", profileId }` message.
+ * Only string ids are accepted; blank or malformed ids return null so the
+ * caller ignores the message (an old/deleted profile must not disturb the
+ * deck). Older phones simply never receive or understand this message.
+ */
+internal fun parseProfileSwitch(obj: JsonObject): String? {
+    val primitive = obj["profileId"] as? JsonPrimitive ?: return null
+    if (!primitive.isString) return null
+    return normalizeProfileId(primitive.contentOrNull)
+}
 
 internal sealed interface BrightnessMessage {
     data class Level(val level: Float) : BrightnessMessage

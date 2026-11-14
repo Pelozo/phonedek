@@ -6,6 +6,7 @@ import com.phonedek.app.data.DeckJson
 import com.phonedek.app.data.GridDto
 import com.phonedek.app.data.GridSettings
 import com.phonedek.app.data.Pairing
+import com.phonedek.app.data.normalizeProfileId
 import com.phonedek.app.data.pageGrid
 import com.phonedek.app.ui.BackgroundSpec
 import com.phonedek.app.ui.backgroundSpec
@@ -1133,6 +1134,19 @@ class DeckModelsTest {
     fun rejectsConfigWithoutProfiles() {
         assertNull(DeckJson.parse("""{"profiles":[]}"""))
         assertNull(DeckJson.parse("not json"))
+    }
+
+    @Test
+    fun normalizesProfileIdsFromServerMessages() {
+        assertEquals("valorant", normalizeProfileId("valorant"))
+        assertEquals("game_2", normalizeProfileId("  game_2  "))
+        assertEquals("A1-b", normalizeProfileId("A1-b"))
+        assertNull(normalizeProfileId(null))
+        assertNull(normalizeProfileId(""))
+        assertNull(normalizeProfileId("  "))
+        assertNull(normalizeProfileId("-leading"))
+        assertNull(normalizeProfileId("has.dot"))
+        assertNull(normalizeProfileId("a".repeat(65)))
     }
 
     @Test

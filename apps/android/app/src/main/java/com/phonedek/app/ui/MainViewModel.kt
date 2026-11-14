@@ -393,6 +393,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 navigateCurrentProfile(direction, pageId)
             }
 
+            override fun onProfileSwitch(profileId: String) {
+                applyServerProfileSwitch(profileId)
+            }
+
             override fun onPong() = Unit
         },
     )
@@ -1884,6 +1888,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             runCatching { prefs.setLastPage(profileId, pageId) }
         }
+    }
+
+    /**
+     * Auto-profile switch from the desktop (`{ type: "profile" }`).
+     *
+     * Only ids present in the current config are applied, and the pager lands
+     * on that profile's default page. The switch uses the same page/profile
+     * change path as a page action: state is cleared, the watch subscription is
+     * re-sent and the choice is persisted. Missing/deleted ids are ignored
+     * quietly (no toast, no network error) and never disconnect the socket.
+     */
+    private fun applyServerProfileSwitch(profileId: String) {
+        val snapshot = _state.value
+        val target = resolveAndPersistProfileSwitch(
+            config = snapshot.config,
+            requestedProfileId = profileId,
+            persist = { targetProfileId, targetPageId ->
+                viewModelScope.launch {
+                    runCatching { prefs.setLastPage(targetProfileId, targetPageId) }
+                }
+            },
+        )
+        if (target == null) {
+            Diag.d("Ignoring profile switch \"$profileId\": not in the current config")
+            return
+        }
+        lastProfileId = target.profileId
+        lastPageId = target.pageId
+        if (snapshot.activeProfileId == target.profileId &&
+            snapshot.activePageId == target.pageId
+        ) {
+            Diag.d("Profile switch already active: ${target.profileId}/${target.pageId}")
+            return
+        }
+        Diag.i("Profile switch -> ${target.profileId}/${target.pageId}")
+        _state.update {
+            it.copy(
+                activeProfileId = target.profileId,
+                activePageId = target.pageId,
+                // Live state is scoped to the previous profile/page.
+                controlStates = emptyMap(),
+            )
+        }
+        scheduleWatch()
     }
 
     private fun emit(message: String) {
