@@ -14,6 +14,7 @@ import type { ServerInfoView } from '../../../shared/api'
 import { obsStateBadge, obsStateBindingSummary } from '../lib/obs'
 import { twitchStateBadge, twitchStateBindingSummary } from '../lib/twitch'
 import { lightStateBadge, lightStateBindingSummary } from '../lib/lights'
+import { appVolumeStateBadge, appVolumeStateBindingSummary } from '../lib/appVolume'
 import type { StateBinding } from '@phonedek/shared'
 import { backgroundStyle, buttonBackground, isVideoBackground, textColorFor } from '../lib/ui'
 import { KEYBOARD_BADGE, hasKeyboardAction, hasKeyboardLauncher } from '../lib/keyboard'
@@ -24,7 +25,7 @@ import { Icon } from './Icons'
 function statusBadge(state: StateBinding): string {
   if (state.type === 'obs') return obsStateBadge(state.target)
   if (state.type === 'twitch') return twitchStateBadge(state.target)
-  if (state.type === 'appVolume') return state.target === 'mute' ? 'APP MUTE' : 'APP VOL'
+  if (state.type === 'appVolume') return appVolumeStateBadge(state.target)
   return lightStateBadge(state.target)
 }
 
@@ -34,9 +35,7 @@ function statusSummary(
 ): string | null {
   if (state.type === 'obs') return obsStateBindingSummary(state)
   if (state.type === 'twitch') return twitchStateBindingSummary(state)
-  if (state.type === 'appVolume') {
-    return state.target === 'mute' ? 'App mute' : 'App volume'
-  }
+  if (state.type === 'appVolume') return appVolumeStateBindingSummary(state)
   return lightStateBindingSummary(state, lights)
 }
 

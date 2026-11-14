@@ -19,7 +19,7 @@ export function keyboardAction(): KeyboardAction {
   return { type: 'keyboard', action: 'open' }
 }
 
-export function isKeyboardAction(action: ConfigAction): action is KeyboardAction {
+export function isKeyboardAction(action: ConfigAction | { type: string }): action is KeyboardAction {
   return action.type === 'keyboard'
 }
 

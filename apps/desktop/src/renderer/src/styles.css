@@ -5888,3 +5888,152 @@ select[aria-invalid="true"] {
   font-size: 11.5px;
   line-height: 1.5;
 }
+
+/* ------------------------------------------------------------------ */
+/* Per-app audio mixer UI                                             */
+/* ------------------------------------------------------------------ */
+
+.control-value {
+  font-size: 0.72em;
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+  opacity: 0.78;
+}
+
+.mixer-session-field .mixer-refresh {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.mixer-dialog-hint {
+  margin-right: auto;
+  max-width: 300px;
+}
+
+.mixer-dialog-status {
+  margin-bottom: 10px;
+}
+
+.mixer-picker-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 2px;
+}
+
+.mixer-picker-empty svg {
+  color: var(--accent);
+}
+
+.mixer-picker-empty p {
+  margin: 0;
+  max-width: 430px;
+  color: var(--text-soft);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.mixer-session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 330px;
+  overflow-y: auto;
+}
+
+.mixer-session-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--surface-2);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.mixer-session-option:hover,
+.mixer-session-option:focus-visible {
+  border-color: var(--accent);
+  background: var(--surface-3);
+}
+
+.mixer-session-option.selected {
+  border-color: var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.mixer-session-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  background: var(--bg-deep);
+  color: var(--accent);
+}
+
+.mixer-session-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.mixer-session-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.mixer-session-copy small {
+  color: var(--faint);
+  font-size: 8.5px;
+  letter-spacing: 0.05em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mixer-session-level {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex: 0 0 74px;
+}
+
+.mixer-session-level > .mono {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.mixer-session-level > .mono.muted {
+  color: var(--accent);
+}
+
+.mixer-session-meter {
+  display: block;
+  width: 100%;
+  height: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.mixer-session-meter > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.app-status-badges {
+  letter-spacing: 0.04em;
+}

@@ -3,7 +3,8 @@ import type {
   Action,
   ActionPack,
   ActionPreset,
-  ConfigAction,
+  AppVolumeAction,
+  AppVolumeStateBinding,
   DeckButton,
   MicAction,
   PointerBinding,
@@ -66,6 +67,22 @@ import {
   type LightActionOperation,
 } from '../lib/lights'
 import { MEDIA_SCRUB_HINT } from '../lib/media'
+import {
+  APP_VOLUME_BADGE,
+  appProcessKey,
+  appVolumeActionSummary,
+  appVolumeControlSpec,
+  appVolumeMatch,
+  appVolumeStateBadge,
+  appVolumeStateBindingSummary,
+  findMixerSession,
+  mixerProcessOptions,
+  type EditorAction,
+} from '../lib/appVolume'
+import { useMixerSnapshot } from '../lib/useMixerSnapshot'
+import { AppVolumeStatusEditor } from './AppVolumeStatusEditor'
+import { MixerSessionDialog } from './MixerSessionDialog'
+import { MixerSessionSelect } from './MixerSessionSelect'
 import { useObsInputs } from '../lib/useObsInputs'
 import { backgroundStyle, buttonBackground, textColorFor } from '../lib/ui'
 import { KEYBOARD_ACTION_TITLE, keyboardAction } from '../lib/keyboard'
@@ -94,13 +111,13 @@ const DEFAULT_MACRO_STEP: MacroStep = { type: 'hotkey', keys: ['CTRL', 'C'], hol
 
 /** Mic actions are valid in configs but not yet part of the legacy Action union. */
 const MIC_TOGGLE_ACTION: MicAction = { type: 'mic', action: 'toggleMute' }
-const asLegacyAction = (action: ConfigAction): Action => action as unknown as Action
+const asLegacyAction = (action: EditorAction): Action => action as unknown as Action
 
 /** Static status labels for the binding families the editor can hold. */
 function stateBadge(state: StateBinding): string {
   if (state.type === 'obs') return obsStateBadge(state.target)
   if (state.type === 'twitch') return twitchStateBadge(state.target)
-  if (state.type === 'appVolume') return state.target === 'mute' ? 'APP MUTE' : 'APP VOL'
+  if (state.type === 'appVolume') return appVolumeStateBadge(state.target)
   return lightStateBadge(state.target)
 }
 
@@ -110,9 +127,7 @@ function stateSummary(
 ): string {
   if (state.type === 'obs') return obsStateBindingSummary(state) ?? 'OBS status'
   if (state.type === 'twitch') return twitchStateBindingSummary(state) ?? 'Twitch status'
-  if (state.type === 'appVolume') {
-    return state.target === 'mute' ? 'App mute status' : 'App volume status'
-  }
+  if (state.type === 'appVolume') return appVolumeStateBindingSummary(state) ?? 'App status'
   return lightStateBindingSummary(state, lights) ?? lightTargetInfo(state.target).label
 }
 
@@ -183,6 +198,7 @@ export function Inspector({
   const [moveOpen, setMoveOpen] = useState(false)
   const [iconBusy, setIconBusy] = useState<'image' | 'video' | null>(null)
   const [shortcutTarget, setShortcutTarget] = useState<'keys' | 'reverse' | 'hold' | null>(null)
+  const [appActionPicker, setAppActionPicker] = useState(false)
   const platform = useHostPlatform()
   const confirm = useConfirm()
   const initialObsBinding =
@@ -190,6 +206,16 @@ export function Inspector({
       ? button.control.binding
       : null
   const statusBinding = button?.state ?? null
+  const appControlBinding =
+    button?.control && button.control.kind !== 'trackpad' && button.control.binding.type === 'appVolume'
+      ? button.control.binding
+      : null
+  const appStatusBinding = statusBinding?.type === 'appVolume' ? statusBinding : null
+  const appMixer = useMixerSnapshot(appControlBinding !== null || appStatusBinding !== null)
+  const appControlSession = findMixerSession(
+    appMixer.snapshot,
+    appControlBinding?.match.process,
+  )
   const obsInputsState = useObsInputs(
     initialObsBinding !== null ||
       (statusBinding?.type === 'obs' &&
@@ -213,12 +239,13 @@ export function Inspector({
 
   useEffect(() => {
     setShortcutTarget(null)
+    setAppActionPicker(false)
   }, [button?.id])
 
   const buttonDefaultBackground = profile.theme.buttonBackground
   const primaryKey = platform === 'darwin' ? '⌘' : 'Ctrl'
 
-  const testActions = async (actions: readonly ConfigAction[], label: string): Promise<void> => {
+  const testActions = async (actions: readonly EditorAction[], label: string): Promise<void> => {
     if (!actions.length) {
       onToast('This button has no actions yet', 'info')
       return
@@ -457,7 +484,7 @@ export function Inspector({
   }
 
   const setControlBinding = (
-    type: 'volume' | 'scroll' | 'mic' | 'obs' | 'shortcut' | 'light' | 'media',
+    type: 'volume' | 'scroll' | 'mic' | 'obs' | 'shortcut' | 'light' | 'media' | 'appVolume',
   ): void => {
     if (!button.control || button.control.kind === 'trackpad') return
     if (button.control.binding.type === type) return
@@ -534,6 +561,22 @@ export function Inspector({
         commit: 'end',
         display: 'time',
         haptics: true,
+      })
+      return
+    }
+    if (type === 'appVolume') {
+      updateControl({
+        kind: 'slider',
+        axis: 'horizontal',
+        emit: 'value',
+        binding: { type: 'appVolume', target: 'volume', match: {} },
+        min: 0,
+        max: 100,
+        step: 1,
+        initial: 50,
+        unit: '%',
+        commit: undefined,
+        display: undefined,
       })
       return
     }
@@ -734,6 +777,10 @@ export function Inspector({
       await testActions([MIC_TOGGLE_ACTION], 'Toggle mic mute')
       return
     }
+    if (control.binding.type === 'appVolume') {
+      await testAppVolume(direction)
+      return
+    }
     if (controlIsAbsolute) {
       const percent = direction < 0 ? 45 : 55
       type ControlTestResult = Awaited<ReturnType<typeof window.phonedek.testControlInput>>
@@ -779,6 +826,80 @@ export function Inspector({
         : (result.error ?? 'Control test failed'),
       result.ok ? 'success' : 'error',
     )
+  }
+
+  const updateAppVolumeProcess = (process: string | undefined): void => {
+    if (!control || control.binding.type !== 'appVolume') return
+    updateControl({
+      binding: {
+        type: 'appVolume',
+        target: 'volume',
+        match: appVolumeMatch(process),
+      },
+    })
+  }
+
+  const testAppVolume = async (direction: -1 | 1): Promise<void> => {
+    if (!appControlBinding) return
+    if (!appMixer.snapshot?.available) {
+      onToast(
+        appMixer.snapshot?.reason?.trim() || 'Per-app audio is not available on this desktop.',
+        'info',
+      )
+      return
+    }
+    if (!appControlSession) {
+      onToast(
+        appControlBinding.match.process
+          ? `“${appControlBinding.match.process}” is not playing audio — pick the app again.`
+          : 'Pick an app first.',
+        'error',
+      )
+      return
+    }
+    const percent = direction < 0 ? 45 : 55
+    const result = await window.phonedek.setMixerVolume(appControlSession.id, percent)
+    await appMixer.refresh()
+    onToast(
+      result.ok
+        ? `Set ${appControlSession.name || appControlSession.process} to ${percent}%`
+        : (result.error ?? 'Mixer volume failed'),
+      result.ok ? 'success' : 'error',
+    )
+  }
+
+  const testAppMute = async (): Promise<void> => {
+    if (!appControlBinding) return
+    if (!appMixer.snapshot?.available) {
+      onToast(
+        appMixer.snapshot?.reason?.trim() || 'Per-app audio is not available on this desktop.',
+        'info',
+      )
+      return
+    }
+    if (!appControlSession) {
+      onToast(
+        appControlBinding.match.process
+          ? `“${appControlBinding.match.process}” is not playing audio — pick the app again.`
+          : 'Pick an app first.',
+        'error',
+      )
+      return
+    }
+    const muted = !appControlSession.muted
+    const result = await window.phonedek.setMixerMute(appControlSession.id, muted)
+    await appMixer.refresh()
+    onToast(
+      result.ok
+        ? `${muted ? 'Muted' : 'Unmuted'} ${appControlSession.name || appControlSession.process}`
+        : (result.error ?? 'Mixer mute failed'),
+      result.ok ? 'success' : 'error',
+    )
+  }
+
+  const addAppVolumeAction = (action: AppVolumeAction): void => {
+    update({ actions: [...button.actions, action as unknown as Action] })
+    onToast(`${appVolumeActionSummary(action)} added`, 'success')
   }
 
   const updateObsInput = (input: string | undefined): void => {
@@ -842,7 +963,7 @@ export function Inspector({
     )
   }
 
-  const updateAction = (index: number, action: ConfigAction): void => {
+  const updateAction = (index: number, action: EditorAction): void => {
     update({
       actions: button.actions.map((item, current) => (current === index ? asLegacyAction(action) : item)),
     })
@@ -1236,8 +1357,9 @@ export function Inspector({
             </div>
             <p className="hint">
               Add a live readout to this button without replacing its tap actions. OBS uses its
-              WebSocket connection, Twitch uses the Helix account, and lights use the Elgato HTTP
-              devices from Settings → Lights. All feed the phone through control-state-v1.
+              WebSocket connection, Twitch uses the Helix account, lights use the Elgato HTTP
+              devices from Settings → Lights, and app audio uses the desktop mixer. All feed the
+              phone through control-state-v1.
             </p>
             <label className="field">
               <span>Status source</span>
@@ -1252,6 +1374,8 @@ export function Inspector({
                     update({ state: { type: 'obs', target: 'streaming' } })
                   } else if (value === 'light') {
                     update({ state: { type: 'light', target: 'power' } })
+                  } else if (value === 'appVolume') {
+                    update({ state: { type: 'appVolume', target: 'volume', match: {} } })
                   }
                 }}
               >
@@ -1259,6 +1383,7 @@ export function Inspector({
                 <option value="obs">OBS Studio</option>
                 <option value="twitch">Twitch</option>
                 <option value="light">Local light</option>
+                <option value="appVolume">App audio</option>
               </select>
             </label>
             {statusBinding?.type === 'obs' && (
@@ -1302,6 +1427,22 @@ export function Inspector({
                   binding={statusBinding}
                   server={server}
                   onUpdate={(state: LightStateBinding) => update({ state })}
+                />
+                <button
+                  type="button"
+                  className="button danger ghost full"
+                  onClick={() => update({ state: undefined })}
+                >
+                  <Icon name="trash" size={15} /> Remove status
+                </button>
+              </>
+            )}
+            {statusBinding?.type === 'appVolume' && (
+              <>
+                <AppVolumeStatusEditor
+                  key={`app-${button.id}`}
+                  binding={statusBinding}
+                  onUpdate={(state: AppVolumeStateBinding) => update({ state })}
                 />
                 <button
                   type="button"
@@ -1420,7 +1561,9 @@ export function Inspector({
             <div className="section-heading">
               <h3>Control</h3>
               <span className="inspector-badge mono">
-                {control.binding.type === 'media'
+                {control.binding.type === 'appVolume'
+                  ? APP_VOLUME_BADGE
+                  : control.binding.type === 'media'
                   ? 'MEDIA · SEEK'
                   : `${control.kind === 'slider' ? 'SLIDER' : 'DIAL'} · ${
                       control.binding.type === 'volume'
@@ -1475,6 +1618,34 @@ export function Inspector({
                 <span className="hint">
                   Seeks from a paired phone only · the editor never stands in for a live player
                 </span>
+              ) : control.binding.type === 'appVolume' ? (
+                <>
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    title="Set this app's audio session to 45%"
+                    onClick={() => void testControl(-1)}
+                  >
+                    Test −
+                  </button>
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    title="Set this app's audio session to 55%"
+                    onClick={() => void testControl(1)}
+                  >
+                    Test +
+                  </button>
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    title="Toggle mute on this app's audio session"
+                    onClick={() => void testAppMute()}
+                  >
+                    Test mute
+                  </button>
+                  <span className="hint">Talks to the mixer directly · sets 45% / 55%</span>
+                </>
               ) : control.binding.type === 'mic' ? (
                 <>
                   <button
@@ -1592,12 +1763,14 @@ export function Inspector({
                         | 'obs'
                         | 'shortcut'
                         | 'light'
-                        | 'media',
+                        | 'media'
+                        | 'appVolume',
                     )
                   }
                 >
                   <option value="volume">Volume</option>
                   <option value="mic">Mic</option>
+                  <option value="appVolume">App volume</option>
                   <option value="obs">OBS input volume</option>
                   <option value="media">Media position (scrub)</option>
                   <option value="light">Local light</option>
@@ -1711,6 +1884,39 @@ export function Inspector({
 
             {control.binding.type === 'mic' && (
               <p className="hint">Default capture device · tap the tile label to mute</p>
+            )}
+
+            {control.binding.type === 'appVolume' && (
+              <>
+                <MixerSessionSelect
+                  selected={appControlBinding?.match.process}
+                  state={appMixer}
+                  onSelect={updateAppVolumeProcess}
+                  hint="Browser tabs often share one audio process. The control follows the app's mixer session, not an individual tab."
+                />
+                {(() => {
+                  const option = mixerProcessOptions(appMixer.snapshot).find(
+                    (item) =>
+                      appProcessKey(item.process) ===
+                      appProcessKey(appControlBinding?.match.process ?? ''),
+                  )
+                  return option && option.count > 1 ? (
+                    <p className="hint">
+                      This process has {option.count} live sessions. The phone controls the first
+                      matching session; browser tabs may therefore move together.
+                    </p>
+                  ) : null
+                })()}
+                <div className="preview-strip">
+                  <Icon name="sliders" size={15} />
+                  <span>
+                    <strong className="mono">
+                      {Math.max(0, Math.min(100, Math.round(control.initial ?? 50)))}%
+                    </strong>{' '}
+                    initial · 0–100% · tap the label toggles mute
+                  </span>
+                </div>
+              </>
             )}
 
             {control.binding.type === 'volume' && (
@@ -1997,6 +2203,8 @@ export function Inspector({
                   ? 'Editor preview only. Drag on the phone to scrub; only the released position is sent. Add a play/pause action if you want a tap action.'
                   : control.binding.type === 'mic'
                   ? 'Editor preview only. Drag on the phone to set mic gain; tap the label or mic glyph to mute. The mic action below stays as the fallback.'
+                  : control.binding.type === 'appVolume'
+                  ? 'Editor preview only. Drag on the phone to set the app level; tap the label to toggle mute. Test − / Test + set 45% / 55% through the mixer.'
                   : control.binding.type === 'obs'
                     ? 'Editor preview only. Drag on the phone to set the OBS input level; Test −, Test + and Test mute talk to OBS directly. Input names are scene-collection scoped.'
                     : control.binding.type === 'light'
@@ -2044,6 +2252,7 @@ export function Inspector({
                   { label: 'Open URL', icon: 'link', description: 'Open a web page', onClick: () => update({ actions: [...button.actions, makeAction('url')] }) },
                   { label: 'Run command', icon: 'terminal', description: 'Run a shell command', onClick: () => update({ actions: [...button.actions, makeAction('command')] }) },
                   { label: 'Media key', icon: 'music', description: 'Play, pause, volume…', onClick: () => update({ actions: [...button.actions, makeAction('media')] }) },
+                  { label: 'App audio mute', section: 'Audio', icon: 'microphone', description: 'Toggle or set mute for one app audio session', onClick: () => setAppActionPicker(true) },
                   { label: 'Open phone keyboard', section: 'Integrations', icon: 'keyboard', description: 'Phone keyboard types into the active PC window', onClick: addKeyboardAction },
                   { label: 'OBS scene switcher', section: 'Integrations', icon: 'layers', description: 'Switch the program scene by name', onClick: () => addObsAction({ type: 'obs', action: 'setScene' }, 'Scene', '🎬') },
                   { label: 'OBS toggle stream', icon: 'wifi', description: 'Start or stop streaming', onClick: () => addObsAction({ type: 'obs', action: 'toggleStream' }, 'Stream', '📡') },
@@ -2081,6 +2290,8 @@ export function Inspector({
                       ? 'No tap action needed. Drag this control on the phone to seek; only the released position is sent. The phone shows the player title, artist and time.'
                     : button.control.binding.type === 'mic'
                       ? 'No tap action needed. Drag this control on the phone to set mic gain; use Test mute above to verify the mic on this PC.'
+                      : button.control.binding.type === 'appVolume'
+                      ? 'No tap action needed. Drag this control on the phone to set the app level; use Test mute above or add an App audio mute action for a tap.'
                       : button.control.binding.type === 'obs'
                         ? 'No tap action needed. Drag this control on the phone to set the OBS input level; add an OBS mute action if you want a tap action.'
                         : button.control.binding.type === 'light'
@@ -2131,6 +2342,21 @@ export function Inspector({
       </div>
 
       {presetsOpen && <PresetPicker onClose={() => setPresetsOpen(false)} onPick={addPreset} />}
+      {appActionPicker && (
+        <MixerSessionDialog
+          title="Add app audio mute"
+          description="Choose the app this action mutes. You can switch between toggle, mute and unmute in the action editor."
+          onPick={(session) => {
+            setAppActionPicker(false)
+            addAppVolumeAction({
+              type: 'appVolume',
+              action: 'toggleMute',
+              match: appVolumeMatch(session.process || session.name),
+            })
+          }}
+          onClose={() => setAppActionPicker(false)}
+        />
+      )}
       {shortcut && shortcutTarget && (
         <ShortcutDialog
           initial={

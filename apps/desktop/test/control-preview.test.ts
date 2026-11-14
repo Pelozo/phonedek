@@ -26,6 +26,12 @@ describe('controlBadge', () => {
     )
   })
 
+  it('labels per-app volume', () => {
+    expect(
+      controlBadge(control({ type: 'appVolume', target: 'volume', match: { process: 'chrome' } })),
+    ).toBe('APP · VOL')
+  })
+
   it('labels local light targets', () => {
     expect(controlBadge(control({ type: 'light', target: 'brightness' }))).toBe('LIGHT · BRIGHT')
     expect(controlBadge(control({ type: 'light', target: 'temperature' }))).toBe('LIGHT · TEMP')

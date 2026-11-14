@@ -11,6 +11,7 @@ import {
   shortcutBadge,
   shortcutDirectionLabel,
 } from '../lib/shortcut'
+import { APP_VOLUME_BADGE } from '../lib/appVolume'
 
 function initialPercent(control: SliderOrDialControlSpec): number {
   const min = control.min ?? 0
@@ -27,6 +28,7 @@ export function controlBadge(control: SliderOrDialControlSpec): string {
   }
   if (control.binding.type === 'mic') return 'MIC · GAIN'
   if (control.binding.type === 'obs') return 'OBS · VOL'
+  if (control.binding.type === 'appVolume') return APP_VOLUME_BADGE
   if (control.binding.type === 'light') {
     if (control.binding.target === 'temperature') return 'LIGHT · TEMP'
     if (control.binding.target === 'power') return 'LIGHT · POWER'
@@ -72,6 +74,18 @@ export function ControlPreview({
   const percent = initialPercent(control)
   const axis = control.axis ?? 'horizontal'
   const dialAngle = -135 + percent * 270
+  const appPercent =
+    control.binding.type === 'appVolume'
+      ? Math.round(
+          Math.max(
+            0,
+            Math.min(
+              100,
+              control.initial ?? ((control.min ?? 0) + (control.max ?? 100)) / 2,
+            ),
+          ),
+        )
+      : null
 
   if (control.binding.type === 'media') {
     return (
@@ -132,6 +146,9 @@ export function ControlPreview({
       <span className="control-copy">
         <span className="control-name">{label || 'Control'}</span>
         {sublabel && <span className="control-sublabel">{sublabel}</span>}
+        {appPercent !== null && (
+          <span className="control-value mono">{appPercent}%</span>
+        )}
       </span>
     </div>
   )

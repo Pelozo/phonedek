@@ -10,7 +10,7 @@ import {
   pageCapacity,
   pageGrid,
 } from '@phonedek/shared'
-import type { Action, ControlSpec, DeckButton, DeckConfig, LightTarget, MicAction, ObsAction } from '@phonedek/shared'
+import type { Action, ControlSpec, DeckButton, DeckConfig, LightTarget, MicAction, MixerSession, ObsAction } from '@phonedek/shared'
 import type { AppState, ObsInputView, ServerInfoView, UpdateStatus, PermissionStatus } from '../../shared/api'
 import { isUpdateNoticeVisible, updateIndicatorLabel } from '../../shared/update-status'
 import { DeckCanvas } from './components/DeckCanvas'
@@ -18,6 +18,7 @@ import { DeckMark, Icon } from './components/Icons'
 import { Inspector } from './components/Inspector'
 import { LightPickerDialog } from './components/LightPickerDialog'
 import { PopMenu } from './components/Menu'
+import { MixerSessionDialog } from './components/MixerSessionDialog'
 import { ObsInputDialog } from './components/ObsInputDialog'
 import { PairDialog } from './components/PairDialog'
 import { PermissionBanner } from './components/PermissionBanner'
@@ -25,6 +26,12 @@ import { ConfirmProvider } from './components/Primitives'
 import { SettingsDialog } from './components/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
 import { cutButtonFromPage, moveButtonToPage, pasteButtonIntoPage } from './lib/clipboard'
+import {
+  APP_VOLUME_STATUS_TILES,
+  createAppVolumeButton,
+  createAppVolumeStatusButton,
+  type AppVolumeStatusTilePreset,
+} from './lib/appVolume'
 import { createKeyboardLauncher, keyboardSpanCandidates } from './lib/keyboard'
 import { LIGHT_STATUS_TILES, createLightStatusButton, type LightStatusTilePreset } from './lib/lightStatus'
 import { lightControlSpec } from './lib/lights'
@@ -56,6 +63,10 @@ type LightPickerRequest =
   | { kind: 'control'; target: LightTarget }
   | { kind: 'status'; preset: LightStatusTilePreset }
 
+type AppVolumePickerRequest =
+  | { kind: 'control' }
+  | { kind: 'status'; preset: AppVolumeStatusTilePreset }
+
 /** Clipboard shortcuts must never steal native text editing. */
 function isEditableTarget(target: EventTarget | null): boolean {
   const element = target as HTMLElement | null
@@ -80,6 +91,7 @@ function AppContent() {
   const [settingsCategory, setSettingsCategory] = useState<SettingsCategoryId>('general')
   const [obsPickerOpen, setObsPickerOpen] = useState(false)
   const [lightPicker, setLightPicker] = useState<LightPickerRequest | null>(null)
+  const [appVolumePicker, setAppVolumePicker] = useState<AppVolumePickerRequest | null>(null)
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
   const [permission, setPermission] = useState<PermissionStatus | null>(null)
   const [permissionBusy, setPermissionBusy] = useState(false)
@@ -833,6 +845,86 @@ function AppContent() {
     else addLightStatusTile(request.preset, light)
   }
 
+  const addAppVolumeControl = (session: MixerSession): void => {
+    if (!config || !profile || !page) return
+    const grid = pageGrid(profile, page)
+    const spanCandidates = [
+      { columns: 3, rows: 1 },
+      { columns: 1, rows: 1 },
+    ]
+    const findSlot = (span: { columns: number; rows: number }): number | null => {
+      for (let candidate = 0; candidate < grid.columns * grid.rows; candidate += 1) {
+        if (canPlaceButton(page.buttons, candidate, span, grid)) return candidate
+      }
+      return null
+    }
+
+    let span: { columns: number; rows: number } | null = null
+    let slot: number | null = null
+    for (const candidate of spanCandidates) {
+      const found = findSlot(candidate)
+      if (found !== null) {
+        span = candidate
+        slot = found
+        break
+      }
+    }
+    if (slot === null || span === null) {
+      showToast('No free cell left on this page. Resize the grid or remove a button first.', 'error')
+      return
+    }
+    const fallback = span.columns !== 3 || span.rows !== 1
+    const name = session.name || session.process
+    const button = createAppVolumeButton(session, slot, span)
+    try {
+      const next = addButton(config, profile.id, page.id, button)
+      setConfig(next)
+      setSelectedButtonId(button.id)
+      showToast(
+        fallback
+          ? `App volume for ${name} added as ${span.columns}×${span.rows} — no 3×1 space was free`
+          : `App volume for ${name} added — tap the tile label to mute`,
+        'success',
+      )
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error')
+    }
+  }
+
+  const addAppVolumeStatusTile = (
+    preset: AppVolumeStatusTilePreset,
+    session: MixerSession,
+  ): void => {
+    if (!config || !profile || !page) return
+    const slot = nextFreeSlotForPage(profile, page)
+    if (slot === null) {
+      showToast('This page is full. Add rows/columns or delete a button first.', 'error')
+      return
+    }
+    const button = createAppVolumeStatusButton(preset, slot, session)
+    try {
+      const next = addButton(config, profile.id, page.id, button)
+      setConfig(next)
+      setSelectedButtonId(button.id)
+      showToast(
+        `${preset.menuLabel} for ${session.name || session.process} added${
+          preset.action ? ' — tap toggles mute' : ' — read-only, tapping does nothing'
+        }`,
+        'success',
+      )
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error')
+    }
+  }
+
+  const pickAppVolumeSession = (session: MixerSession): void => {
+    const request = appVolumePicker
+    setAppVolumePicker(null)
+    if (!request) return
+    if (request.kind === 'control') addAppVolumeControl(session)
+    else addAppVolumeStatusTile(request.preset, session)
+  }
+
   const openObsInputPicker = (): void => {
     if (!server) return
     if (server.obsStatus.state !== 'connected') {
@@ -965,11 +1057,24 @@ function AppContent() {
                   onClick: () => addNewControl('mic'),
                 },
                 {
+                  label: 'App volume',
+                  icon: 'sliders',
+                  description: '3 × 1 · pick an app, slider + tap to mute',
+                  onClick: () => setAppVolumePicker({ kind: 'control' }),
+                },
+                {
                   label: 'Volume wheel',
                   icon: 'sliders',
                   description: '2 × 1 · turn or drag for small ± steps',
                   onClick: () => addNewControl('volume-wheel'),
                 },
+                ...APP_VOLUME_STATUS_TILES.map((preset) => ({
+                  label: preset.menuLabel,
+                  section: 'App status',
+                  icon: preset.menuIcon,
+                  description: preset.menuDescription,
+                  onClick: () => setAppVolumePicker({ kind: 'status', preset }),
+                })),
                 {
                   label: 'Media scrub',
                   section: 'Media',
@@ -1122,6 +1227,22 @@ function AppContent() {
         </footer>
       </main>
 
+      {appVolumePicker && (
+        <MixerSessionDialog
+          title={
+            appVolumePicker.kind === 'control'
+              ? 'Add app volume'
+              : appVolumePicker.preset.menuLabel
+          }
+          description={
+            appVolumePicker.kind === 'control'
+              ? 'Pick the app whose audio this slider controls. It seeds the current level and taps toggle mute.'
+              : 'Pick the app this read-only status tile follows. Browser tabs may share one process.'
+          }
+          onPick={pickAppVolumeSession}
+          onClose={() => setAppVolumePicker(null)}
+        />
+      )}
       {obsPickerOpen && (
         <ObsInputDialog onPick={addObsInput} onClose={() => setObsPickerOpen(false)} />
       )}

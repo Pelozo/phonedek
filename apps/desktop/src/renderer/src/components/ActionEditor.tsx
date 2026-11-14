@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from 'react'
 import { describeAction, formatCombo } from '@phonedek/shared'
-import type { ConfigAction, DeckPage, ExecutableAction, LightAction, MacroAction, MacroStep, MediaKey, ObsAction, TwitchAction } from '@phonedek/shared'
+import type { DeckPage, ExecutableAction, LightAction, MacroAction, MacroStep, MediaKey, ObsAction, TwitchAction } from '@phonedek/shared'
 import { Icon, type IconName } from './Icons'
 import { NumberField } from './Primitives'
 import { Keycaps, ShortcutDialog } from './ShortcutDialog'
@@ -8,9 +8,12 @@ import { MacroEditor } from './MacroEditor'
 import { LightActionEditor } from './LightActionEditor'
 import { ObsActionEditor } from './ObsActionEditor'
 import { TwitchActionEditor } from './TwitchActionEditor'
+import { AppVolumeActionEditor } from './AppVolumeActionEditor'
 import { lightActionTitle } from '../lib/lights'
 import { obsActionTitle } from '../lib/obs'
 import { twitchActionTitle } from '../lib/twitch'
+import type { EditorAction } from '../lib/appVolume'
+import { appVolumeActionTitle } from '../lib/appVolume'
 import {
   KEYBOARD_ACTION_BODY,
   KEYBOARD_ACTION_SUMMARY,
@@ -106,23 +109,25 @@ function lightIconName(_action: LightAction): IconName {
   return 'light'
 }
 
-function actionIconName(action: ConfigAction): IconName {
+function actionIconName(action: EditorAction): IconName {
   if (isKeyboardAction(action)) return 'keyboard'
   if (action.type === 'obs') return obsIconName(action)
   if (action.type === 'twitch') return twitchIconName(action)
   if (action.type === 'light') return lightIconName(action)
+  if (action.type === 'appVolume') return 'sliders'
   return ACTION_ICONS[action.type]
 }
 
-function actionTitle(action: ConfigAction): string {
+function actionTitle(action: EditorAction): string {
   if (isKeyboardAction(action)) return KEYBOARD_ACTION_TITLE
   if (action.type === 'obs') return obsActionTitle(action)
   if (action.type === 'twitch') return twitchActionTitle(action)
   if (action.type === 'light') return lightActionTitle(action)
+  if (action.type === 'appVolume') return appVolumeActionTitle(action)
   return ACTION_TITLES[action.type]
 }
 
-function actionSummary(action: ConfigAction, platform: string): string {
+function actionSummary(action: EditorAction, platform: string): string {
   if (isKeyboardAction(action)) return KEYBOARD_ACTION_SUMMARY
   return describeAction(action, platform)
 }
@@ -203,15 +208,15 @@ export function ActionEditor({
   onMove,
   onTest,
 }: {
-  action: ConfigAction
+  action: EditorAction
   index: number
   total: number
   pages: DeckPage[]
   server: ServerInfoView | null
-  onUpdate: (action: ConfigAction) => void
+  onUpdate: (action: EditorAction) => void
   onDelete: () => void
   onMove: (direction: -1 | 1) => void
-  onTest: (action: ConfigAction) => void
+  onTest: (action: EditorAction) => void
 }) {
   const [shortcutOpen, setShortcutOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -475,6 +480,10 @@ export function ActionEditor({
 
         {action.type === 'light' && (
           <LightActionEditor action={action} server={server} onUpdate={onUpdate} />
+        )}
+
+        {action.type === 'appVolume' && (
+          <AppVolumeActionEditor action={action} onUpdate={onUpdate} />
         )}
 
         {action.type === 'page' && (
