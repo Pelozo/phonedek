@@ -1145,6 +1145,7 @@ function AppContent() {
         <SettingsDialog
           server={server}
           settings={server.settings}
+          profiles={config.profiles}
           serverName={config.serverName}
           updateStatus={updateStatus}
           permission={permission}

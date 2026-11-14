@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { BRIGHTNESS_CAPABILITY } from '@phonedek/shared'
-import type { ConnectedClient, DeckConfig } from '@phonedek/shared'
+import type { ConnectedClient, DeckConfig, DeckProfile } from '@phonedek/shared'
 import type {
   ObsInputView,
   ObsSettingsInput,
@@ -17,6 +17,7 @@ import {
   updateProgressPercent,
 } from '../../../shared/update-status'
 import { obsEndpoint, obsStatusSummary } from '../lib/obs'
+import { AutoProfileSettings } from './AutoProfileSettings'
 import { Icon } from './Icons'
 import { LightsSettings } from './LightsSettings'
 import { Modal, Slider, Toggle, useConfirm } from './Primitives'
@@ -139,6 +140,7 @@ function PhoneBrightnessRow({
 export function SettingsDialog({
   server,
   settings,
+  profiles,
   serverName,
   updateStatus,
   permission,
@@ -154,6 +156,7 @@ export function SettingsDialog({
 }: {
   server: ServerInfoView
   settings: SettingsView
+  profiles: ReadonlyArray<DeckProfile>
   serverName: string
   updateStatus: UpdateStatus | null
   permission: PermissionStatus | null
@@ -728,6 +731,13 @@ export function SettingsDialog({
 
       <LightsSettings
         settings={settings}
+        onServerUpdate={onServerUpdate}
+        onToast={onToast}
+      />
+
+      <AutoProfileSettings
+        settings={settings}
+        profiles={profiles}
         onServerUpdate={onServerUpdate}
         onToast={onToast}
       />
