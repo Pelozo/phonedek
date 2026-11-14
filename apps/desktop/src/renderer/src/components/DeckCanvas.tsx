@@ -24,6 +24,7 @@ import { Icon } from './Icons'
 function statusBadge(state: StateBinding): string {
   if (state.type === 'obs') return obsStateBadge(state.target)
   if (state.type === 'twitch') return twitchStateBadge(state.target)
+  if (state.type === 'appVolume') return state.target === 'mute' ? 'APP MUTE' : 'APP VOL'
   return lightStateBadge(state.target)
 }
 
@@ -33,6 +34,9 @@ function statusSummary(
 ): string | null {
   if (state.type === 'obs') return obsStateBindingSummary(state)
   if (state.type === 'twitch') return twitchStateBindingSummary(state)
+  if (state.type === 'appVolume') {
+    return state.target === 'mute' ? 'App mute' : 'App volume'
+  }
   return lightStateBindingSummary(state, lights)
 }
 

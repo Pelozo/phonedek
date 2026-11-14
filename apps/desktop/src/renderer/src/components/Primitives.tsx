@@ -11,6 +11,8 @@ export function Modal({
   wide,
   compact,
   closeOnEscape = true,
+  bodyClassName,
+  className: extraClassName,
 }: {
   title: string
   subtitle?: string
@@ -20,6 +22,10 @@ export function Modal({
   wide?: boolean
   compact?: boolean
   closeOnEscape?: boolean
+  /** Extra hook for dialogs that own their scrolling (e.g. Settings). */
+  bodyClassName?: string
+  /** Extra panel class for dialogs with a stable size or custom chrome. */
+  className?: string
 }) {
   const backdropRef = useRef<HTMLDivElement>(null)
 
@@ -38,7 +44,9 @@ export function Modal({
     return () => window.removeEventListener('keydown', handler)
   }, [closeOnEscape, onClose])
 
-  const className = wide ? 'modal modal-wide' : compact ? 'modal modal-compact' : 'modal'
+  const className = [wide ? 'modal modal-wide' : compact ? 'modal modal-compact' : 'modal', extraClassName]
+    .filter(Boolean)
+    .join(' ')
 
   return createPortal(
     <div
@@ -56,7 +64,7 @@ export function Modal({
             <Icon name="x" />
           </button>
         </header>
-        <div className="modal-body">{children}</div>
+        <div className={bodyClassName ? `modal-body ${bodyClassName}` : 'modal-body'}>{children}</div>
         {footer && <footer className="modal-footer">{footer}</footer>}
       </div>
     </div>,

@@ -30,6 +30,7 @@ import { LIGHT_STATUS_TILES, createLightStatusButton, type LightStatusTilePreset
 import { lightControlSpec } from './lib/lights'
 import { MEDIA_SCRUB_SPANS, mediaScrubControl } from './lib/media'
 import { OBS_STATUS_TILES, createObsStatusButton, type ObsStatusTilePreset } from './lib/obsStatus'
+import type { SettingsCategoryId } from './lib/settingsCategories'
 import {
   TWITCH_STATUS_TILES,
   createTwitchStatusButton,
@@ -76,6 +77,7 @@ function AppContent() {
   const [toast, setToast] = useState<ToastState | null>(null)
   const [pairOpen, setPairOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsCategory, setSettingsCategory] = useState<SettingsCategoryId>('general')
   const [obsPickerOpen, setObsPickerOpen] = useState(false)
   const [lightPicker, setLightPicker] = useState<LightPickerRequest | null>(null)
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
@@ -93,6 +95,11 @@ function AppContent() {
     setToast({ message, kind })
     if (toastTimer.current) window.clearTimeout(toastTimer.current)
     toastTimer.current = window.setTimeout(() => setToast(null), 3800)
+  }, [])
+
+  const openSettings = useCallback((category: SettingsCategoryId = 'general') => {
+    setSettingsCategory(category)
+    setSettingsOpen(true)
   }, [])
 
   useEffect(
@@ -889,7 +896,7 @@ function AppContent() {
           onSelectProfile={selectProfile}
           onSelectPage={selectPage}
           onOpenPair={() => setPairOpen(true)}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={() => openSettings('general')}
           onToast={showToast}
         />
 
@@ -912,7 +919,7 @@ function AppContent() {
               <button
                 type="button"
                 className={`update-pill ${updateStatus.state}`}
-                onClick={() => setSettingsOpen(true)}
+                onClick={() => openSettings('about')}
                 title="Open update settings"
               >
                 <Icon name={updateStatus.state === 'downloaded' ? 'arrow-up' : 'download'} size={15} />
@@ -1045,7 +1052,7 @@ function AppContent() {
               Pair phone
               {server.clients.length > 0 && <span className="client-count">{server.clients.length}</span>}
             </button>
-            <button type="button" className="icon-button bordered" onClick={() => setSettingsOpen(true)} aria-label="Settings">
+            <button type="button" className="icon-button bordered" onClick={() => openSettings()} aria-label="Settings">
               <Icon name="settings" size={18} />
             </button>
           </div>
@@ -1127,7 +1134,7 @@ function AppContent() {
           onPick={pickLight}
           onOpenSettings={() => {
             setLightPicker(null)
-            setSettingsOpen(true)
+            openSettings('integrations')
           }}
           onClose={() => setLightPicker(null)}
         />
@@ -1158,6 +1165,7 @@ function AppContent() {
           onServerUpdate={setServer}
           onConfigImported={handleConfigImported}
           onToast={showToast}
+          initialCategory={settingsCategory}
         />
       )}
       {toast && <div className={`toast ${toast.kind}`}>{toast.message}</div>}

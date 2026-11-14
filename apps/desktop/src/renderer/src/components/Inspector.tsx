@@ -100,6 +100,7 @@ const asLegacyAction = (action: ConfigAction): Action => action as unknown as Ac
 function stateBadge(state: StateBinding): string {
   if (state.type === 'obs') return obsStateBadge(state.target)
   if (state.type === 'twitch') return twitchStateBadge(state.target)
+  if (state.type === 'appVolume') return state.target === 'mute' ? 'APP MUTE' : 'APP VOL'
   return lightStateBadge(state.target)
 }
 
@@ -109,6 +110,9 @@ function stateSummary(
 ): string {
   if (state.type === 'obs') return obsStateBindingSummary(state) ?? 'OBS status'
   if (state.type === 'twitch') return twitchStateBindingSummary(state) ?? 'Twitch status'
+  if (state.type === 'appVolume') {
+    return state.target === 'mute' ? 'App mute status' : 'App volume status'
+  }
   return lightStateBindingSummary(state, lights) ?? lightTargetInfo(state.target).label
 }
 
