@@ -312,6 +312,66 @@ class DeckConnectionControlStateTest {
     }
 
     @Test
+    fun parsesAppVolumePercentMuteAndNoSessionStates() {
+        val message = DeckJson.parseControlState(
+            """
+                {
+                  "type": "controlState",
+                  "profileId": "p1",
+                  "pageId": "pg1",
+                  "states": [
+                    {
+                      "controlId": "app-volume",
+                      "revision": 31,
+                      "value": 0.42,
+                      "muted": false,
+                      "available": true,
+                      "detail": "42%",
+                      "active": true
+                    },
+                    {
+                      "controlId": "app-muted",
+                      "revision": 32,
+                      "value": 0.42,
+                      "muted": true,
+                      "available": true,
+                      "detail": "MUTED",
+                      "active": false
+                    },
+                    {
+                      "controlId": "app-closed",
+                      "revision": 33,
+                      "available": false,
+                      "detail": "NO SESSION"
+                    }
+                  ]
+                }
+            """.trimIndent(),
+        )
+
+        assertNotNull(message)
+        val states = message!!.states.associateBy { it.controlId }
+        assertEquals(3, states.size)
+
+        val live = states.getValue("app-volume")
+        assertEquals(0.42f, live.value!!, 0.0001f)
+        assertFalse(live.muted!!)
+        assertTrue(live.available)
+        assertEquals("42%", live.detail)
+        assertTrue(live.active!!)
+
+        val muted = states.getValue("app-muted")
+        assertTrue(muted.muted!!)
+        assertEquals("MUTED", muted.detail)
+        assertFalse(muted.active!!)
+
+        val gone = states.getValue("app-closed")
+        assertFalse(gone.available)
+        assertNull(gone.value)
+        assertEquals("NO SESSION", gone.detail)
+    }
+
+    @Test
     fun malformedEntriesAreDroppedWithoutLosingTheBatch() {
         val message = DeckJson.parseControlState(
             """

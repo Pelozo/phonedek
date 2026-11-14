@@ -822,6 +822,264 @@ class ControlStateStoreTest {
     }
 
     @Test
+    fun watchIdsIncludeAppVolumeControlsAndStateTiles() {
+        val page = DeckPage(
+            id = "pg1",
+            buttons = listOf(
+                button("plain", control = null),
+                button("app-slider", type = "appVolume", mode = null, target = "volume"),
+                button(
+                    "app-wheel",
+                    kind = "dial",
+                    type = "appVolume",
+                    mode = null,
+                    target = "volume",
+                ),
+                button(
+                    "app-delta",
+                    type = "appVolume",
+                    mode = null,
+                    target = "volume",
+                    emit = "delta",
+                ),
+                button(
+                    "app-bad-target",
+                    type = "appVolume",
+                    mode = null,
+                    target = "mute",
+                ),
+                button(
+                    "app-volume-tile",
+                    control = null,
+                    state = StateBindingDto(type = "appVolume", target = "volume"),
+                ),
+                button(
+                    "app-mute-tile",
+                    control = null,
+                    state = StateBindingDto(type = "appVolume", target = "mute"),
+                ),
+                button(
+                    "app-with-control",
+                    type = "appVolume",
+                    mode = null,
+                    target = "volume",
+                    state = StateBindingDto(type = "appVolume", target = "mute"),
+                ),
+                button(
+                    "",
+                    control = null,
+                    state = StateBindingDto(type = "appVolume", target = "volume"),
+                ),
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                "app-slider",
+                "app-wheel",
+                "app-volume-tile",
+                "app-mute-tile",
+                "app-with-control",
+            ),
+            ControlStateStore.statefulControlIds(page),
+        )
+    }
+
+    @Test
+    fun appVolumeDisplayTextShowsPercentMuteAndQuietOutages() {
+        assertEquals(
+            "42%",
+            ControlStateStore.displayText(
+                localText = "50%",
+                statePresent = true,
+                stateAvailable = true,
+                stateMuted = false,
+                stateDetail = "42%",
+                interacting = false,
+                unavailableText = ControlStateStore.NO_SESSION,
+            ),
+        )
+        assertEquals(
+            ControlStateStore.MUTED,
+            ControlStateStore.displayText(
+                localText = "42%",
+                statePresent = true,
+                stateAvailable = true,
+                stateMuted = true,
+                stateDetail = "MUTED",
+                interacting = false,
+                unavailableText = ControlStateStore.NO_SESSION,
+            ),
+        )
+        // A missing app/session keeps the local value visually but shows the
+        // exact desktop reason; it never falls back to a generic NO INPUT.
+        assertEquals(
+            ControlStateStore.NO_SESSION,
+            ControlStateStore.displayText(
+                localText = "42%",
+                statePresent = true,
+                stateAvailable = false,
+                stateMuted = false,
+                stateDetail = "NO SESSION",
+                interacting = false,
+                unavailableText = ControlStateStore.NO_SESSION,
+            ),
+        )
+        assertEquals(
+            ControlStateStore.NO_SESSION,
+            ControlStateStore.displayText(
+                localText = "42%",
+                statePresent = true,
+                stateAvailable = false,
+                stateMuted = false,
+                stateDetail = "Unavailable",
+                interacting = false,
+                unavailableText = ControlStateStore.NO_SESSION,
+            ),
+        )
+        // Unsupported hosts (macOS) and broken mixers are quiet tile text too.
+        assertEquals(
+            ControlStateStore.UNSUPPORTED,
+            ControlStateStore.displayText(
+                localText = "42%",
+                statePresent = true,
+                stateAvailable = false,
+                stateMuted = false,
+                stateDetail = "UNSUPPORTED",
+                interacting = false,
+                unavailableText = ControlStateStore.NO_SESSION,
+            ),
+        )
+        // Dragging keeps the local readout even when the session vanished.
+        assertEquals(
+            "73%",
+            ControlStateStore.displayText(
+                localText = "73%",
+                statePresent = true,
+                stateAvailable = false,
+                stateMuted = false,
+                stateDetail = "NO SESSION",
+                interacting = true,
+                unavailableText = ControlStateStore.NO_SESSION,
+            ),
+        )
+        // No state entry at all (old desktop) leaves the local value alone.
+        assertEquals(
+            "73%",
+            ControlStateStore.displayText(
+                localText = "73%",
+                statePresent = false,
+                stateAvailable = false,
+                stateMuted = false,
+                stateDetail = null,
+                interacting = false,
+                unavailableText = ControlStateStore.NO_SESSION,
+            ),
+        )
+    }
+
+    @Test
+    fun appVolumeStateTilesShowPercentMuteAndNoSession() {
+        fun text(
+            target: String,
+            detail: String? = null,
+            active: Boolean? = null,
+            available: Boolean = true,
+            muted: Boolean = false,
+            value: Float? = null,
+        ) = ControlStateStore.stateTileText(
+            StateBindingDto(type = "appVolume", target = target),
+            ControlStateEntryDto(
+                controlId = "tile",
+                revision = 1,
+                value = value,
+                muted = muted,
+                available = available,
+                detail = detail,
+                active = active,
+            ),
+            stateCapable = true,
+        )
+
+        assertEquals("42%", text("volume", detail = "42%", active = true))
+        assertEquals(
+            "MUTED",
+            text("volume", detail = "MUTED", muted = true, active = false),
+        )
+        // Sparse updates derive the volume percentage from the normalized value.
+        assertEquals("63%", text("volume", value = 0.63f, active = true))
+        // Mute tiles use LIVE/MUTED (detail first, then the active cue).
+        assertEquals("LIVE", text("mute", detail = "LIVE", active = true))
+        assertEquals("MUTED", text("mute", detail = "MUTED", muted = true, active = false))
+        assertEquals("LIVE", text("mute", active = true))
+        assertEquals("MUTED", text("mute", active = false))
+
+        // Missing sessions and unsupported hosts are quiet chip text.
+        assertEquals("NO SESSION", text("volume", detail = "NO SESSION", available = false))
+        assertEquals("UNSUPPORTED", text("mute", detail = "UNSUPPORTED", available = false))
+        assertEquals(
+            ControlStateStore.NO_SESSION,
+            text("volume", available = false, detail = null),
+        )
+
+        // No entry yet: placeholder only on a state-capable desktop.
+        assertNull(
+            ControlStateStore.stateTileText(
+                StateBindingDto(type = "appVolume", target = "volume"),
+                null,
+                stateCapable = false,
+            ),
+        )
+        assertEquals(
+            ControlStateStore.NO_STATE,
+            ControlStateStore.stateTileText(
+                StateBindingDto(type = "appVolume", target = "volume"),
+                null,
+                stateCapable = true,
+            ),
+        )
+    }
+
+    @Test
+    fun detectsAppVolumeValueControlsActionsAndState() {
+        val app = ControlDto(
+            kind = "slider",
+            emit = "value",
+            binding = ControlBindingDto(type = "appVolume", target = "volume"),
+        )
+        assertTrue(ControlStateStore.isAppVolumeValueControl(app))
+        assertTrue(ControlStateStore.isAppVolumeValueControl(app.copy(kind = "dial")))
+        assertFalse(ControlStateStore.isAppVolumeValueControl(app.copy(emit = "delta")))
+        assertFalse(
+            ControlStateStore.isAppVolumeValueControl(
+                app.copy(binding = app.binding.copy(target = "mute")),
+            ),
+        )
+        assertFalse(ControlStateStore.isAppVolumeValueControl(null))
+
+        assertTrue(
+            ControlStateStore.hasAppVolumeAction(
+                listOf(ActionDto(type = "appVolume", action = "toggleMute")),
+            ),
+        )
+        assertFalse(
+            ControlStateStore.hasAppVolumeAction(
+                listOf(ActionDto(type = "light", action = "togglePower")),
+            ),
+        )
+        assertTrue(
+            ControlStateStore.hasAppVolumeStateBinding(
+                DeckButton(state = StateBindingDto(type = "appVolume", target = "mute")),
+            ),
+        )
+        assertFalse(
+            ControlStateStore.hasAppVolumeStateBinding(
+                DeckButton(state = StateBindingDto(type = "twitch", target = "live")),
+            ),
+        )
+    }
+
+    @Test
     fun normalizedStateMapsToTheControlRangeAndStep() {
         assertEquals(
             42f,

@@ -60,6 +60,26 @@ class ValueEntryTest {
     }
 
     @Test
+    fun appVolumeEntryUsesTheZeroToHundredPercentRange() {
+        val app = ControlDto(
+            kind = "slider",
+            emit = "value",
+            binding = ControlBindingDto(type = "appVolume", target = "volume"),
+            min = 0f,
+            max = 100f,
+            step = 1f,
+            unit = "%",
+        )
+
+        assertTrue(ValueEntry.supports(app))
+        assertTrue(ValueEntry.supports(app.copy(kind = "dial")))
+        assertEquals(42f, ValueEntry.parse("42", 0f, 100f, 1f).value!!, 0.0001f)
+        assertEquals(0f, ValueEntry.parse("-5", 0f, 100f, 1f).value!!, 0.0001f)
+        assertEquals(100f, ValueEntry.parse("150", 0f, 100f, 1f).value!!, 0.0001f)
+        assertEquals("0–100 %", ValueEntry.rangeText(0f, 100f, "%"))
+    }
+
+    @Test
     fun validEntryIsUsedAsIs() {
         val parsed = ValueEntry.parse("42", minValue = 0f, maxValue = 100f, step = 1f)
 

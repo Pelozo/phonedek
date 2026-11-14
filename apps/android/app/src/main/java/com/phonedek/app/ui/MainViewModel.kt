@@ -289,7 +289,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     // otherwise an explicit press looks like a dead button.
                     if (
                         (isObsButton(buttonId) || isTwitchButton(buttonId) ||
-                            isLightButton(buttonId)) &&
+                            isLightButton(buttonId) || isAppVolumeButton(buttonId)) &&
                         isQuietAvailabilityFailure(failure)
                     ) {
                         Diag.w("State action rejected button=$buttonId error=\"$failure\"")
@@ -312,7 +312,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val failure = error?.takeIf { it.isNotBlank() }
                         ?: "The desktop could not run that control."
                     if (isObsControl(controlId) || isLightControl(controlId) ||
-                        isMediaControl(controlId)
+                        isMediaControl(controlId) || isAppVolumeControl(controlId)
                     ) {
                         Diag.w("State input rejected control=$controlId error=\"$failure\"")
                     } else {
@@ -1657,6 +1657,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun isMediaControl(controlId: String): Boolean =
         ControlStateStore.isMediaValueControl(activeButton(controlId)?.control)
 
+    private fun isAppVolumeControl(controlId: String): Boolean =
+        ControlStateStore.isAppVolumeValueControl(activeButton(controlId)?.control)
+
     private fun isObsButton(buttonId: String): Boolean {
         val button = activeButton(buttonId) ?: return false
         return ControlStateStore.hasObsAction(button.actions) ||
@@ -1669,10 +1672,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ControlStateStore.hasTwitchStateBinding(button)
     }
 
+    private fun isAppVolumeButton(buttonId: String): Boolean {
+        val button = activeButton(buttonId) ?: return false
+        return ControlStateStore.hasAppVolumeAction(button.actions) ||
+            ControlStateStore.hasAppVolumeStateBinding(button)
+    }
+
     /**
      * Background integration outages are already visible as tile state
-     * (NO OBS, NO TWITCH, NO LIGHT, OFFLINE). Suppress those toasts, but let
-     * functional rejections (e.g. replay buffer not active) reach the user.
+     * (NO OBS, NO TWITCH, NO LIGHT, NO SESSION, OFFLINE). Suppress those
+     * toasts, but let functional rejections (e.g. replay buffer not active)
+     * reach the user.
      */
     private fun isQuietAvailabilityFailure(message: String): Boolean {
         val text = message.lowercase()
@@ -1685,6 +1695,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             "no obs",
             "no twitch",
             "no light",
+            "no audio session",
+            "no session",
+            "no mixer",
+            "no match",
+            "unsupported",
             "not configured",
             "update phonedek",
         ).any(text::contains)

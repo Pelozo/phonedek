@@ -655,6 +655,222 @@ class DeckModelsTest {
     }
 
     @Test
+    fun parsesAppVolumeControlAndMuteAction() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [{
+                    "id": "chrome",
+                    "slot": 0,
+                    "label": "Chrome",
+                    "control": {
+                      "kind": "slider",
+                      "axis": "horizontal",
+                      "emit": "value",
+                      "binding": {
+                        "type": "appVolume",
+                        "target": "volume",
+                        "match": { "process": "Google Chrome" }
+                      },
+                      "min": 0,
+                      "max": 100,
+                      "step": 1,
+                      "initial": 42,
+                      "unit": "%"
+                    },
+                    "actions": [
+                      {
+                        "type": "appVolume",
+                        "action": "toggleMute",
+                        "match": { "process": "Google Chrome" }
+                      }
+                    ]
+                  }]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val button = DeckJson.parse(raw)!!.profiles.single().pages.single()
+            .buttons.single()
+        val control = button.control!!
+        assertEquals("slider", control.kind)
+        assertEquals("value", control.emit)
+        assertEquals("appVolume", control.binding.type)
+        assertEquals("volume", control.binding.target)
+        assertEquals("Google Chrome", control.binding.match?.process)
+        assertEquals(0f, control.min!!, 0.001f)
+        assertEquals(100f, control.max!!, 0.001f)
+        assertEquals(1f, control.step!!, 0.001f)
+        assertEquals(42f, control.initial!!, 0.001f)
+        assertEquals("%", control.unit)
+        assertEquals("appVolume", button.actions.single().type)
+        assertEquals("toggleMute", button.actions.single().action)
+    }
+
+    @Test
+    fun appVolumeDefaultsToPercentRangeAndRejectsBadShapes() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [
+                    {
+                      "id": "good",
+                      "slot": 0,
+                      "control": {
+                        "kind": "dial",
+                        "emit": "value",
+                        "binding": {
+                          "type": "appVolume",
+                          "target": "volume",
+                          "match": { "process": "  discord.exe  " }
+                        }
+                      }
+                    },
+                    {
+                      "id": "clamped",
+                      "slot": 1,
+                      "control": {
+                        "kind": "slider",
+                        "emit": "value",
+                        "binding": { "type": "appVolume", "target": "volume" },
+                        "min": -20,
+                        "max": 250
+                      }
+                    },
+                    {
+                      "id": "bad-target",
+                      "slot": 2,
+                      "control": {
+                        "kind": "slider",
+                        "emit": "value",
+                        "binding": { "type": "appVolume", "target": "mute" }
+                      }
+                    },
+                    {
+                      "id": "bad-mode",
+                      "slot": 3,
+                      "control": {
+                        "kind": "slider",
+                        "emit": "value",
+                        "binding": {
+                          "type": "appVolume",
+                          "target": "volume",
+                          "mode": "relative"
+                        }
+                      }
+                    },
+                    {
+                      "id": "bad-emit",
+                      "slot": 4,
+                      "control": {
+                        "kind": "slider",
+                        "emit": "delta",
+                        "binding": { "type": "appVolume", "target": "volume" }
+                      }
+                    }
+                  ]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val buttons = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons
+        val good = buttons.first { it.id == "good" }.control!!
+        assertEquals("dial", good.kind)
+        assertEquals(0f, good.min!!, 0.001f)
+        assertEquals(100f, good.max!!, 0.001f)
+        assertEquals(1f, good.step!!, 0.001f)
+        assertEquals(50f, good.initial!!, 0.001f)
+        assertEquals("%", good.unit)
+        assertEquals("discord.exe", good.binding.match?.process)
+
+        // Out-of-contract ranges are repaired, not rendered as a 150 % slider.
+        val clamped = buttons.first { it.id == "clamped" }.control!!
+        assertEquals(0f, clamped.min!!, 0.001f)
+        assertEquals(100f, clamped.max!!, 0.001f)
+        assertNull(clamped.binding.match)
+
+        assertNull(buttons.first { it.id == "bad-target" }.control)
+        assertNull(buttons.first { it.id == "bad-mode" }.control)
+        assertNull(buttons.first { it.id == "bad-emit" }.control)
+    }
+
+    @Test
+    fun parsesAppVolumeStateTargetsAndDropsUnknownOnes() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [
+                    {
+                      "id": "volume",
+                      "slot": 0,
+                      "state": {
+                        "type": "appVolume",
+                        "target": "volume",
+                        "match": { "process": "  Spotify  " }
+                      }
+                    },
+                    {
+                      "id": "mute",
+                      "slot": 1,
+                      "state": {
+                        "type": "appVolume",
+                        "target": "mute",
+                        "match": { "process": "discord" }
+                      }
+                    },
+                    {
+                      "id": "empty-match",
+                      "slot": 2,
+                      "state": { "type": "appVolume", "target": "volume" }
+                    },
+                    {
+                      "id": "legacy-obs",
+                      "slot": 3,
+                      "state": { "type": "obs", "target": "streaming" }
+                    },
+                    {
+                      "id": "bad-target",
+                      "slot": 4,
+                      "state": { "type": "appVolume", "target": "recording" }
+                    }
+                  ]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val buttons = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons
+        val volume = buttons.first { it.id == "volume" }.state!!
+        assertEquals("appVolume", volume.type)
+        assertEquals("volume", volume.target)
+        assertEquals("Spotify", volume.match?.process)
+
+        val mute = buttons.first { it.id == "mute" }.state!!
+        assertEquals("mute", mute.target)
+        assertEquals("discord", mute.match?.process)
+
+        val empty = buttons.first { it.id == "empty-match" }.state!!
+        assertEquals("appVolume", empty.type)
+        assertEquals("volume", empty.target)
+        assertNull(empty.match)
+
+        // Existing OBS configs keep parsing exactly as before.
+        assertEquals("streaming", buttons.first { it.id == "legacy-obs" }.state!!.target)
+        assertNull(buttons.first { it.id == "bad-target" }.state)
+    }
+
+    @Test
     fun parsesEveryObsStateTargetOnPlainButtons() {
         val raw = """
             {

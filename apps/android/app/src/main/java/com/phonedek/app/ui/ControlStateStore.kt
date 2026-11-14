@@ -19,6 +19,9 @@ object ControlStateStore {
     const val NO_TWITCH = "NO TWITCH"
     const val NO_LIGHT = "NO LIGHT"
     const val NO_PLAYER = "NO PLAYER"
+    const val NO_SESSION = "NO SESSION"
+    const val UNSUPPORTED = "UNSUPPORTED"
+    const val NO_MIXER = "NO MIXER"
     const val OFFLINE = "OFFLINE"
     const val MUTED = "MUTED"
     const val SWITCHING = "SWITCHING"
@@ -32,6 +35,9 @@ object ControlStateStore {
         NO_OBS,
         NO_LIGHT,
         NO_PLAYER,
+        NO_SESSION,
+        UNSUPPORTED,
+        NO_MIXER,
         OFFLINE,
         SWITCHING,
         "NO SCENE",
@@ -98,6 +104,28 @@ object ControlStateStore {
             control.binding.type == "media" &&
             control.binding.target == "position"
 
+    /**
+     * True for a per-app volume value control (slider or dial).
+     *
+     * Per-app state rides the existing `control-state-v1` watch channel.
+     * `mixer-v1` only advertises the desktop's full mixer snapshot on
+     * Windows/Linux and is deliberately not required here.
+     */
+    fun isAppVolumeValueControl(control: ControlDto?): Boolean =
+        control != null &&
+            control.kind != "trackpad" &&
+            control.emit == "value" &&
+            control.binding.type == "appVolume" &&
+            control.binding.target == "volume"
+
+    /** True when a button carries a per-app action (tap-to-mute). */
+    fun hasAppVolumeAction(actions: List<ActionDto>): Boolean =
+        actions.any { it.type.trim().lowercase() == "appvolume" }
+
+    /** True for a normal tile with a read-only per-app volume/mute binding. */
+    fun hasAppVolumeStateBinding(button: DeckButton?): Boolean =
+        button?.state?.type == "appVolume"
+
     /** True when a button carries an OBS action (e.g. tap-to-mute). */
     fun hasObsAction(actions: List<ActionDto>): Boolean =
         actions.any { it.type.trim().lowercase() == "obs" }
@@ -129,6 +157,7 @@ object ControlStateStore {
         "obs" -> obsStateTileText(binding, state, stateCapable)
         "twitch" -> twitchStateTileText(binding, state, stateCapable)
         "light" -> lightStateTileText(binding, state, stateCapable)
+        "appVolume" -> appVolumeStateTileText(binding, state, stateCapable)
         else -> null
     }
 
@@ -239,15 +268,48 @@ object ControlStateStore {
         }
     }
 
+    /**
+     * Per-app tiles follow the same detail-first rule as OBS/light. The
+     * desktop sends `42%` for volume, `LIVE`/`MUTED` for mute, and
+     * `NO SESSION`/`UNSUPPORTED` when the process is missing or the host has
+     * no mixer. Missing sessions stay quiet (chip text, never a toast).
+     */
+    private fun appVolumeStateTileText(
+        binding: StateBindingDto,
+        state: ControlStateDto?,
+        stateCapable: Boolean,
+    ): String? {
+        if (state == null) return if (stateCapable) NO_STATE else null
+        val detail = state.detail?.trim()?.takeIf { it.isNotEmpty() }
+        if (!state.available) return detail ?: NO_SESSION
+        if (state.muted == true || detail == MUTED) return MUTED
+        if (detail != null) return detail
+        // Sparse update without a detail: derive the same short form from the
+        // normalized value or the mute cue.
+        return when (binding.target) {
+            "volume" -> state.value?.let { value ->
+                "${(value.coerceIn(0f, 1f) * 100).roundToInt()}%"
+            }
+
+            "mute" -> when (state.active) {
+                true -> "LIVE"
+                false -> MUTED
+                null -> null
+            }
+
+            else -> null
+        }
+    }
+
     /** True when the state chip should use the active/accent treatment. */
     fun stateTileActive(state: ControlStateDto?): Boolean =
         state?.available == true && state.active == true
 
     /**
      * Ids with a desktop live-state producer: absolute output volume,
-     * microphone gain, OBS input volume, local-light controls, media position,
-     * and normal buttons with an OBS/Twitch/light read-only `state` binding.
-     * Relative volume, scroll and trackpads stay open-loop.
+     * microphone gain, OBS input volume, local-light controls, per-app volume,
+     * media position, and normal buttons with an OBS/Twitch/light/app read-only
+     * `state` binding. Relative volume, scroll and trackpads stay open-loop.
      */
     fun statefulControlIds(page: DeckPage): List<String> =
         page.buttons
@@ -255,7 +317,9 @@ object ControlStateStore {
             .filter { button ->
                 // A status tile uses the same channel, even without a control.
                 val stateType = button.state?.type
-                if (stateType == "obs" || stateType == "twitch" || stateType == "light") {
+                if (stateType == "obs" || stateType == "twitch" ||
+                    stateType == "light" || stateType == "appVolume"
+                ) {
                     return@filter true
                 }
                 val control = button.control ?: return@filter false
@@ -270,6 +334,7 @@ object ControlStateStore {
                     "mic" -> control.binding.mode == "gain"
                     "obs" -> control.binding.target == "inputVolume"
                     "light" -> true
+                    "appVolume" -> control.binding.target == "volume"
                     "media" -> control.binding.target == "position"
                     else -> false
                 }

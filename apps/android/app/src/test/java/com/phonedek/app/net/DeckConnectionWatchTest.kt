@@ -43,6 +43,20 @@ class DeckConnectionWatchTest {
     }
 
     @Test
+    fun watchCarriesPerAppControlIdsUnchanged() {
+        val payload = buildWatchPayload(
+            profileId = "p1",
+            pageId = "pg1",
+            controlIds = listOf("app-volume", "app-mute"),
+        )
+
+        val ids = payload["controlIds"] as JsonArray
+        assertEquals(2, ids.size)
+        assertEquals("app-volume", (ids[0] as JsonPrimitive).contentOrNull)
+        assertEquals("app-mute", (ids[1] as JsonPrimitive).contentOrNull)
+    }
+
+    @Test
     fun emptyIdsAreAnExplicitUnsubscribe() {
         val payload = buildWatchPayload(
             profileId = "p1",

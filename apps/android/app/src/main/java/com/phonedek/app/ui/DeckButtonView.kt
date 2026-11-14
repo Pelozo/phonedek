@@ -215,7 +215,8 @@ fun DeckButtonView(
                 statePresent = controlState != null &&
                     (control.binding.type == "mic" ||
                         control.binding.type == "obs" ||
-                        control.binding.type == "light"),
+                        control.binding.type == "light" ||
+                        control.binding.type == "appVolume"),
                 stateMuted = controlState?.muted == true,
                 stateDetail = controlState?.detail,
                 stateRevision = controlState?.revision ?: -1,

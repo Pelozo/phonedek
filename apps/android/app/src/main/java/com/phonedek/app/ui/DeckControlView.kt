@@ -67,6 +67,8 @@ private const val DIAL_DETENT_DEGREES = 15f
  *
  * - Relative deltas are positive for right/up/clockwise.
  * - Absolute volume sends the normalized 0..1 slider value instead.
+ * - Per-app volume uses the same absolute path; the desktop resolves
+ *   `match.process` and reports `42%`/`MUTED`/`NO SESSION`.
  * - Volume sliders map a full relative travel to 100 / stepPercent steps.
  * - Scroll sliders map a full relative travel to 100 wheel units.
  * - Every dial detent sends one relative unit; absolute dials send the new value.
@@ -113,6 +115,7 @@ fun DeckControlView(
     val isMic = control.binding.type == "mic"
     val isObs = control.binding.type == "obs"
     val isLight = control.binding.type == "light"
+    val isAppVolume = control.binding.type == "appVolume"
     val scrollControl = control.binding.type == "scroll"
     // Shortcut wheels are delta-only: the readout is a chord badge, not a
     // numeric value, and there is no live desktop state to follow.
@@ -125,7 +128,7 @@ fun DeckControlView(
     }
     val volumeStepPercent = control.binding.stepPercent?.coerceIn(1, 25) ?: 2
     val sliderWireScale = if (isVolume) 100f / volumeStepPercent else 100f
-    val displayUnit = control.unit ?: if (isVolume || isMic || isObs) "%" else ""
+    val displayUnit = control.unit ?: if (isVolume || isMic || isObs || isAppVolume) "%" else ""
     val contentRotation = LocalButtonContentRotation.current
     val haptics = LocalHapticFeedback.current
     val density = LocalDensity.current
@@ -245,10 +248,12 @@ fun DeckControlView(
             stateMuted = stateMuted,
             stateDetail = stateDetail,
             interacting = interacting,
-            unavailableText = if (isLight) {
-                ControlStateStore.NO_LIGHT
-            } else {
-                ControlStateStore.NO_INPUT
+            unavailableText = when {
+                isLight -> ControlStateStore.NO_LIGHT
+                // A missing process/session is a quiet per-app state, never a
+                // generic "NO INPUT" that suggests a capture-device problem.
+                isAppVolume -> ControlStateStore.NO_SESSION
+                else -> ControlStateStore.NO_INPUT
             },
         )
     }

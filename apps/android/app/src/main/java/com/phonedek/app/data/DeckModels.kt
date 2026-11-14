@@ -106,6 +106,9 @@ data class DeckButton(
  *   the Helix field and sends it as `detail`; no scene/input applies.
  * - `light`: `power`, `brightness`, `temperature`. `light` selects a configured
  *   Elgato device; omitted means the desktop's first configured light.
+ * - `appVolume`: `volume` or `mute`. `match.process` selects the app's audio
+ *   session on Windows/Linux; the desktop resolves it and sends `42%`/`MUTED`
+ *   or `NO SESSION`.
  *
  * Kept as one forgiving wire shape so old OBS-only configs still parse.
  */
@@ -117,6 +120,8 @@ data class StateBindingDto(
     val input: String? = null,
     /** Local-light device id (`type == "light"`); omitted = first light. */
     val light: String? = null,
+    /** Per-app audio selector (`type == "appVolume"`). */
+    val match: AppVolumeMatchDto? = null,
 )
 
 @Serializable
@@ -164,6 +169,10 @@ data class ControlBindingDto(
     // Local Elgato light binding (`type == "light"`). `target` selects the
     // value the slider/dial writes; `light` selects a configured device.
     val light: String? = null,
+    // Per-app audio session selector (`type == "appVolume"`). `process` is the
+    // process or application name as typed in the editor; the desktop resolves
+    // it case-insensitively at read/write time.
+    val match: AppVolumeMatchDto? = null,
     // Shortcut/key-wheel binding (`type == "shortcut"`). The desktop maps
     // deltas to key chords; the phone only renders what one detent sends.
     val keys: List<String> = emptyList(),
@@ -177,6 +186,16 @@ data class ControlBindingDto(
 data class PointerButtonEvent(
     val button: String,
     val action: String,
+)
+
+/**
+ * Per-app audio selector. `process` is optional on the wire (the shared schema
+ * allows an empty match, which resolves to no session); Android keeps it for
+ * display only — the desktop does the actual matching.
+ */
+@Serializable
+data class AppVolumeMatchDto(
+    val process: String? = null,
 )
 
 /**
@@ -571,8 +590,29 @@ private fun StateBindingDto.normalized(): StateBindingDto? =
             )
         }
 
+        "appvolume" -> {
+            // Per-app tiles show either the session volume (`42%`) or its mute
+            // state (`MUTED`/`LIVE`). The session is resolved by the desktop;
+            // an absent or empty match is still a valid binding (NO SESSION).
+            val safeTarget = when (target.trim().lowercase()) {
+                "volume" -> "volume"
+                "mute" -> "mute"
+                else -> return null
+            }
+            StateBindingDto(
+                type = "appVolume",
+                target = safeTarget,
+                match = match.normalized(),
+            )
+        }
+
         else -> null
     }
+
+private fun AppVolumeMatchDto?.normalized(): AppVolumeMatchDto? {
+    val process = this?.process?.trim()?.take(128)?.takeIf { it.isNotEmpty() }
+    return process?.let { AppVolumeMatchDto(process = it) }
+}
 
 private fun ControlBindingDto.normalized(): ControlBindingDto? {
     return when (type.trim().lowercase()) {
@@ -634,6 +674,19 @@ private fun ControlBindingDto.normalized(): ControlBindingDto? {
                 type = "light",
                 target = lightTarget,
                 light = light?.trim()?.take(128)?.takeIf { it.isNotEmpty() },
+            )
+        }
+
+        // Per-app volume is always an absolute value binding (0..100 %). The
+        // target is fixed by the contract; the desktop resolves `match.process`
+        // to a Windows/Linux audio session at read/write time.
+        "appvolume" -> {
+            if (target?.trim()?.lowercase() != "volume") return null
+            if (!mode?.trim().isNullOrEmpty()) return null
+            ControlBindingDto(
+                type = "appVolume",
+                target = "volume",
+                match = match.normalized(),
             )
         }
 
@@ -716,6 +769,7 @@ private fun ControlDto.normalized(): ControlDto? {
         safeBinding.type == "mic" -> controlEmit == "value"
         safeBinding.type == "obs" -> controlEmit == "value"
         safeBinding.type == "light" -> controlEmit == "value"
+        safeBinding.type == "appVolume" -> controlEmit == "value"
         safeBinding.type == "media" -> controlEmit == "value"
         safeBinding.type == "shortcut" -> controlEmit == "delta"
         else -> false
@@ -724,6 +778,7 @@ private fun ControlDto.normalized(): ControlDto? {
 
     val isObs = safeBinding.type == "obs"
     val isLight = safeBinding.type == "light"
+    val isAppVolume = safeBinding.type == "appVolume"
     val isMedia = safeBinding.type == "media"
     // Light ranges are device-native: brightness/power are 0..100 (power snaps
     // to the endpoints by step 100), while Elgato white balance is 143..344
@@ -766,6 +821,7 @@ private fun ControlDto.normalized(): ControlDto? {
     var safeMin = when {
         isMedia -> 0f
         isObs -> 0f
+        isAppVolume -> (min?.takeIf { it.isFinite() } ?: 0f).coerceIn(0f, 100f)
         isLight -> (min?.takeIf { it.isFinite() } ?: lightDefaults.min)
             .coerceIn(lightDefaults.min, lightDefaults.max)
 
@@ -773,6 +829,7 @@ private fun ControlDto.normalized(): ControlDto? {
     }
     var safeMax = when {
         isMedia -> 1f
+        isAppVolume -> (max?.takeIf { it.isFinite() } ?: 100f).coerceIn(0f, 100f)
         isLight -> (max?.takeIf { it.isFinite() } ?: lightDefaults.max)
             .coerceIn(lightDefaults.min, lightDefaults.max)
 
@@ -782,6 +839,9 @@ private fun ControlDto.normalized(): ControlDto? {
         if (isLight) {
             safeMin = lightDefaults.min
             safeMax = lightDefaults.max
+        } else if (isAppVolume) {
+            safeMin = 0f
+            safeMax = 100f
         } else {
             safeMax = safeMin + defaultMax
         }
@@ -814,7 +874,8 @@ private fun ControlDto.normalized(): ControlDto? {
                 isLight -> lightDefaults.unit
                 safeBinding.type == "volume" ||
                     safeBinding.type == "mic" ||
-                    safeBinding.type == "obs" -> "%"
+                    safeBinding.type == "obs" ||
+                    safeBinding.type == "appVolume" -> "%"
 
                 else -> null
             }
