@@ -239,6 +239,12 @@ const keyboardSchema = z.object({
   action: z.literal('open'),
 })
 
+/** Phone-local per-app mixer launcher. */
+const mixerLauncherSchema = z.object({
+  type: z.literal('mixer'),
+  action: z.literal('open'),
+})
+
 /** Per-app audio session selector; `.exe`, case and path are normalized. */
 const appVolumeMatch = z
   .object({
@@ -291,6 +297,7 @@ export const ActionSchema = z.union([
   lightSchema,
   appVolumeSchema,
   keyboardSchema,
+  mixerLauncherSchema,
 ])
 
 export const GridSchema = z.object({

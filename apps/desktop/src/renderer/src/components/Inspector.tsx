@@ -86,6 +86,7 @@ import { MixerSessionSelect } from './MixerSessionSelect'
 import { useObsInputs } from '../lib/useObsInputs'
 import { backgroundStyle, buttonBackground, textColorFor } from '../lib/ui'
 import { KEYBOARD_ACTION_TITLE, keyboardAction } from '../lib/keyboard'
+import { MIXER_ACTION_TITLE, mixerAction } from '../lib/mixer'
 import { ActionEditor } from './ActionEditor'
 import { BackgroundEditor } from './BackgroundEditor'
 import { ControlPreview } from './ControlPreview'
@@ -1043,6 +1044,17 @@ export function Inspector({
       ...(untitled ? { label: 'Keyboard', icon: '⌨️', sublabel: 'Tap to type' } : {}),
     })
     onToast('Phone keyboard action added — it opens on the phone, not on this PC', 'success')
+  }
+
+  const addMixerAction = (): void => {
+    const current = button.label.trim().toLowerCase()
+    const untitled =
+      current === '' || current === 'untitled' || current === 'untitled button' || current === 'new button'
+    update({
+      actions: [...button.actions, mixerAction() as unknown as Action],
+      ...(untitled ? { label: 'Mixer', icon: '🎚️', sublabel: 'Tap to open' } : {}),
+    })
+    onToast('Phone mixer action added — it opens on the phone, not on this PC', 'success')
   }
 
   const chooseIconMedia = async (kind: 'image' | 'video'): Promise<void> => {
@@ -2253,6 +2265,7 @@ export function Inspector({
                   { label: 'Run command', icon: 'terminal', description: 'Run a shell command', onClick: () => update({ actions: [...button.actions, makeAction('command')] }) },
                   { label: 'Media key', icon: 'music', description: 'Play, pause, volume…', onClick: () => update({ actions: [...button.actions, makeAction('media')] }) },
                   { label: 'App audio mute', section: 'Audio', icon: 'microphone', description: 'Toggle or set mute for one app audio session', onClick: () => setAppActionPicker(true) },
+                  { label: 'Open mixer', icon: 'sliders', description: 'Full-screen per-app mixer on the phone', onClick: addMixerAction },
                   { label: 'Open phone keyboard', section: 'Integrations', icon: 'keyboard', description: 'Phone keyboard types into the active PC window', onClick: addKeyboardAction },
                   { label: 'OBS scene switcher', section: 'Integrations', icon: 'layers', description: 'Switch the program scene by name', onClick: () => addObsAction({ type: 'obs', action: 'setScene' }, 'Scene', '🎬') },
                   { label: 'OBS toggle stream', icon: 'wifi', description: 'Start or stop streaming', onClick: () => addObsAction({ type: 'obs', action: 'toggleStream' }, 'Stream', '📡') },
@@ -2323,7 +2336,9 @@ export function Inspector({
                     [candidate],
                     candidate.type === 'keyboard'
                       ? KEYBOARD_ACTION_TITLE
-                      : describeAction(candidate, platform),
+                      : candidate.type === 'mixer'
+                        ? MIXER_ACTION_TITLE
+                        : describeAction(candidate, platform),
                   )}
                 />
               ))}

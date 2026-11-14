@@ -33,6 +33,7 @@ import {
   type AppVolumeStatusTilePreset,
 } from './lib/appVolume'
 import { createKeyboardLauncher, keyboardSpanCandidates } from './lib/keyboard'
+import { createMixerLauncher, mixerSpanCandidates, mixerSupportNote } from './lib/mixer'
 import { LIGHT_STATUS_TILES, createLightStatusButton, type LightStatusTilePreset } from './lib/lightStatus'
 import { lightControlSpec } from './lib/lights'
 import { MEDIA_SCRUB_SPANS, mediaScrubControl } from './lib/media'
@@ -475,6 +476,7 @@ function AppContent() {
       | 'obs'
       | 'shortcut'
       | 'keyboard'
+      | 'mixer'
       | 'media',
     obsInput?: string,
     shortcutId?: ShortcutPresetId,
@@ -490,22 +492,24 @@ function AppContent() {
     const spanCandidates: Array<{ columns: number; rows: number }> =
       kind === 'keyboard'
         ? keyboardSpanCandidates()
-        : kind === 'media'
-        ? [...MEDIA_SCRUB_SPANS]
-        : kind === 'trackpad'
-        ? [
-            { columns: 3, rows: 2 },
-            { columns: 2, rows: 2 },
-            { columns: 1, rows: 1 },
-          ]
-        : preset
-          ? [preset.span, { columns: 1, rows: 1 }]
-          : [
-              kind === 'volume' || kind === 'mic' || kind === 'obs'
-                ? { columns: 3, rows: 1 }
-                : { columns: 2, rows: 1 },
-              { columns: 1, rows: 1 },
-            ]
+        : kind === 'mixer'
+          ? mixerSpanCandidates()
+          : kind === 'media'
+            ? [...MEDIA_SCRUB_SPANS]
+            : kind === 'trackpad'
+              ? [
+                  { columns: 3, rows: 2 },
+                  { columns: 2, rows: 2 },
+                  { columns: 1, rows: 1 },
+                ]
+              : preset
+                ? [preset.span, { columns: 1, rows: 1 }]
+                : [
+                    kind === 'volume' || kind === 'mic' || kind === 'obs'
+                      ? { columns: 3, rows: 1 }
+                      : { columns: 2, rows: 1 },
+                    { columns: 1, rows: 1 },
+                  ]
     const preferredSpan = spanCandidates[0]!
 
     const findSlot = (span: { columns: number; rows: number }): number | null => {
@@ -543,6 +547,35 @@ function AppContent() {
             : 'Keyboard launcher added',
           'success',
         )
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : String(error), 'error')
+      }
+      return
+    }
+
+    if (kind === 'mixer') {
+      const button = createMixerLauncher(slot, span)
+      try {
+        const next = addButton(config, profile.id, page.id, button)
+        setConfig(next)
+        setSelectedButtonId(button.id)
+        showToast(
+          fallback
+            ? `Mixer added as ${span.columns}×${span.rows} — no ${preferredSpan.columns}×${preferredSpan.rows} space was free`
+            : 'Mixer launcher added',
+          'success',
+        )
+        // Probe once, on demand: unsupported hosts still get a working tile
+        // (the phone opens its own mixer screen), plus a clear hint here.
+        void window.phonedek
+          .getMixerSnapshot()
+          .then((snapshot) => {
+            const note = mixerSupportNote(snapshot.available, snapshot.reason)
+            if (note) showToast(note, 'info')
+          })
+          .catch(() => {
+            /* The launcher is already saved; a probe failure needs no toast. */
+          })
       } catch (error) {
         showToast(error instanceof Error ? error.message : String(error), 'error')
       }
@@ -1067,6 +1100,12 @@ function AppContent() {
                   icon: 'sliders',
                   description: '2 × 1 · turn or drag for small ± steps',
                   onClick: () => addNewControl('volume-wheel'),
+                },
+                {
+                  label: 'Mixer',
+                  icon: 'sliders',
+                  description: '3 × 2 · full-screen per-app mixer on the phone',
+                  onClick: () => addNewControl('mixer'),
                 },
                 ...APP_VOLUME_STATUS_TILES.map((preset) => ({
                   label: preset.menuLabel,

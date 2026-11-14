@@ -3103,6 +3103,19 @@ input[type="range"]:disabled {
   color: var(--accent-hi);
 }
 
+.action-type-mixer .action-icon {
+  color: var(--info);
+}
+
+.mixer-action-body svg {
+  color: var(--info);
+}
+
+.action-type-mixer .action-phone-chip {
+  border-color: rgba(134, 169, 196, 0.45);
+  color: var(--info);
+}
+
 .action-body {
   padding: 8px;
   display: flex;
@@ -5194,6 +5207,11 @@ input[type="range"]:disabled {
 .deck-status-badge.keyboard {
   border-color: rgba(242, 106, 46, 0.5);
   color: var(--accent-hi);
+}
+
+.deck-status-badge.mixer {
+  border-color: rgba(134, 169, 196, 0.55);
+  color: var(--info);
 }
 
 input[aria-invalid="true"],

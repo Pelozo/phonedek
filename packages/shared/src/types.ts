@@ -302,6 +302,12 @@ export interface KeyboardAction {
   action: 'open'
 }
 
+/** Phone-local per-app mixer launcher; never runs on the desktop. */
+export interface MixerAction {
+  type: 'mixer'
+  action: 'open'
+}
+
 /**
  * Everything the host can execute. `MicAction` and `TwitchAction` are accepted
  * by ActionSchema and the plan builder but deliberately stay out of `Action`
@@ -321,7 +327,7 @@ export type PlannableAction = ExecutableAction | LightAction
  * never reach the desktop plan. Renderers can keep consuming
  * `PlannableAction` until they add keyboard UI.
  */
-export type ConfigAction = PlannableAction | KeyboardAction
+export type ConfigAction = PlannableAction | KeyboardAction | MixerAction
 
 /** Footprint of a button measured in grid cells. */
 export interface CellSpan {

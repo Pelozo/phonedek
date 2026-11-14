@@ -259,6 +259,9 @@ export function actionsToPlan(
         // Phone-local launcher: the phone opens its keyboard panel without a
         // press, and the desktop never sees a plan step for it.
         break
+      case 'mixer':
+        // Phone-local per-app mixer launcher; no desktop plan step.
+        break
     }
   }
   return plan

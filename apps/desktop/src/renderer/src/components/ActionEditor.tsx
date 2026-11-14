@@ -20,6 +20,12 @@ import {
   KEYBOARD_ACTION_TITLE,
   isKeyboardAction,
 } from '../lib/keyboard'
+import {
+  MIXER_ACTION_BODY,
+  MIXER_ACTION_SUMMARY,
+  MIXER_ACTION_TITLE,
+  isMixerAction,
+} from '../lib/mixer'
 import { useHostPlatform } from '../lib/platform'
 import type { ServerInfoView } from '../../../shared/api'
 
@@ -111,6 +117,7 @@ function lightIconName(_action: LightAction): IconName {
 
 function actionIconName(action: EditorAction): IconName {
   if (isKeyboardAction(action)) return 'keyboard'
+  if (isMixerAction(action)) return 'sliders'
   if (action.type === 'obs') return obsIconName(action)
   if (action.type === 'twitch') return twitchIconName(action)
   if (action.type === 'light') return lightIconName(action)
@@ -120,6 +127,7 @@ function actionIconName(action: EditorAction): IconName {
 
 function actionTitle(action: EditorAction): string {
   if (isKeyboardAction(action)) return KEYBOARD_ACTION_TITLE
+  if (isMixerAction(action)) return MIXER_ACTION_TITLE
   if (action.type === 'obs') return obsActionTitle(action)
   if (action.type === 'twitch') return twitchActionTitle(action)
   if (action.type === 'light') return lightActionTitle(action)
@@ -129,6 +137,7 @@ function actionTitle(action: EditorAction): string {
 
 function actionSummary(action: EditorAction, platform: string): string {
   if (isKeyboardAction(action)) return KEYBOARD_ACTION_SUMMARY
+  if (isMixerAction(action)) return MIXER_ACTION_SUMMARY
   return describeAction(action, platform)
 }
 
@@ -224,6 +233,8 @@ export function ActionEditor({
   const [macroRecording, setMacroRecording] = useState(false)
   const macroBodyId = useId()
   const platform = useHostPlatform()
+  /** Phone-local launchers have no host test and show a PHONE chip instead. */
+  const phoneLocal = isKeyboardAction(action) || isMixerAction(action)
 
   useEffect(() => {
     if (macroRecording && !macroOpen) setMacroOpen(true)
@@ -277,7 +288,7 @@ export function ActionEditor({
           </div>
         )}
         <div className="action-tools">
-          {isKeyboardAction(action) ? (
+          {phoneLocal ? (
             <span className="action-phone-chip" title="Runs on your phone, not on this PC">
               <Icon name="phone" size={12} /> Phone
             </span>
@@ -309,6 +320,13 @@ export function ActionEditor({
             <p className="hint keyboard-action-body">
               <Icon name="phone" size={15} />
               <span>{KEYBOARD_ACTION_BODY}</span>
+            </p>
+          )}
+
+          {isMixerAction(action) && (
+            <p className="hint keyboard-action-body mixer-action-body">
+              <Icon name="phone" size={15} />
+              <span>{MIXER_ACTION_BODY}</span>
             </p>
           )}
 

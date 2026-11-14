@@ -18,6 +18,7 @@ import { appVolumeStateBadge, appVolumeStateBindingSummary } from '../lib/appVol
 import type { StateBinding } from '@phonedek/shared'
 import { backgroundStyle, buttonBackground, isVideoBackground, textColorFor } from '../lib/ui'
 import { KEYBOARD_BADGE, hasKeyboardAction, hasKeyboardLauncher } from '../lib/keyboard'
+import { MIXER_BADGE, hasMixerAction, hasMixerLauncher } from '../lib/mixer'
 import { ControlPreview } from './ControlPreview'
 import { DeckMedia } from './DeckMedia'
 import { Icon } from './Icons'
@@ -236,7 +237,15 @@ export function DeckCanvas({
                       {KEYBOARD_BADGE}
                     </span>
                   )}
-                  {!button.control && !hasKeyboardAction(button.actions) && button.actions.length === 0 && !button.state && (
+                  {hasMixerLauncher(button) && (
+                    <span
+                      className="deck-status-badge mixer"
+                      title="Opens the full-screen per-app mixer on the phone. Nothing runs on this PC from this tile."
+                    >
+                      {MIXER_BADGE}
+                    </span>
+                  )}
+                  {!button.control && !hasKeyboardAction(button.actions) && !hasMixerAction(button.actions) && button.actions.length === 0 && !button.state && (
                     <span className="deck-warning" title="This button has no actions">
                       !
                     </span>
