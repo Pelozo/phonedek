@@ -142,6 +142,10 @@ internal class PointerGesture(
     private var lastTime = 0L
     private var moved = false
     private var longPressFired = false
+    /** Recent two-finger centroid velocity, used for the post-lift scroll tail. */
+    private var scrollVelX = 0f
+    private var scrollVelY = 0f
+    private var lastScrollAt = 0L
 
     val canLongPress: Boolean
         get() = active && !buttonLocked && mode == Mode.PENDING_ONE
@@ -224,6 +228,11 @@ internal class PointerGesture(
     fun onUp(point: PadPoint): PointerGestureFrame {
         if (!active) return PointerGestureFrame()
         var frame = processPoint(point)
+        // A flick keeps rolling briefly. One extra batch is enough on a phone
+        // and avoids a timer inside the restricted pointer scope.
+        if (mode == Mode.SCROLL && point.timeMs - lastScrollAt <= 130L) {
+            frame = frame.merge(scrollFrame(scrollVelX * 110f, scrollVelY * 110f))
+        }
         val elapsed = (point.timeMs - downTime).coerceAtLeast(0L)
 
         frame = when (mode) {
@@ -296,6 +305,7 @@ internal class PointerGesture(
         if (point.timeMs == lastTime && point.x == lastX && point.y == lastY) {
             return PointerGestureFrame()
         }
+        val previousTime = lastTime
         val stepX = point.x - lastX
         val stepY = point.y - lastY
         lastX = point.x
@@ -332,7 +342,13 @@ internal class PointerGesture(
                 moveFrame(stepX, stepY)
             }
 
-            Mode.SCROLL -> scrollFrame(stepX, stepY)
+            Mode.SCROLL -> {
+                val dt = (point.timeMs - previousTime).coerceAtLeast(1L)
+                scrollVelX = stepX / dt
+                scrollVelY = stepY / dt
+                lastScrollAt = point.timeMs
+                scrollFrame(stepX, stepY)
+            }
 
             Mode.LOCKED, Mode.HELD -> {
                 if (distance > tapSlopPx) moved = true
@@ -365,6 +381,9 @@ internal class PointerGesture(
         mode = Mode.IDLE
         moved = false
         longPressFired = false
+        scrollVelX = 0f
+        scrollVelY = 0f
+        lastScrollAt = 0L
     }
 }
 

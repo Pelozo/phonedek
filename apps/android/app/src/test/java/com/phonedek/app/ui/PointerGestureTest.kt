@@ -127,6 +127,39 @@ class PointerGestureTest {
     }
 
     @Test
+    fun fastScrollReleaseKeepsRolling() {
+        val pad = gesture()
+        pad.onDown(point(100f, 100f, 0))
+        pad.onSecondDown(point(100f, 100f, 10))
+        pad.onMove(point(130f, 100f, 30))
+        val up = pad.onUp(point(150f, 100f, 50))
+
+        assertTrue("expected momentum beyond the final step", up.scrollX > 0.5f)
+    }
+
+    @Test
+    fun slowScrollReleaseDoesNotFling() {
+        val pad = gesture()
+        pad.onDown(point(100f, 100f, 0))
+        pad.onSecondDown(point(100f, 100f, 10))
+        pad.onMove(point(130f, 100f, 30))
+        val up = pad.onUp(point(130f, 100f, 500))
+
+        assertEquals(0f, up.scrollX, 0.0001f)
+    }
+
+    @Test
+    fun scrollMomentumRespectsInvertedNaturalScroll() {
+        val pad = gesture(naturalScroll = false)
+        pad.onDown(point(100f, 100f, 0))
+        pad.onSecondDown(point(100f, 100f, 10))
+        pad.onMove(point(130f, 100f, 30))
+        val up = pad.onUp(point(150f, 100f, 50))
+
+        assertTrue(up.scrollX < 0f)
+    }
+
+    @Test
     fun secondFingerDuringMoveDoesNotTeleport() {
         val pad = gesture()
         pad.onDown(point(100f, 100f, 0))
