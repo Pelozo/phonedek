@@ -58,7 +58,8 @@ fun PhoneDeckApp(viewModel: MainViewModel, state: UiState) {
             KeepScreenOn(
                 state.ready &&
                     state.pairing != null &&
-                    (state.keepScreenOn || state.pointerPadOpen || state.keyboardPadOpen),
+                    (state.keepScreenOn || state.pointerPadOpen ||
+                        state.keyboardPadOpen || state.mixerPadOpen),
             )
 
             when {
@@ -109,6 +110,15 @@ fun PhoneDeckApp(viewModel: MainViewModel, state: UiState) {
                     options = state.keyboardPadOptions,
                     status = state.keyboardStatus,
                     capable = state.keyboardCapable,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+
+            if (state.mixerPadOpen) {
+                MixerPadOverlay(
+                    viewModel = viewModel,
+                    snapshot = state.mixerSnapshot,
+                    capable = state.mixerCapable,
                     modifier = Modifier.fillMaxSize(),
                 )
             }

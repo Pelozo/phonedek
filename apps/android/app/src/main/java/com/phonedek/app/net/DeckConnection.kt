@@ -10,6 +10,7 @@ import com.phonedek.app.data.normalizeProfileId
 import com.phonedek.app.util.Diag
 import java.util.UUID
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.random.Random
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -55,6 +56,7 @@ internal val CLIENT_CAPABILITIES = listOf(
     "pointer-v1",
     "control-state-v1",
     "keyboard-v1",
+    "mixer-v1",
 )
 
 internal fun buildHelloPayload(device: DeviceInfo): JsonObject = buildJsonObject {
@@ -102,6 +104,10 @@ class DeckConnection(
         fun onInputResult(requestId: String, controlId: String, ok: Boolean, error: String?)
         fun onPointerResult(seq: Long, ok: Boolean, error: String?)
         fun onKeyboardResult(seq: Long, ok: Boolean, error: String?)
+        /** Live per-app mixer snapshot while the full-screen mixer is open. */
+        fun onMixerState(state: MixerStatePayload)
+        /** Correlated acknowledgement of one [DeckConnection.sendMixerCommand]. */
+        fun onMixerResult(requestId: String, ok: Boolean, error: String?)
         fun onBrightness(level: Float?)
         fun onControlState(
             profileId: String,
@@ -332,6 +338,53 @@ class DeckConnection(
         return socket.send(payload.toString())
     }
 
+    /**
+     * Subscribes this connection to the live per-app mixer. The desktop sends
+     * an immediate snapshot and then polls at ~1 Hz while subscribed.
+     */
+    fun sendMixerStart(): Boolean = sendMixerPhase("start")
+
+    /** Releases the mixer subscription; safe when it was never started. */
+    fun sendMixerStop(): Boolean = sendMixerPhase("stop")
+
+    private fun sendMixerPhase(phase: String): Boolean {
+        val socket = webSocketRef
+        if (!active || !connected || socket == null) {
+            Diag.w("sendMixer dropped: phase=$phase connected=$connected active=$active")
+            return false
+        }
+        return socket.send(buildMixerPhasePayload(phase).toString())
+    }
+
+    /**
+     * Writes one mixer channel by session id. At least one of [volume]/
+     * [muted] is required; the payload builder clamps the volume and rejects
+     * unusable ids, in which case nothing is sent.
+     */
+    fun sendMixerCommand(
+        requestId: String,
+        sessionId: String,
+        volume: Int? = null,
+        muted: Boolean? = null,
+    ): Boolean {
+        val socket = webSocketRef
+        if (!active || !connected || socket == null) {
+            Diag.w("sendMixerCommand dropped: connected=$connected active=$active")
+            return false
+        }
+        val payload = buildMixerCommandPayload(
+            requestId = requestId,
+            sessionId = sessionId,
+            volume = volume,
+            muted = muted,
+        ) ?: return false
+        Diag.d(
+            "WS -> mixerCommand session=${sessionId.take(64)} " +
+                "volume=${volume ?: "-"} muted=${muted ?: "-"}",
+        )
+        return socket.send(payload.toString())
+    }
+
     private fun connect() {
         if (!active) return
         val generation = ++socketGeneration
@@ -517,6 +570,16 @@ class DeckConnection(
             "keyboardResult" -> {
                 val result = parseKeyboardResult(obj)
                 listener.onKeyboardResult(result.seq, result.ok, result.error)
+            }
+
+            "mixerState" -> {
+                parseMixerState(obj)?.let(listener::onMixerState)
+            }
+
+            "mixerResult" -> {
+                parseMixerResult(obj)?.let { result ->
+                    listener.onMixerResult(result.requestId, result.ok, result.error)
+                }
             }
 
             "brightness" -> {
@@ -787,6 +850,141 @@ internal fun parseKeyboardResult(obj: JsonObject): KeyboardResultPayload = Keybo
     error = obj.string("error"),
 )
 
+/* ------------------------------------------------------------------ */
+/* Per-app mixer                                                        */
+/* ------------------------------------------------------------------ */
+
+internal const val MIXER_MAX_SESSIONS = 128
+internal const val MIXER_MAX_REQUEST_ID = 64
+internal const val MIXER_MAX_SESSION_ID = 512
+internal const val MIXER_MAX_NAME = 200
+internal const val MIXER_MAX_REASON = 300
+
+/** One desktop mixer channel as sent in `mixerState.sessions`. */
+data class MixerSessionPayload(
+    val id: String,
+    val process: String,
+    val name: String,
+    val volume: Int,
+    val muted: Boolean,
+    /** False when the session vanished after the snapshot was requested. */
+    val available: Boolean = true,
+)
+
+/** One full `mixerState` snapshot. */
+data class MixerStatePayload(
+    val available: Boolean,
+    val sessions: List<MixerSessionPayload>,
+    val reason: String?,
+    val updatedAt: Long,
+)
+
+internal data class MixerResultPayload(
+    val requestId: String,
+    val ok: Boolean,
+    val error: String?,
+)
+
+/** `{type:"mixer",phase:"start"|"stop"}`; unknown phases stop safely. */
+internal fun buildMixerPhasePayload(phase: String): JsonObject = buildJsonObject {
+    put("type", "mixer")
+    put("phase", if (phase == "start") "start" else "stop")
+}
+
+/**
+ * `{type:"mixerCommand",…}` shared by [DeckConnection.sendMixerCommand] and
+ * tests. At least one of volume/muted is required; ids are trimmed and length
+ * checked, and the volume is clamped to the protocol's 0..100.
+ */
+internal fun buildMixerCommandPayload(
+    requestId: String,
+    sessionId: String,
+    volume: Int?,
+    muted: Boolean?,
+): JsonObject? {
+    val safeRequestId = requestId.trim()
+        .takeIf { it.isNotEmpty() && it.length <= MIXER_MAX_REQUEST_ID }
+        ?: return null
+    val safeSessionId = sessionId.trim()
+        .takeIf { it.isNotEmpty() && it.length <= MIXER_MAX_SESSION_ID }
+        ?: return null
+    if (volume == null && muted == null) return null
+    return buildJsonObject {
+        put("type", "mixerCommand")
+        put("requestId", safeRequestId)
+        put("sessionId", safeSessionId)
+        volume?.let { put("volume", it.coerceIn(0, 100)) }
+        muted?.let { put("muted", it) }
+    }
+}
+
+/**
+ * Parses a `mixerState` snapshot. A malformed envelope or session entry is
+ * dropped instead of failing the whole batch: losing one dead channel must not
+ * blank the mixer. Snapshots are capped at the protocol's 128 sessions.
+ */
+internal fun parseMixerState(obj: JsonObject): MixerStatePayload? {
+    val available = obj.bool("available") ?: return null
+    val rawSessions = obj["sessions"] as? JsonArray ?: return null
+    val sessions = rawSessions.asSequence()
+        .take(MIXER_MAX_SESSIONS)
+        .mapNotNull { it as? JsonObject }
+        .mapNotNull(::parseMixerSession)
+        .toList()
+    val reason = obj.strictString("reason")
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?.take(MIXER_MAX_REASON)
+    val updatedAt = obj.long("updatedAt")?.coerceAtLeast(0L) ?: 0L
+    return MixerStatePayload(
+        available = available,
+        sessions = sessions,
+        reason = reason,
+        updatedAt = updatedAt,
+    )
+}
+
+private fun parseMixerSession(obj: JsonObject): MixerSessionPayload? {
+    val id = obj.strictString("id")
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() && it.length <= MIXER_MAX_SESSION_ID }
+        ?: return null
+    val process = obj.strictString("process")
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() && it.length <= MIXER_MAX_NAME }
+        ?: return null
+    val name = obj.strictString("name")
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() && it.length <= MIXER_MAX_NAME }
+        ?: return null
+    val volume = obj.number("volume")
+        ?.takeIf { it.isFinite() && it in 0f..100f }
+        ?.roundToInt()
+        ?: return null
+    val muted = obj.bool("muted") ?: return null
+    return MixerSessionPayload(
+        id = id,
+        process = process,
+        name = name,
+        volume = volume,
+        muted = muted,
+        available = obj.bool("available") ?: true,
+    )
+}
+
+internal fun parseMixerResult(obj: JsonObject): MixerResultPayload? {
+    val requestId = obj.strictString("requestId")
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() && it.length <= MIXER_MAX_REQUEST_ID }
+        ?: return null
+    val ok = obj.bool("ok") ?: return null
+    val error = obj.strictString("error")
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?.take(MIXER_MAX_REASON)
+    return MixerResultPayload(requestId = requestId, ok = ok, error = error)
+}
+
 internal fun parseCapabilities(obj: JsonObject): Set<String> =
     obj.stringList("capabilities").orEmpty().toSet()
 
@@ -837,6 +1035,20 @@ private fun JsonObject.long(key: String): Long? =
 
 private fun JsonObject.bool(key: String): Boolean? =
     (this[key] as? JsonPrimitive)?.booleanOrNull
+
+/** Strings only: a numeric id or boolean is not a valid telemetry field. */
+private fun JsonObject.strictString(key: String): String? {
+    val primitive = this[key] as? JsonPrimitive ?: return null
+    if (!primitive.isString) return null
+    return primitive.contentOrNull
+}
+
+/** Numeric only: a JSON string "42" is not a mixer volume. */
+private fun JsonObject.number(key: String): Float? {
+    val primitive = this[key] as? JsonPrimitive ?: return null
+    if (primitive.isString) return null
+    return primitive.floatOrNull
+}
 
 private fun JsonObject.stringList(key: String): List<String>? =
     (this[key] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }

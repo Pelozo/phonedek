@@ -28,6 +28,7 @@ import com.phonedek.app.net.DeckConnection
 import com.phonedek.app.net.FetchResult
 import com.phonedek.app.net.HttpApi
 import com.phonedek.app.net.ImportResult
+import com.phonedek.app.net.MixerStatePayload
 import com.phonedek.app.net.createHttpClient
 import com.phonedek.app.net.createWebSocketClient
 import com.phonedek.app.util.Diag
@@ -91,6 +92,10 @@ data class UiState(
     val keyboardPadOpen: Boolean = false,
     val keyboardPadOptions: KeyboardPadOptions = KeyboardPadOptions(),
     val keyboardStatus: KeyboardStatus = KeyboardStatus.READY,
+    val mixerCapable: Boolean = false,
+    val mixerPadOpen: Boolean = false,
+    /** Latest live snapshot; null while the subscription is still starting. */
+    val mixerSnapshot: MixerStatePayload? = null,
     val phoneBrightness: Float? = null,
     val keepScreenOn: Boolean = true,
     val hideTopBarWhenConnected: Boolean = true,
@@ -183,6 +188,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var keyboardPageId: String? = null
     private var keyboardStartSent = false
 
+    private var mixerUnsupportedShown = false
+    private var mixerFaderJob: Job? = null
+    private var mixerFaderSessionId: String? = null
+    private val mixerFaderThrottle = MixerFaderThrottle()
+
     private val connection = DeckConnection(
         client = socketClient,
         scope = viewModelScope,
@@ -206,6 +216,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     // The socket is gone; the desktop cancels the session on close.
                     closeKeyboardPad(cancel = false)
                 }
+                if (status != ConnectionStatus.CONNECTED && _state.value.mixerPadOpen) {
+                    // The server drops the subscription with the socket.
+                    closeMixerPad(sendStop = false)
+                }
             }
 
             override fun onOpen() {
@@ -224,12 +238,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val pointerCapable = "pointer-v1" in capabilities
                 val keyboardCapable = "keyboard-v1" in capabilities
                 val stateCapable = "control-state-v1" in capabilities
+                val mixerCapable = "mixer-v1" in capabilities
                 _state.update { current ->
                     current.copy(
                         inputCapable = inputCapable,
                         pointerCapable = pointerCapable,
                         keyboardCapable = keyboardCapable,
                         stateCapable = stateCapable,
+                        mixerCapable = mixerCapable,
                         // A hello starts a new socket; state from the previous
                         // connection (and its revision counter) is stale.
                         controlStates = emptyMap(),
@@ -248,6 +264,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (inputCapable) inputUnsupportedShown = false
                 if (pointerCapable) pointerUnsupportedShown = false
                 if (keyboardCapable) keyboardUnsupportedShown = false
+                if (mixerCapable) mixerUnsupportedShown = false
                 if (!pointerCapable &&
                     (_state.value.pointerPadOpen || pointerControlId != null)
                 ) {
@@ -255,6 +272,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 if (!keyboardCapable && _state.value.keyboardPadOpen) {
                     closeKeyboardPad(cancel = false)
+                }
+                if (!mixerCapable && _state.value.mixerPadOpen) {
+                    closeMixerPad(sendStop = false)
                 }
                 if (protocol != 1 && !protocolWarningShown) {
                     protocolWarningShown = true
@@ -384,6 +404,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 emit(message)
             }
 
+            override fun onMixerState(state: MixerStatePayload) {
+                if (!_state.value.mixerCapable) return
+                // Never resurrect the overlay state from a late in-flight
+                // snapshot after the panel closed.
+                if (!_state.value.mixerPadOpen) return
+                _state.update { it.copy(mixerSnapshot = state) }
+            }
+
+            override fun onMixerResult(requestId: String, ok: Boolean, error: String?) {
+                if (ok) {
+                    Diag.d("Mixer command ok request=$requestId")
+                    return
+                }
+                // Functional failures (rate limit, vanishing session, helper
+                // error) get one quiet toast; the panel stays open so the user
+                // can retry the channel.
+                val message = error?.takeIf { it.isNotBlank() }
+                    ?: "The desktop could not change that channel."
+                Diag.w("Mixer command rejected request=$requestId error=\"$message\"")
+                emit(message)
+            }
+
             override fun onServerError(code: String, message: String) {
                 Diag.w("Server error code=$code message=\"$message\"")
                 emit(message.ifBlank { "The desktop reported an error." })
@@ -421,6 +463,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // Backgrounding is an abort, not a clean finish: cancel pending text
         // and release any held key on the desktop before the socket goes away.
         closeKeyboardPad(cancel = true)
+        closeMixerPad(sendStop = true)
         foreground = false
         connection.stop()
     }
@@ -579,6 +622,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         pendingInputValue = null
         inputUnsupportedShown = false
         pointerUnsupportedShown = false
+        mixerUnsupportedShown = false
+        resetMixerFader()
         resetPointerState()
         connection.stop()
         lastRawConfig = null
@@ -1355,6 +1400,203 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         keyboardSeq = 0L
     }
 
+    private fun noteMixerUnsupported() {
+        if (mixerUnsupportedShown) return
+        mixerUnsupportedShown = true
+        emit("Update PhoneDeck on your PC to use the mixer.")
+    }
+
+    /**
+     * Opens the full-screen per-app mixer. The launcher is phone-local, so no
+     * `press` is ever sent; the desktop only sees the `mixer/start`
+     * subscription. Re-opening restarts the subscription and clears the last
+     * snapshot so the panel shows its SYNC state instead of stale channels.
+     */
+    fun openMixerPad(button: DeckButton) {
+        val snapshot = _state.value
+        when (
+            mixerLaunch(
+                button = button,
+                capable = snapshot.mixerCapable,
+                connected = snapshot.connection == ConnectionStatus.CONNECTED,
+            )
+        ) {
+            MixerLaunch.NotLauncher -> return
+
+            MixerLaunch.Unsupported -> {
+                noteMixerUnsupported()
+                return
+            }
+
+            MixerLaunch.Offline -> {
+                emit("Offline — the mixer needs a connection.")
+                return
+            }
+
+            MixerLaunch.Open -> Unit
+        }
+
+        resetMixerFader()
+        _state.update { it.copy(mixerPadOpen = true, mixerSnapshot = null) }
+        Diag.i("Mixer pad opened")
+        if (!connection.sendMixerStart()) {
+            closeMixerPad(sendStop = false)
+            emit("Connection lost — the mixer did not open.")
+        }
+    }
+
+    /**
+     * Closes the panel and releases the desktop subscription. Pass false when
+     * the socket is already gone or the server withdrew `mixer-v1`. Safe to
+     * call twice, including from Compose disposal.
+     */
+    fun closeMixerPad(sendStop: Boolean = true) {
+        val snapshot = _state.value
+        val wasOpen = snapshot.mixerPadOpen
+        if (sendStop && snapshot.mixerCapable && connection.isConnected()) {
+            connection.sendMixerStop()
+        }
+        resetMixerFader()
+        if (wasOpen || snapshot.mixerSnapshot != null) {
+            if (wasOpen) Diag.i("Mixer pad closed")
+            _state.update { it.copy(mixerPadOpen = false, mixerSnapshot = null) }
+        }
+    }
+
+    /** Re-subscribes to the live mixer; the desktop pushes a fresh snapshot. */
+    fun refreshMixer() {
+        val snapshot = _state.value
+        if (!snapshot.mixerPadOpen || !snapshot.mixerCapable) return
+        if (snapshot.connection != ConnectionStatus.CONNECTED) {
+            emit("Offline — the mixer needs a connection.")
+            return
+        }
+        if (!connection.sendMixerStart()) {
+            Diag.w("Mixer refresh dropped")
+            emit("Could not refresh the mixer.")
+        }
+    }
+
+    /**
+     * Fader movement while the finger is down. Writes are coalesced to about
+     * 20 Hz; [onMixerVolumeCommit] sends the final value on release.
+     */
+    fun onMixerVolume(sessionId: String, volume: Int) {
+        val snapshot = _state.value
+        if (!snapshot.mixerPadOpen || !snapshot.mixerCapable) return
+        if (sessionId.isBlank()) return
+        if (snapshot.connection != ConnectionStatus.CONNECTED) {
+            closeMixerPad(sendStop = false)
+            emit("Mixer disconnected.")
+            return
+        }
+
+        if (mixerFaderSessionId != sessionId) {
+            mixerFaderJob?.cancel()
+            mixerFaderJob = null
+            mixerFaderThrottle.reset()
+            mixerFaderSessionId = sessionId
+        }
+
+        val now = SystemClock.elapsedRealtime()
+        val due = mixerFaderThrottle.onMove(volume, now)
+        if (due != null) {
+            sendMixerVolume(sessionId, due)
+        } else if (mixerFaderJob?.isActive != true) {
+            mixerFaderJob = viewModelScope.launch {
+                delay(mixerFaderThrottle.waitMs(SystemClock.elapsedRealtime()))
+                mixerFaderJob = null
+                if (mixerFaderSessionId != sessionId) return@launch
+                val pending = mixerFaderThrottle.flush(SystemClock.elapsedRealtime())
+                if (pending != null) sendMixerVolume(sessionId, pending)
+            }
+        }
+    }
+
+    /** Release commit: always sends the final value instead of waiting. */
+    fun onMixerVolumeCommit(sessionId: String, volume: Int) {
+        val snapshot = _state.value
+        if (!snapshot.mixerPadOpen || !snapshot.mixerCapable) return
+        if (sessionId.isBlank()) return
+        if (snapshot.connection != ConnectionStatus.CONNECTED) {
+            closeMixerPad(sendStop = false)
+            return
+        }
+        mixerFaderJob?.cancel()
+        mixerFaderJob = null
+        if (mixerFaderSessionId != sessionId) mixerFaderThrottle.reset()
+        mixerFaderSessionId = sessionId
+        val final = mixerFaderThrottle.commit(volume, SystemClock.elapsedRealtime())
+        updateMixerSession(sessionId, volume = final)
+        sendMixerVolume(sessionId, final)
+    }
+
+    /** Mute is a discrete action: sent immediately, never coalesced. */
+    fun onMixerMute(sessionId: String, muted: Boolean) {
+        val snapshot = _state.value
+        if (!snapshot.mixerPadOpen || !snapshot.mixerCapable) return
+        if (sessionId.isBlank()) return
+        if (snapshot.connection != ConnectionStatus.CONNECTED) {
+            closeMixerPad(sendStop = false)
+            emit("Mixer disconnected.")
+            return
+        }
+        updateMixerSession(sessionId, muted = muted)
+        val sent = connection.sendMixerCommand(
+            requestId = connection.newRequestId(),
+            sessionId = sessionId,
+            muted = muted,
+        )
+        if (!sent) {
+            Diag.w("Mixer mute dropped: session=${sessionId.take(64)}")
+            closeMixerPad(sendStop = false)
+            emit("Connection lost — the mixer closed.")
+        }
+    }
+
+    private fun sendMixerVolume(sessionId: String, volume: Int): Boolean {
+        val sent = connection.sendMixerCommand(
+            requestId = connection.newRequestId(),
+            sessionId = sessionId,
+            volume = volume.coerceIn(0, 100),
+        )
+        if (!sent) {
+            Diag.w("Mixer volume dropped: session=${sessionId.take(64)}")
+            closeMixerPad(sendStop = false)
+            emit("Connection lost — the mixer closed.")
+        }
+        return sent
+    }
+
+    /** Optimistic local value so the fader/mute cannot snap back for ~1 s. */
+    private fun updateMixerSession(
+        sessionId: String,
+        volume: Int? = null,
+        muted: Boolean? = null,
+    ) {
+        _state.update { current ->
+            val mixer = current.mixerSnapshot ?: return@update current
+            val sessions = mixer.sessions.map { session ->
+                if (session.id != sessionId) {
+                    session
+                } else {
+                    session.copy(
+                        volume = volume ?: session.volume,
+                        muted = muted ?: session.muted,
+                    )
+                }
+            }
+            current.copy(mixerSnapshot = mixer.copy(sessions = sessions))
+        }
+    }
+
+    private fun resetMixerFader() {
+        mixerFaderJob?.cancel()
+        mixerFaderJob = null
+        mixerFaderSessionId = null
+        mixerFaderThrottle.reset()
+    }
+
     /**
      * Coalesces watch updates triggered by hello/config/page changes. The
      * desktop allows one watch per 500 ms, so a fast page flip must not send a
@@ -1718,6 +1960,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             openKeyboardPad(button)
             return
         }
+        // The mixer launcher is phone-local too: open the panel instead of
+        // sending a press, so the desktop never sees an unexecutable action.
+        if (hasMixerAction(button)) {
+            openMixerPad(button)
+            return
+        }
         if (button.control?.kind == "trackpad") {
             openPointerPad(button)
             return
@@ -1980,6 +2228,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         inputFlushJob?.cancel()
         stopWatching(sendEmpty = false)
         closeKeyboardPad(cancel = true)
+        closeMixerPad(sendStop = false)
         stopPointerKeepalive()
         pointerFlushJob?.cancel()
         connection.stop()
