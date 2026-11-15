@@ -10,6 +10,13 @@ export interface WhatsNewEntry {
  * Keep highlights short: the dialog is a summary, not release notes.
  */
 const WHATS_NEW: Readonly<Record<string, WhatsNewEntry>> = {
+  '0.16.1': {
+    title: 'Streamer.bot and copy fixes',
+    highlights: [
+      'Adding a Streamer.bot action no longer leaves the deck unsaved; choose its action before pressing.',
+      'Fixed singular wording in automation delete confirmations.',
+    ],
+  },
   '0.16.0': {
     title: 'Automation rules',
     highlights: [
