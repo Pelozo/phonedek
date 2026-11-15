@@ -365,8 +365,19 @@ export function removeRigFromConfig(
   dropButtons: boolean = false,
 ): DeckConfig {
   const ids = new Set(references.map((reference) => reference.buttonId))
+  const nextRules = config.rules
+    ?.map((rule) => ({
+      ...rule,
+      actions: rule.actions.filter(
+        (action) => !(action.kind === 'runRig' && action.presetId === presetId),
+      ),
+    }))
+    .filter((rule) => rule.actions.length > 0)
   return {
     ...config,
+    ...(nextRules !== undefined
+      ? { rules: nextRules.length > 0 ? nextRules : undefined }
+      : {}),
     rigs: config.rigs?.filter((rig) => rig.id !== presetId),
     profiles: config.profiles.map((profile) => ({
       ...profile,

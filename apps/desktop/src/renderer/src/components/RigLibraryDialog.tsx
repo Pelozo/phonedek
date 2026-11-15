@@ -234,7 +234,7 @@ export function RigLibraryDialog({
         details: ruleReferences.slice(0, 6).map((rule) => `Automation rule: ${rule.name}`),
         warning:
           ruleReferences.length > 0
-            ? `${ruleReferences.length} automation rule${ruleReferences.length === 1 ? '' : 's'} use this rig. They stay saved but become inert until you pick another rig. Its guards and steps are removed. This cannot be undone.`
+            ? `${ruleReferences.length} automation rule${ruleReferences.length === 1 ? '' : 's'} use this rig. Those actions are removed; rules with no actions left are deleted. Its guards and steps are removed. This cannot be undone.`
             : 'Its guards and steps are removed. This cannot be undone.',
         confirmLabel: 'Delete rig',
         danger: true,
@@ -1071,7 +1071,7 @@ export function RigLibraryDialog({
             <p className="confirm-warning">
               “Keep buttons” leaves each button in place and removes its rig action/status, so the
               deck stays valid. “Delete buttons too” removes those buttons entirely. Automation
-              rules stay saved either way and become inert until they pick another rig.
+              rules that used this rig lose that action, and rules left with no actions are deleted.
             </p>
           </div>
         </Modal>

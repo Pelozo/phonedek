@@ -387,6 +387,52 @@ export function ruleSidebarSummary(
   return `${total} rule${total === 1 ? '' : 's'} · ${live} live`
 }
 
+/** Reference shape used by delete flows when a target disappears. */
+export type RuleDeleteReference =
+  | { kind: 'rig'; rigId: string }
+  | { kind: 'profile'; profileId: string }
+  | { kind: 'page'; profileId: string; pageId: string }
+
+function actionUsesDeletedTarget(action: RuleAction, reference: RuleDeleteReference): boolean {
+  switch (reference.kind) {
+    case 'rig':
+      return action.kind === 'runRig' && action.presetId === reference.rigId
+    case 'profile':
+      return (
+        (action.kind === 'showProfile' || action.kind === 'showPage') &&
+        action.profileId === reference.profileId
+      )
+    case 'page':
+      return (
+        action.kind === 'showPage' &&
+        action.profileId === reference.profileId &&
+        action.pageId === reference.pageId
+      )
+  }
+}
+
+/**
+ * Remove actions that point at a deleted rig/profile/page. A rule left with no
+ * actions is deleted too: the schema requires one action, so keeping an empty
+ * "inert" rule would make the whole config unsavable.
+ */
+export function removeRuleReferences(
+  config: DeckConfig,
+  reference: RuleDeleteReference,
+): DeckConfig {
+  if (!config.rules) return config
+  const rules = config.rules
+    .map((rule) => ({
+      ...rule,
+      actions: rule.actions.filter((action) => !actionUsesDeletedTarget(action, reference)),
+    }))
+    .filter((rule) => rule.actions.length > 0)
+  return {
+    ...config,
+    rules: rules.length > 0 ? rules : undefined,
+  }
+}
+
 /** Tone for one source strip cell. */
 export function ruleSourceTone(source: RuleSourceView): RuleTone {
   return sourceIsLive(source) ? 'ok' : 'muted'

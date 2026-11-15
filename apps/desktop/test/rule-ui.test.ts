@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   createDefaultConfig,
+  DeckConfigSchema,
   eventRuleSchema,
   RULE_COOLDOWN_DEFAULT_MS,
   RULE_DEBOUNCE_DEFAULT_MS,
@@ -19,6 +20,7 @@ import {
   nextRuleId,
   processMatchHint,
   removeRuleFromConfig,
+  removeRuleReferences,
   ruleActionFromKind,
   ruleActionLabel,
   ruleActionTarget,
@@ -139,6 +141,42 @@ describe('rule config helpers', () => {
     ).toBe(0)
     expect(ruleSidebarSummary(rules, sources)).toBe('3 rules · 2 live')
     expect(ruleSidebarSummary([rule()], [])).toBe('1 rule · 0 live')
+  })
+
+  it('removes deleted rig/profile/page references and drops empty rules', () => {
+    const base = config()
+    const profileId = base.defaultProfileId
+    const pageId = base.profiles[0]!.pages[0]!.id
+    const withRules: DeckConfig = {
+      ...base,
+      rules: [
+        rule({ id: 'a', actions: [{ kind: 'runRig', presetId: 'go-live' }] }),
+        rule({
+          id: 'b',
+          actions: [
+            { kind: 'runRig', presetId: 'go-live' },
+            { kind: 'showProfile', profileId },
+          ],
+        }),
+        rule({ id: 'c', actions: [{ kind: 'showPage', profileId, pageId }] }),
+        rule({ id: 'd', actions: [{ kind: 'showProfile', profileId }] }),
+      ],
+    }
+
+    const noRig = removeRuleReferences(withRules, { kind: 'rig', rigId: 'go-live' })
+    expect(noRig.rules?.map((entry) => entry.id)).toEqual(['b', 'c', 'd'])
+    expect(noRig.rules?.find((entry) => entry.id === 'b')?.actions).toEqual([
+      { kind: 'showProfile', profileId },
+    ])
+    expect(DeckConfigSchema.safeParse(noRig).success).toBe(true)
+
+    const noPage = removeRuleReferences(noRig, { kind: 'page', profileId, pageId })
+    expect(noPage.rules?.map((entry) => entry.id)).toEqual(['b', 'd'])
+    expect(DeckConfigSchema.safeParse(noPage).success).toBe(true)
+
+    const noProfile = removeRuleReferences(noPage, { kind: 'profile', profileId })
+    expect(noProfile.rules).toBeUndefined()
+    expect(DeckConfigSchema.safeParse(noProfile).success).toBe(true)
   })
 })
 

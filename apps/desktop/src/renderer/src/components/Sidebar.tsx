@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { DeckButton, DeckConfig, DeckPage, DeckProfile, GridSettings } from '@phonedek/shared'
 import { rigsOf } from '../lib/rigs'
-import { enabledRuleCount, ruleSidebarSummary, rulesOf } from '../lib/rules'
+import { enabledRuleCount, removeRuleReferences, ruleSidebarSummary, rulesOf } from '../lib/rules'
 import {
   addPage,
   addProfile,
@@ -249,14 +249,14 @@ export function Sidebar({
       details: ruleReferences.slice(0, 5).map((rule) => `Automation rule: ${rule.name}`),
       warning:
         ruleReferences.length > 0
-          ? `Every page, button and action in the profile is removed. ${ruleReferences.length} automation rule${ruleReferences.length === 1 ? '' : 's'} reference it and will stay saved but inert. This cannot be undone.`
+          ? `Every page, button and action in the profile is removed. ${ruleReferences.length} automation rule${ruleReferences.length === 1 ? '' : 's'} reference it; those actions are removed and rules with no actions left are deleted. This cannot be undone.`
           : 'Every page, button and action in the profile is removed. This cannot be undone.',
       confirmLabel: 'Delete profile',
       danger: true,
     })
     if (!confirmed) return
     const next = deleteProfile(config, profileId)
-    onChangeConfig(next)
+    onChangeConfig(removeRuleReferences(next, { kind: 'profile', profileId }))
     const first = next.profiles[0]
     if (first) {
       onSelectProfile(first.id)
@@ -289,14 +289,16 @@ export function Sidebar({
       details: ruleReferences.slice(0, 5).map((rule) => `Automation rule: ${rule.name}`),
       warning:
         ruleReferences.length > 0
-          ? `The page and its buttons are removed. ${ruleReferences.length} automation rule${ruleReferences.length === 1 ? '' : 's'} reference this page and will stay saved but inert. This cannot be undone.`
+          ? `The page and its buttons are removed. ${ruleReferences.length} automation rule${ruleReferences.length === 1 ? '' : 's'} reference this page; those actions are removed and rules with no actions left are deleted. This cannot be undone.`
           : 'The page and its buttons are removed. This cannot be undone.',
       confirmLabel: 'Delete page',
       danger: true,
     })
     if (!confirmed) return
     const next = deletePage(config, profile.id, pageId)
-    onChangeConfig(next)
+    onChangeConfig(
+      removeRuleReferences(next, { kind: 'page', profileId: profile.id, pageId }),
+    )
     const nextProfile = next.profiles.find((item) => item.id === profile.id)
     if (nextProfile) onSelectPage(nextProfile.defaultPageId)
   }
