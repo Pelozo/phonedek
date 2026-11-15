@@ -11,6 +11,13 @@ data class WhatsNewEntry(
  * each release; versions without a key fall back to [GENERIC_WHATS_NEW].
  */
 private val WHATS_NEW: Map<String, WhatsNewEntry> = mapOf(
+    "0.16.2" to WhatsNewEntry(
+        title = "Streamer.bot and copy fixes",
+        highlights = listOf(
+            "Adding a Streamer.bot action no longer leaves the deck unsaved; choose its action before pressing.",
+            "Fixed singular wording in automation delete confirmations.",
+        ),
+    ),
     "0.16.1" to WhatsNewEntry(
         title = "Streamer.bot and copy fixes",
         highlights = listOf(
