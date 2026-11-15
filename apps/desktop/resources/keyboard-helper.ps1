@@ -486,7 +486,12 @@ public static class PhoneDeckSessions {
                     string sessionId = control.GetSessionInstanceIdentifier(out instancePointer) == 0
                         ? TakeString(instancePointer)
                         : string.Empty;
-                    if (string.IsNullOrEmpty(sessionId)) sessionId = control.GetProcessId(out uint pid) == 0 ? pid + ":" + index : index.ToString();
+                    if (string.IsNullOrEmpty(sessionId)) {
+                        // Windows PowerShell 5.1 compiles Add-Type as C# 5, which
+                        // does not allow the C# 7 inline `out uint pid` form.
+                        uint pid;
+                        sessionId = control.GetProcessId(out pid) == 0 ? pid + ":" + index : index.ToString();
+                    }
                     if (!string.Equals(sessionId, id, StringComparison.Ordinal)) continue;
                     var volume = control as ISimpleAudioVolume;
                     if (volume == null) throw new InvalidOperationException("Audio session has no volume control: " + id);
