@@ -1150,6 +1150,144 @@ class ControlStateStoreTest {
         assertTrue(ControlStateStore.statefulControlIds(DeckPage()).isEmpty())
     }
 
+    @Test
+    fun rigStateTilesAreDetailFirstAndWatchable() {
+        val page = DeckPage(
+            id = "pg1",
+            buttons = listOf(
+                button("plain", control = null),
+                button(
+                    "rig-status",
+                    control = null,
+                    state = StateBindingDto(type = "rig", presetId = "rig-1"),
+                ),
+                button(
+                    "rig-status-with-control",
+                    type = "obs",
+                    mode = null,
+                    target = "inputVolume",
+                    state = StateBindingDto(type = "rig", presetId = "rig-2"),
+                ),
+                button("", control = null, state = StateBindingDto(type = "rig", presetId = "x")),
+            ),
+        )
+
+        assertEquals(
+            listOf("rig-status", "rig-status-with-control"),
+            ControlStateStore.statefulControlIds(page),
+        )
+    }
+
+    @Test
+    fun rigStateTileTextShowsDesktopDetailAndQuietFallbacks() {
+        val binding = StateBindingDto(type = "rig", presetId = "rig-1")
+        fun text(
+            detail: String? = null,
+            active: Boolean? = null,
+            available: Boolean = true,
+        ) = ControlStateStore.stateTileText(
+            binding,
+            ControlStateEntryDto(
+                controlId = "rig-status",
+                revision = 1,
+                available = available,
+                detail = detail,
+                active = active,
+            ),
+            stateCapable = true,
+        )
+
+        // Detail-first: every desktop short form is passed through unchanged.
+        listOf(
+            "READY",
+            "3/9",
+            "RUN 2m",
+            "PARTIAL",
+            "FAILED",
+            "BLOCKED",
+            "STOPPED",
+            "TIMEOUT",
+            "NO RIG",
+        ).forEach { detail -> assertEquals(detail, text(detail = detail)) }
+
+        // A sparse update uses the running cue, then the quiet placeholder.
+        assertEquals("RUN", text(active = true))
+        assertEquals(ControlStateStore.NO_STATE, text(active = false))
+        // Unavailable without a detail means the preset/deck is missing.
+        assertEquals(ControlStateStore.NO_RIG, text(available = false))
+        assertEquals("NO RIG", text(detail = "NO RIG", available = false))
+
+        // No entry yet: silent on an old desktop, placeholder when capable.
+        assertNull(
+            ControlStateStore.stateTileText(binding, null, stateCapable = false),
+        )
+        assertEquals(
+            ControlStateStore.NO_STATE,
+            ControlStateStore.stateTileText(binding, null, stateCapable = true),
+        )
+        // A malformed binding never renders a rig tile.
+        assertNull(
+            ControlStateStore.stateTileText(
+                StateBindingDto(type = "rig"),
+                ControlStateEntryDto(controlId = "rig-status", revision = 1, detail = "READY"),
+                stateCapable = true,
+            ),
+        )
+    }
+
+    @Test
+    fun rigStateActiveRequiresAnAvailableRunningPreset() {
+        val binding = StateBindingDto(type = "rig", presetId = "rig-1")
+        assertEquals("3/9", ControlStateStore.stateTileText(
+            binding,
+            state("rig", 1, detail = "3/9", active = true),
+            stateCapable = true,
+        ))
+        assertTrue(
+            ControlStateStore.stateTileActive(
+                state("rig", 1, detail = "3/9", active = true),
+            ),
+        )
+        assertFalse(
+            ControlStateStore.stateTileActive(
+                state("rig", 2, detail = "READY", active = false),
+            ),
+        )
+        assertFalse(
+            ControlStateStore.stateTileActive(
+                state("rig", 3, detail = "NO RIG", available = false),
+            ),
+        )
+    }
+
+    @Test
+    fun detectsRigRunActionsAndStateBindings() {
+        val run = DeckButton(
+            id = "btn-rig",
+            actions = listOf(
+                ActionDto(type = "rig", action = "run", presetId = "rig-1"),
+            ),
+        )
+        assertTrue(ControlStateStore.hasRigAction(run))
+        assertEquals("rig-1", ControlStateStore.rigActionPreset(run.actions))
+        assertTrue(ControlStateStore.hasRigStateBinding(
+            DeckButton(state = StateBindingDto(type = "rig", presetId = "rig-1")),
+        ))
+        assertFalse(ControlStateStore.hasRigAction(
+            DeckButton(actions = listOf(ActionDto(type = "rig", action = "run"))),
+        ))
+        assertFalse(ControlStateStore.hasRigAction(
+            DeckButton(actions = listOf(ActionDto(type = "rig", action = "stop", presetId = "rig-1"))),
+        ))
+        assertFalse(ControlStateStore.hasRigAction(
+            DeckButton(actions = listOf(ActionDto(type = "page", direction = "next"))),
+        ))
+        assertFalse(ControlStateStore.hasRigAction(null))
+        assertFalse(ControlStateStore.hasRigStateBinding(
+            DeckButton(state = StateBindingDto(type = "obs", target = "streaming")),
+        ))
+    }
+
     private fun state(
         id: String,
         revision: Int,

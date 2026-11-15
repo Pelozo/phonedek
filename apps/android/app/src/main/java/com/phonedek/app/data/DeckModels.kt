@@ -6,8 +6,11 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.longOrNull
 import com.phonedek.app.util.ShortcutChord
 
 const val DEFAULT_HTTP_PORT = 47654
@@ -17,6 +20,9 @@ const val PROTOCOL_VERSION = 1
 /**
  * Wire model for the PhoneDeck config. Everything has a default so partial or
  * older configs never crash the renderer. Unknown keys are ignored by [DeckJson].
+ *
+ * The additive top-level `rigs` array is intentionally not modeled: the phone
+ * never lists or executes a rig, so decoding simply ignores it.
  */
 @Serializable
 data class DeckConfig(
@@ -109,6 +115,8 @@ data class DeckButton(
  * - `appVolume`: `volume` or `mute`. `match.process` selects the app's audio
  *   session on Windows/Linux; the desktop resolves it and sends `42%`/`MUTED`
  *   or `NO SESSION`.
+ * - `rig`: `presetId` selects the rig last-run status. The desktop owns the
+ *   run; the phone only renders the short detail (`READY`, `3/9`, `FAILED`).
  *
  * Kept as one forgiving wire shape so old OBS-only configs still parse.
  */
@@ -122,6 +130,8 @@ data class StateBindingDto(
     val light: String? = null,
     /** Per-app audio selector (`type == "appVolume"`). */
     val match: AppVolumeMatchDto? = null,
+    /** Rig preset id (`type == "rig"`); required for a valid rig binding. */
+    val presetId: String? = null,
 )
 
 @Serializable
@@ -231,6 +241,25 @@ data class ControlStateMessageDto(
     val states: List<ControlStateEntryDto> = emptyList(),
 )
 
+/**
+ * One live rig progress frame (`rig-v1`). Runtime data only: never part of
+ * [DeckConfig] and never persisted. `start` carries index 0; `step` carries the
+ * 1-based step that just finished; `done` carries the final status.
+ */
+@Serializable
+data class RigProgressDto(
+    val presetId: String = "",
+    val buttonId: String? = null,
+    val phase: String = "",
+    val index: Int = 0,
+    val total: Int = 0,
+    val label: String? = null,
+    val status: String? = null,
+    val ok: Boolean? = null,
+    val error: String? = null,
+    val durationMs: Long? = null,
+)
+
 @Serializable
 data class MediaIconDto(
     val type: String = "",
@@ -252,6 +281,8 @@ data class ActionDto(
     // Kept for the desktop-resolved mic (and future) actions; presses carry
     // only ids, so this is informational on the phone.
     val action: String? = null,
+    /** Rig run action (`type == "rig"`, `action == "run"`): preset to run. */
+    val presetId: String? = null,
 )
 
 @Serializable
@@ -357,7 +388,63 @@ object DeckJson {
             states = states,
         )
     }
+
+    /**
+     * Parses one `rigProgress` frame. Unknown fields are ignored; malformed
+     * frames (missing ids, an unknown phase or an impossible step index) are
+     * dropped so a broken desktop cannot put nonsense on a tile.
+     */
+    fun parseRigProgress(raw: String): RigProgressDto? =
+        runCatching { format.parseToJsonElement(raw) }
+            .getOrNull()
+            ?.let(::parseRigProgress)
+
+    fun parseRigProgress(element: JsonElement): RigProgressDto? {
+        val obj = element as? JsonObject ?: return null
+        val presetId = (obj["presetId"] as? JsonPrimitive)
+            ?.contentOrNull?.trim().orEmpty()
+        if (presetId.isEmpty() || presetId.length > 128) return null
+        val phase = (obj["phase"] as? JsonPrimitive)
+            ?.contentOrNull?.trim()?.lowercase()
+            .orEmpty()
+        if (phase != "start" && phase != "step" && phase != "done") return null
+        val total = (obj["total"] as? JsonPrimitive)?.intOrNull ?: return null
+        val index = (obj["index"] as? JsonPrimitive)?.intOrNull ?: return null
+        if (total !in 1..32) return null
+        if (index !in 0..total) return null
+        if (phase == "start" && index != 0) return null
+        if (phase == "step" && index < 1) return null
+        val status = (obj["status"] as? JsonPrimitive)
+            ?.contentOrNull?.trim()?.lowercase()
+            ?.takeIf { it in RIG_STATUSES }
+        return RigProgressDto(
+            presetId = presetId,
+            buttonId = (obj["buttonId"] as? JsonPrimitive)
+                ?.contentOrNull?.trim()?.take(128)?.takeIf { it.isNotEmpty() },
+            phase = phase,
+            index = index,
+            total = total,
+            label = (obj["label"] as? JsonPrimitive)
+                ?.contentOrNull?.trim()?.take(60)?.takeIf { it.isNotEmpty() },
+            status = status,
+            ok = (obj["ok"] as? JsonPrimitive)?.booleanOrNull,
+            error = (obj["error"] as? JsonPrimitive)
+                ?.contentOrNull?.trim()?.take(200)?.takeIf { it.isNotEmpty() },
+            durationMs = (obj["durationMs"] as? JsonPrimitive)?.longOrNull
+                ?.takeIf { it >= 0L },
+        )
+    }
 }
+
+private val RIG_STATUSES = setOf(
+    "ok",
+    "partial",
+    "failed",
+    "blocked",
+    "cancelled",
+    "timeout",
+    "busy",
+)
 
 private fun ControlStateEntryDto.sanitized(): ControlStateEntryDto? {
     val id = controlId.trim()
@@ -604,6 +691,15 @@ private fun StateBindingDto.normalized(): StateBindingDto? =
                 target = safeTarget,
                 match = match.normalized(),
             )
+        }
+
+        "rig" -> {
+            // A rig status tile is identified only by its preset. An empty or
+            // missing id cannot be resolved by the desktop, so drop the
+            // binding rather than render a permanently blank status tile.
+            val preset = presetId?.trim()?.take(128)?.takeIf { it.isNotEmpty() }
+                ?: return null
+            StateBindingDto(type = "rig", presetId = preset)
         }
 
         else -> null

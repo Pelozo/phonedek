@@ -20,6 +20,7 @@ object ControlStateStore {
     const val NO_LIGHT = "NO LIGHT"
     const val NO_PLAYER = "NO PLAYER"
     const val NO_SESSION = "NO SESSION"
+    const val NO_RIG = "NO RIG"
     const val UNSUPPORTED = "UNSUPPORTED"
     const val NO_MIXER = "NO MIXER"
     const val OFFLINE = "OFFLINE"
@@ -36,6 +37,7 @@ object ControlStateStore {
         NO_LIGHT,
         NO_PLAYER,
         NO_SESSION,
+        NO_RIG,
         UNSUPPORTED,
         NO_MIXER,
         OFFLINE,
@@ -143,6 +145,31 @@ object ControlStateStore {
         actions.any { it.type.trim().lowercase() == "twitch" }
 
     /**
+     * Preset id of the first well-formed rig run action, or null. The phone
+     * only needs it to match `rigProgress`/last-run state to the tile; the
+     * desktop resolves the actual preset from its own config on press.
+     */
+    fun rigActionPreset(actions: List<ActionDto>): String? =
+        actions.asSequence()
+            .mapNotNull { action ->
+                if (action.type.trim().lowercase() != "rig") return@mapNotNull null
+                val verb = action.action?.trim()?.lowercase()
+                if (verb != null && verb.isNotEmpty() && verb != "run") {
+                    return@mapNotNull null
+                }
+                action.presetId?.trim()?.take(128)?.takeIf { it.isNotEmpty() }
+            }
+            .firstOrNull()
+
+    /** True when a button carries a rig run action. */
+    fun hasRigAction(button: DeckButton?): Boolean =
+        rigActionPreset(button?.actions.orEmpty()) != null
+
+    /** True for a normal tile with a read-only rig last-run binding. */
+    fun hasRigStateBinding(button: DeckButton?): Boolean =
+        button?.state?.type == "rig"
+
+    /**
      * Chip text for a non-control tile with a state binding. The desktop's
      * `detail` already carries the short form (`LIVE`, `REC`, `OFF`, `42%`,
      * a scene name, a viewer count, uptime, title or game); `active` is only a
@@ -158,6 +185,7 @@ object ControlStateStore {
         "twitch" -> twitchStateTileText(binding, state, stateCapable)
         "light" -> lightStateTileText(binding, state, stateCapable)
         "appVolume" -> appVolumeStateTileText(binding, state, stateCapable)
+        "rig" -> rigStateTileText(binding, state, stateCapable)
         else -> null
     }
 
@@ -301,6 +329,27 @@ object ControlStateStore {
         }
     }
 
+    /**
+     * Rig tiles are detail-first: the desktop formats `READY`, `3/9`,
+     * `RUN 2m`, `PARTIAL`, `FAILED`, `BLOCKED`, `STOPPED`, `TIMEOUT` and
+     * `NO RIG` (all ≤12 chars). A missing state is quiet placeholder text,
+     * never a toast; `active` only carries the accent while the runner owns
+     * the preset.
+     */
+    private fun rigStateTileText(
+        binding: StateBindingDto,
+        state: ControlStateDto?,
+        stateCapable: Boolean,
+    ): String? {
+        if (binding.presetId.isNullOrBlank()) return null
+        if (state == null) return if (stateCapable) NO_STATE else null
+        val detail = state.detail?.trim()?.takeIf { it.isNotEmpty() }
+        if (!state.available) return detail ?: NO_RIG
+        if (detail != null) return detail
+        if (state.active == true) return "RUN"
+        return NO_STATE
+    }
+
     /** True when the state chip should use the active/accent treatment. */
     fun stateTileActive(state: ControlStateDto?): Boolean =
         state?.available == true && state.active == true
@@ -308,8 +357,9 @@ object ControlStateStore {
     /**
      * Ids with a desktop live-state producer: absolute output volume,
      * microphone gain, OBS input volume, local-light controls, per-app volume,
-     * media position, and normal buttons with an OBS/Twitch/light/app read-only
-     * `state` binding. Relative volume, scroll and trackpads stay open-loop.
+     * media position, and normal buttons with an OBS/Twitch/light/app/rig
+     * read-only `state` binding. Relative volume, scroll and trackpads stay
+     * open-loop.
      */
     fun statefulControlIds(page: DeckPage): List<String> =
         page.buttons
@@ -318,7 +368,8 @@ object ControlStateStore {
                 // A status tile uses the same channel, even without a control.
                 val stateType = button.state?.type
                 if (stateType == "obs" || stateType == "twitch" ||
-                    stateType == "light" || stateType == "appVolume"
+                    stateType == "light" || stateType == "appVolume" ||
+                    stateType == "rig"
                 ) {
                     return@filter true
                 }

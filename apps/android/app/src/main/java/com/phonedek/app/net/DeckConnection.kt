@@ -6,6 +6,7 @@ import com.phonedek.app.data.DeckJson
 import com.phonedek.app.data.DeviceInfo
 import com.phonedek.app.data.PROTOCOL_VERSION
 import com.phonedek.app.data.PointerButtonEvent
+import com.phonedek.app.data.RigProgressDto
 import com.phonedek.app.data.normalizeProfileId
 import com.phonedek.app.util.Diag
 import java.util.UUID
@@ -57,6 +58,9 @@ internal val CLIENT_CAPABILITIES = listOf(
     "control-state-v1",
     "keyboard-v1",
     "mixer-v1",
+    // Rig configs stay executable without this; the capability only opts in to
+    // live `rigProgress` frames and lets the tile show n/total while running.
+    "rig-v1",
 )
 
 internal fun buildHelloPayload(device: DeviceInfo): JsonObject = buildJsonObject {
@@ -114,6 +118,8 @@ class DeckConnection(
             pageId: String,
             states: Map<String, ControlStateDto>,
         )
+        /** Live `rig-v1` run progress (start/step/done) for a rig preset. */
+        fun onRigProgress(progress: RigProgressDto)
         fun onServerError(code: String, message: String)
         fun onNavigate(direction: String, pageId: String?)
         /** Auto-profile: the desktop asked this phone to show [profileId]. */
@@ -601,6 +607,10 @@ class DeckConnection(
                         states = message.states.associateBy { it.controlId },
                     )
                 }
+            }
+
+            "rigProgress" -> {
+                DeckJson.parseRigProgress(obj)?.let(listener::onRigProgress)
             }
 
             "error" -> {

@@ -22,6 +22,7 @@ import com.phonedek.app.data.Pairing
 import com.phonedek.app.data.PairingDraft
 import com.phonedek.app.data.PointerButtonEvent
 import com.phonedek.app.data.PrefsRepository
+import com.phonedek.app.data.RigProgressDto
 import com.phonedek.app.data.shouldShowWhatsNew
 import com.phonedek.app.net.BackupResult
 import com.phonedek.app.net.ConnectionStatus
@@ -95,6 +96,8 @@ data class UiState(
     val keyboardDirectCapable: Boolean = false,
     val stateCapable: Boolean = false,
     val controlStates: Map<String, ControlStateDto> = emptyMap(),
+    /** Live rig runs by button/preset; cleared on done hold, page and socket changes. */
+    val rigProgress: RigProgressState = RigProgressState(),
     val pointerPadOpen: Boolean = false,
     val pointerPadOptions: PointerPadOptions = PointerPadOptions(),
     val keyboardPadOpen: Boolean = false,
@@ -167,6 +170,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var watchJob: Job? = null
     private var lastWatchKey: String? = null
     private var lastWatchSentAt = 0L
+    /** Per-preset timers that remove a finished rig chip after its short hold. */
+    private val rigClearJobs = mutableMapOf<String, Job>()
     private var activeControlId: String? = null
     private var activeControlAbsolute = false
     private var pendingInputDelta = 0f
@@ -212,6 +217,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     // our signature so the next hello re-subscribes even if the
                     // visible controls did not change.
                     stopWatching(sendEmpty = false)
+                    // A run owned by the old socket can never report `done` here.
+                    clearRigProgress()
                 }
                 _state.update { it.copy(connection = status) }
                 if (status != ConnectionStatus.CONNECTED &&
@@ -248,6 +255,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val keyboardDirectCapable = "keyboard-v2" in capabilities
                 val stateCapable = "control-state-v1" in capabilities
                 val mixerCapable = "mixer-v1" in capabilities
+                // Fresh socket: no run from the previous connection is valid.
+                cancelRigClears()
                 _state.update { current ->
                     current.copy(
                         inputCapable = inputCapable,
@@ -259,6 +268,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         // A hello starts a new socket; state from the previous
                         // connection (and its revision counter) is stale.
                         controlStates = emptyMap(),
+                        rigProgress = RigProgressState(),
                         phoneBrightness = if (brightnessCapable) {
                             current.phoneBrightness
                         } else {
@@ -384,6 +394,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             ),
                         )
                     }
+                }
+            }
+
+            override fun onRigProgress(progress: RigProgressDto) {
+                val now = SystemClock.elapsedRealtime()
+                // A run started on another page keeps going on the desktop, but
+                // its chip must not appear on the page the user is looking at.
+                val buttonId = progress.buttonId
+                if (buttonId != null && !buttonOnActivePage(buttonId)) return
+                if (progress.phase == "done") {
+                    val existing = _state.value.rigProgress.byPreset[progress.presetId]
+                    // A duplicated `done` must not extend the 800 ms hold.
+                    if (existing?.phase != "done") scheduleRigClear(progress.presetId)
+                } else {
+                    // A fresh start for this preset supersedes its old hold.
+                    rigClearJobs.remove(progress.presetId)?.cancel()
+                }
+                _state.update { current ->
+                    current.copy(
+                        rigProgress = RigProgressStore.apply(
+                            current.rigProgress,
+                            progress,
+                            now,
+                        ),
+                    )
                 }
             }
 
@@ -536,12 +571,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     lastProfileId = active.first
                     lastPageId = active.second
 
+                    cancelRigClears()
                     _state.update {
                         it.copy(
                             pairing = pairing,
                             config = result.config,
                             activeProfileId = active.first,
                             activePageId = active.second,
+                            rigProgress = RigProgressState(),
                             pairingBusy = false,
                             pairingError = null,
                             pairingDraft = null,
@@ -1938,6 +1975,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return page.buttons.firstOrNull { it.id == buttonId }
     }
 
+    private fun buttonOnActivePage(buttonId: String): Boolean =
+        activeButton(buttonId) != null
+
+    /**
+     * Keeps a finished `n/total`/status chip visible for a short beat, then
+     * removes just that preset. A new run cancels the hold first.
+     */
+    private fun scheduleRigClear(presetId: String) {
+        rigClearJobs.remove(presetId)?.cancel()
+        rigClearJobs[presetId] = viewModelScope.launch {
+            delay(RigProgressStore.DONE_HOLD_MS)
+            _state.update { current ->
+                current.copy(
+                    rigProgress = RigProgressStore.clearPreset(
+                        current.rigProgress,
+                        presetId,
+                    ),
+                )
+            }
+            rigClearJobs.remove(presetId)
+        }
+    }
+
+    private fun cancelRigClears() {
+        rigClearJobs.values.forEach { it.cancel() }
+        rigClearJobs.clear()
+    }
+
+    /** Page/profile switch, disconnect or reconnect: every run is stale. */
+    private fun clearRigProgress() {
+        cancelRigClears()
+        _state.update { current ->
+            if (current.rigProgress == RigProgressState()) {
+                current
+            } else {
+                current.copy(rigProgress = RigProgressState())
+            }
+        }
+    }
+
     private fun isObsControl(controlId: String): Boolean =
         ControlStateStore.isObsValueControl(activeButton(controlId)?.control)
 
@@ -2149,12 +2226,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 lastPageId = active.second
                 val pageChanged = current.activeProfileId != active.first ||
                     current.activePageId != active.second
+                if (pageChanged) cancelRigClears()
                 _state.update {
                     it.copy(
                         config = config,
                         activeProfileId = active.first,
                         activePageId = active.second,
                         controlStates = if (pageChanged) emptyMap() else it.controlStates,
+                        rigProgress = if (pageChanged) {
+                            RigProgressState()
+                        } else {
+                            it.rigProgress
+                        },
                     )
                 }
                 cache.write(rawJson)
@@ -2223,6 +2306,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun setActivePage(profileId: String, pageId: String) {
         val current = _state.value
         if (current.activeProfileId == profileId && current.activePageId == pageId) return
+        cancelRigClears()
         _state.update {
             it.copy(
                 activeProfileId = profileId,
@@ -2230,6 +2314,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // State is scoped to the visible page; never let a stale entry
                 // light a tile on the page we just moved to.
                 controlStates = emptyMap(),
+                rigProgress = RigProgressState(),
             )
         }
         lastProfileId = profileId
@@ -2273,12 +2358,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         Diag.i("Profile switch -> ${target.profileId}/${target.pageId}")
+        cancelRigClears()
         _state.update {
             it.copy(
                 activeProfileId = target.profileId,
                 activePageId = target.pageId,
                 // Live state is scoped to the previous profile/page.
                 controlStates = emptyMap(),
+                rigProgress = RigProgressState(),
             )
         }
         scheduleWatch()
@@ -2292,6 +2379,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         backupJob?.cancel()
         importJob?.cancel()
         inputFlushJob?.cancel()
+        cancelRigClears()
         stopWatching(sendEmpty = false)
         closeKeyboardPad(cancel = true)
         closeMixerPad(sendStop = false)

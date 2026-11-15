@@ -1804,6 +1804,78 @@ class DeckModelsTest {
     }
 
     @Test
+    fun parsesRigConfigAndRigStateBindings() {
+        val raw = """
+            {
+              "schemaVersion": 1,
+              "serverName": "Desk",
+              "rigs": [{
+                "id": "rig-1",
+                "name": "Go live",
+                "steps": [{ "action": { "type": "obs", "action": "startStream" } }]
+              }],
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [{
+                    "id": "run",
+                    "slot": 0,
+                    "label": "Go live",
+                    "actions": [{ "type": "rig", "action": "run", "presetId": "rig-1" }]
+                  }, {
+                    "id": "status",
+                    "slot": 1,
+                    "label": "Rig",
+                    "state": { "type": "rig", "presetId": " rig-1 " }
+                  }]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val config = DeckJson.parse(raw)
+        assertNotNull(config)
+        val buttons = config!!.profiles.single().pages.single().buttons
+        val run = buttons.first { it.id == "run" }
+        assertEquals("rig", run.actions.single().type)
+        assertEquals("run", run.actions.single().action)
+        assertEquals("rig-1", run.actions.single().presetId)
+
+        val status = buttons.first { it.id == "status" }
+        assertEquals("rig", status.state?.type)
+        assertEquals("rig-1", status.state?.presetId)
+        assertNull(status.control)
+    }
+
+    @Test
+    fun rigStateBindingsRequireAPresetId() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [
+                    { "id": "missing", "slot": 0, "state": { "type": "rig" } },
+                    { "id": "blank", "slot": 1, "state": { "type": "rig", "presetId": "   " } },
+                    { "id": "bad-type", "slot": 2, "state": { "type": "rig", "presetId": null } },
+                    { "id": "kept", "slot": 3, "state": { "type": "RIG", "presetId": " rig-2 " } }
+                  ]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val buttons = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons
+        assertNull(buttons.first { it.id == "missing" }.state)
+        assertNull(buttons.first { it.id == "blank" }.state)
+        assertNull(buttons.first { it.id == "bad-type" }.state)
+        assertEquals("rig", buttons.first { it.id == "kept" }.state?.type)
+        assertEquals("rig-2", buttons.first { it.id == "kept" }.state?.presetId)
+    }
+
+    @Test
     fun endpointParserAcceptsCommonForms() {
         assertEquals(parseEndpoint("192.168.1.4")!!.port, 47654)
         assertEquals(parseEndpoint("192.168.1.4:5000")!!.port, 5000)

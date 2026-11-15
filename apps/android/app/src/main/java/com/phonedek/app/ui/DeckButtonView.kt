@@ -97,6 +97,7 @@ fun DeckButtonView(
     trackpad: TrackpadActions = TrackpadActions(),
     controlState: ControlStateDto? = null,
     stateCapable: Boolean = false,
+    rigProgress: RigProgressState = RigProgressState(),
     isActive: Boolean = true,
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -136,18 +137,24 @@ fun DeckButtonView(
     val control = button.control
     // OBS status is a read-only chip on the normal tile; controls keep their
     // own live value/mute readout in DeckControlView.
-    val stateText = if (control == null) {
+    val rigPreset = ControlStateStore.rigActionPreset(button.actions)
+    val rigState = rigPreset?.let { rigProgress.forTile(button.id, it) }
+    val rigChipText = rigPreset?.let { rigState?.chipText() ?: "RIG" }
+    val rigActive = rigState?.isActive == true
+    val stateText = if (control == null && rigPreset == null) {
         ControlStateStore.stateTileText(button.state, controlState, stateCapable)
     } else {
         null
     }
     val stateActive = ControlStateStore.stateTileActive(controlState)
+    val chipText = rigChipText ?: stateText
+    val chipActive = (rigChipText != null && rigActive) || (stateText != null && stateActive)
 
     val description = listOfNotNull(
         button.icon,
         button.label,
         button.sublabel,
-        stateText,
+        chipText,
     )
         .map { it.trim() }
         .filter { it.isNotEmpty() }
@@ -162,7 +169,15 @@ fun DeckButtonView(
             }
             .clip(shape)
             .background(fallback)
-            .border(1.dp, Color.White.copy(alpha = 0.07f), shape)
+            .border(
+                width = if (rigActive) 1.5.dp else 1.dp,
+                color = if (rigActive) {
+                    Accent.copy(alpha = 0.85f)
+                } else {
+                    Color.White.copy(alpha = 0.07f)
+                },
+                shape = shape,
+            )
             // A control owns the whole tile gesture surface; its label remains
             // tappable for the optional tap action. Keeping clickable on the
             // parent would steal the slider/dial drag.
@@ -277,11 +292,11 @@ fun DeckButtonView(
                         Spacer(Modifier.height(2.dp))
                     }
                 }
-                if (stateText != null) {
+                if (chipText != null) {
                     Box(
                         modifier = Modifier
                             .background(
-                                color = if (stateActive) {
+                                color = if (chipActive) {
                                     Accent.copy(alpha = 0.20f)
                                 } else {
                                     Color.Black.copy(alpha = 0.22f)
@@ -290,7 +305,7 @@ fun DeckButtonView(
                             )
                             .border(
                                 width = 1.dp,
-                                color = if (stateActive) {
+                                color = if (chipActive) {
                                     Accent.copy(alpha = 0.70f)
                                 } else {
                                     textColor.copy(alpha = 0.18f)
@@ -300,8 +315,8 @@ fun DeckButtonView(
                             .padding(horizontal = 5.dp, vertical = 1.dp),
                     ) {
                         Text(
-                            text = stateText,
-                            color = if (stateActive) {
+                            text = chipText,
+                            color = if (chipActive) {
                                 AccentHigh
                             } else {
                                 textColor.copy(alpha = 0.72f)

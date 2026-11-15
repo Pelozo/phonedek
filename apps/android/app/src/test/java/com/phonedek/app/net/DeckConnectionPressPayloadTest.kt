@@ -1,12 +1,54 @@
 package com.phonedek.app.net
 
 import com.phonedek.app.data.DeckJson
+import com.phonedek.app.ui.ControlStateStore
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DeckConnectionPressPayloadTest {
+    @Test
+    fun rigActionTilePressesByIdSoTheDesktopRunsThePreset() {
+        val button = DeckJson.parse(
+            """
+                {
+                  "profiles": [{
+                    "id": "p1",
+                    "pages": [{
+                      "id": "pg1",
+                      "buttons": [{
+                        "id": "btn-rig",
+                        "slot": 0,
+                        "label": "Go live",
+                        "actions": [{ "type": "rig", "action": "run", "presetId": "rig-1" }]
+                      }]
+                    }]
+                  }]
+                }
+            """.trimIndent(),
+        )!!.profiles.single().pages.single().buttons.single()
+
+        // A rig button is an ordinary tap tile: the phone forwards the button
+        // id and the desktop resolves the preset from its own config.
+        assertTrue(ControlStateStore.hasRigAction(button))
+        assertEquals("rig-1", ControlStateStore.rigActionPreset(button.actions))
+
+        val payload = buildPressPayload(
+            requestId = "r-rig",
+            profileId = "p1",
+            pageId = "pg1",
+            buttonId = button.id,
+        )
+
+        assertEquals("press", (payload["type"] as JsonPrimitive).contentOrNull)
+        assertEquals("r-rig", (payload["requestId"] as JsonPrimitive).contentOrNull)
+        assertEquals("p1", (payload["profileId"] as JsonPrimitive).contentOrNull)
+        assertEquals("pg1", (payload["pageId"] as JsonPrimitive).contentOrNull)
+        assertEquals("btn-rig", (payload["buttonId"] as JsonPrimitive).contentOrNull)
+    }
+
     @Test
     fun micActionTilePressesByIdSoTheDesktopResolvesTheAction() {
         val button = DeckJson.parse(
