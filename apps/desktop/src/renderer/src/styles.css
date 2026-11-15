@@ -6434,3 +6434,203 @@ select[aria-invalid="true"] {
 .app-status-badges {
   letter-spacing: 0.04em;
 }
+
+/* ------------------------------------------------------------------ */
+/* Streamer.bot integration                                            */
+/* ------------------------------------------------------------------ */
+
+.streamerbot-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  background: transparent;
+}
+
+.streamerbot-status.ok {
+  border-left-color: var(--ok);
+}
+
+.streamerbot-status.warn {
+  border-left-color: var(--warn);
+}
+
+.streamerbot-status.error {
+  border-left-color: var(--danger);
+}
+
+.streamerbot-status.muted {
+  border-left-color: var(--line-strong);
+}
+
+.streamerbot-status > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.streamerbot-status strong {
+  font-size: 12px;
+}
+
+.streamerbot-status small {
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.streamerbot-status-endpoint {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 9px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.streamerbot-meta {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 0.7fr);
+  border: 1px solid var(--line);
+}
+
+.streamerbot-meta > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 9px;
+  border-left: 1px solid var(--line);
+  min-width: 0;
+}
+
+.streamerbot-meta > div:first-child {
+  border-left: 0;
+}
+
+.streamerbot-meta span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 8.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.streamerbot-meta strong {
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.streamerbot-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.streamerbot-toolbar-label {
+  color: var(--muted);
+  font-size: 8.5px;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+}
+
+.streamerbot-filter {
+  flex: 1;
+  min-width: 0;
+}
+
+.streamerbot-editor .streamerbot-toolbar > .button {
+  flex: 0 0 auto;
+}
+
+.streamerbot-args {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+}
+
+.streamerbot-args-title {
+  color: var(--muted);
+  font-size: 8.5px;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+}
+
+.streamerbot-args-title .muted {
+  margin-left: 4px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+.streamerbot-arg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.streamerbot-arg-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.streamerbot-arg-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr) 24px;
+  gap: 5px;
+  align-items: center;
+}
+
+.streamerbot-arg-row input {
+  padding: 6px 7px;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.streamerbot-arg-row .icon-button.tiny {
+  width: 24px;
+  height: 24px;
+}
+
+.streamerbot-test-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.streamerbot-test-row .hint {
+  min-width: 0;
+}
+
+.streamerbot-test-result {
+  margin: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  color: var(--text-soft);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.streamerbot-test-result.ok {
+  border-left-color: var(--ok);
+  color: var(--ok);
+}
+
+.streamerbot-test-result.error {
+  border-left-color: var(--danger);
+  color: var(--danger);
+}
+
+.streamerbot-test-result.busy {
+  border-left-color: var(--warn);
+  color: var(--warn);
+}

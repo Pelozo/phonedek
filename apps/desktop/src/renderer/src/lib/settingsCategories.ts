@@ -20,7 +20,7 @@ export const SETTINGS_CATEGORIES = [
     id: 'integrations',
     index: '03',
     label: 'Integrations',
-    description: 'OBS Studio, Twitch, Elgato, Hue and Nanoleaf lights, and game launch switching.',
+    description: 'OBS Studio, Twitch, Streamer.bot, Elgato, Hue and Nanoleaf lights, and game launch switching.',
   },
   {
     id: 'phone',

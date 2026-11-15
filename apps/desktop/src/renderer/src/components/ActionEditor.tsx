@@ -9,9 +9,14 @@ import { LightActionEditor } from './LightActionEditor'
 import { ObsActionEditor } from './ObsActionEditor'
 import { TwitchActionEditor } from './TwitchActionEditor'
 import { AppVolumeActionEditor } from './AppVolumeActionEditor'
+import { StreamerbotActionEditor } from './StreamerbotActionEditor'
 import { lightActionTitle } from '../lib/lights'
 import { obsActionTitle } from '../lib/obs'
 import { twitchActionTitle } from '../lib/twitch'
+import {
+  streamerbotActionSummary,
+  streamerbotActionTitle,
+} from '../lib/streamerbot'
 import type { EditorAction } from '../lib/appVolume'
 import { appVolumeActionTitle } from '../lib/appVolume'
 import {
@@ -122,6 +127,7 @@ function actionIconName(action: EditorAction): IconName {
   if (action.type === 'twitch') return twitchIconName(action)
   if (action.type === 'light') return lightIconName(action)
   if (action.type === 'appVolume') return 'sliders'
+  if (action.type === 'streamerbot') return 'bolt'
   return ACTION_ICONS[action.type]
 }
 
@@ -132,12 +138,14 @@ function actionTitle(action: EditorAction): string {
   if (action.type === 'twitch') return twitchActionTitle(action)
   if (action.type === 'light') return lightActionTitle(action)
   if (action.type === 'appVolume') return appVolumeActionTitle(action)
+  if (action.type === 'streamerbot') return streamerbotActionTitle()
   return ACTION_TITLES[action.type]
 }
 
 function actionSummary(action: EditorAction, platform: string): string {
   if (isKeyboardAction(action)) return KEYBOARD_ACTION_SUMMARY
   if (isMixerAction(action)) return MIXER_ACTION_SUMMARY
+  if (action.type === 'streamerbot') return streamerbotActionSummary(action)
   return describeAction(action, platform)
 }
 
@@ -502,6 +510,10 @@ export function ActionEditor({
 
         {action.type === 'appVolume' && (
           <AppVolumeActionEditor action={action} onUpdate={onUpdate} />
+        )}
+
+        {action.type === 'streamerbot' && (
+          <StreamerbotActionEditor action={action} server={server} onUpdate={onUpdate} />
         )}
 
         {action.type === 'page' && (

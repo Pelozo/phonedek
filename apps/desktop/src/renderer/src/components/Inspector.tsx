@@ -24,6 +24,7 @@ import type {
   ObsAction,
   ObsStateBinding,
   StateBinding,
+  StreamerBotAction,
   TwitchAction,
   TwitchStateBinding,
 } from '@phonedek/shared'
@@ -88,6 +89,7 @@ import { useObsInputs } from '../lib/useObsInputs'
 import { backgroundStyle, buttonBackground, textColorFor } from '../lib/ui'
 import { KEYBOARD_ACTION_TITLE, keyboardAction } from '../lib/keyboard'
 import { MIXER_ACTION_TITLE, mixerAction } from '../lib/mixer'
+import { streamerbotActionSummary } from '../lib/streamerbot'
 import { ActionEditor } from './ActionEditor'
 import { BackgroundEditor } from './BackgroundEditor'
 import { ControlPreview } from './ControlPreview'
@@ -1078,6 +1080,18 @@ export function Inspector({
       ...(untitled ? { label: 'Mixer', icon: '🎚️', sublabel: 'Tap to open' } : {}),
     })
     onToast('Phone mixer action added — it opens on the phone, not on this PC', 'success')
+  }
+
+  const addStreamerbotAction = (): void => {
+    const current = button.label.trim().toLowerCase()
+    const untitled =
+      current === '' || current === 'untitled' || current === 'untitled button' || current === 'new button'
+    const action: StreamerBotAction = { type: 'streamerbot', action: 'doAction', actionName: '' }
+    update({
+      actions: [...button.actions, action as unknown as Action],
+      ...(untitled ? { label: 'Streamer.bot', icon: '⚡', sublabel: 'Do action' } : {}),
+    })
+    onToast('Streamer.bot action added — choose its action to save', 'info')
   }
 
   const chooseIconMedia = async (kind: 'image' | 'video'): Promise<void> => {
@@ -2322,6 +2336,7 @@ export function Inspector({
                   { label: 'App audio mute', section: 'Audio', icon: 'microphone', description: 'Toggle or set mute for one app audio session', onClick: () => setAppActionPicker(true) },
                   { label: 'Open mixer', icon: 'sliders', description: 'Full-screen per-app mixer on the phone', onClick: addMixerAction },
                   { label: 'Open phone keyboard', section: 'Integrations', icon: 'keyboard', description: 'Phone keyboard types into the active PC window', onClick: addKeyboardAction },
+                  { label: 'Streamer.bot action', icon: 'bolt', description: 'Run one action in your local Streamer.bot', onClick: addStreamerbotAction },
                   { label: 'OBS scene switcher', section: 'Integrations', icon: 'layers', description: 'Switch the program scene by name', onClick: () => addObsAction({ type: 'obs', action: 'setScene' }, 'Scene', '🎬') },
                   { label: 'OBS toggle stream', icon: 'wifi', description: 'Start or stop streaming', onClick: () => addObsAction({ type: 'obs', action: 'toggleStream' }, 'Stream', '📡') },
                   { label: 'OBS toggle recording', icon: 'record', description: 'Start or stop recording', onClick: () => addObsAction({ type: 'obs', action: 'toggleRecord' }, 'Record', '⏺️') },
@@ -2378,7 +2393,7 @@ export function Inspector({
             <div className="action-list">
               {button.actions.map((action, index) => (
                 <ActionEditor
-                  key={`${action.type}-${index}`}
+                  key={`${button.id}-${action.type}-${index}`}
                   action={action}
                   index={index}
                   total={button.actions.length}
@@ -2393,7 +2408,9 @@ export function Inspector({
                       ? KEYBOARD_ACTION_TITLE
                       : candidate.type === 'mixer'
                         ? MIXER_ACTION_TITLE
-                        : describeAction(candidate, platform),
+                        : candidate.type === 'streamerbot'
+                          ? streamerbotActionSummary(candidate)
+                          : describeAction(candidate, platform),
                   )}
                 />
               ))}

@@ -10,14 +10,19 @@ import type {
   MixerSession,
   MixerSnapshot,
   SliderOrDialControlSpec,
+  StreamerBotAction,
 } from '@phonedek/shared'
 import type { IconName } from '../components/Icons'
 
 export const APP_VOLUME_BADGE = 'APP · VOL'
 export const APP_MUTE_BADGE = 'APP · MUTE'
 
-/** Editor action union until `ConfigAction` itself includes app-volume actions. */
-export type EditorAction = ConfigAction | AppVolumeAction
+/**
+ * Editor action union until `ConfigAction` itself includes app-volume and
+ * Streamer.bot actions (both are already accepted by the schema, planner and
+ * desktop executor).
+ */
+export type EditorAction = ConfigAction | AppVolumeAction | StreamerBotAction
 
 export type MixerTone = 'ok' | 'warn' | 'error' | 'muted'
 

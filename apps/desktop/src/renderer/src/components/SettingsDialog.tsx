@@ -28,6 +28,7 @@ import { Icon } from './Icons'
 import { LightsSettings } from './LightsSettings'
 import { Modal, Slider, Toggle, useConfirm } from './Primitives'
 import { TwitchSettings } from './TwitchSettings'
+import { StreamerbotSettings } from './StreamerbotSettings'
 
 function PhoneBrightnessRow({
   client,
@@ -915,6 +916,13 @@ export function SettingsDialog({
             </div>
 
             <TwitchSettings
+              server={server}
+              settings={settings}
+              onServerUpdate={onServerUpdate}
+              onToast={onToast}
+            />
+
+            <StreamerbotSettings
               server={server}
               settings={settings}
               onServerUpdate={onServerUpdate}
