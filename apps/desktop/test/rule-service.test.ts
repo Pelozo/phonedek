@@ -98,6 +98,8 @@ interface TwitchHarness {
   readonly connected: boolean
   calls: string[]
   queue: Array<boolean | Error>
+  /** Number of times the service read the connected flag (a poll boundary). */
+  checks: number
   setConnected(connected: boolean): void
   source: {
     readonly connected: boolean
@@ -108,6 +110,7 @@ interface TwitchHarness {
 function makeTwitch(): TwitchHarness {
   let connected = true
   const harness: TwitchHarness = {
+    checks: 0,
     calls: [],
     queue: [],
     get connected() {
@@ -118,6 +121,7 @@ function makeTwitch(): TwitchHarness {
     },
     source: {
       get connected() {
+        harness.checks += 1
         return connected
       },
       async readStatus(target) {
@@ -340,8 +344,11 @@ describe('RuleService Twitch source', () => {
 
     // Auth gap + reconnect: the first authorized poll is a baseline again.
     h.service.configure([showProfileRule('offline', { kind: 'twitch.live', active: false })])
+    const checksBeforeGap = h.twitch.checks
     h.twitch.setConnected(false)
-    await sleep(30)
+    // Wait for a real poll boundary while disconnected; a fixed sleep can win
+    // the race on a slow CI runner and skip the baseline reset.
+    await waitFor(() => h.twitch.checks > checksBeforeGap)
     h.twitch.setConnected(true)
     h.twitch.queue.push(true, false)
     await waitFor(() => h.profiles.length >= 2)
