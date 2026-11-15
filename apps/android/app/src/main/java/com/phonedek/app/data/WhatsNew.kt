@@ -11,6 +11,14 @@ data class WhatsNewEntry(
  * each release; versions without a key fall back to [GENERIC_WHATS_NEW].
  */
 private val WHATS_NEW: Map<String, WhatsNewEntry> = mapOf(
+    "0.16.0" to WhatsNewEntry(
+        title = "Automation rules",
+        highlights = listOf(
+            "Rules run on the PC when OBS, Twitch, a process or a phone changes state.",
+            "Switch profiles/pages or run a rig from an automation rule.",
+            "Automation stays off until you arm it on the PC; run history shows what fired.",
+        ),
+    ),
     "0.15.0" to WhatsNewEntry(
         title = "Rigs: guarded action sequences",
         highlights = listOf(

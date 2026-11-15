@@ -10,6 +10,14 @@ export interface WhatsNewEntry {
  * Keep highlights short: the dialog is a summary, not release notes.
  */
 const WHATS_NEW: Readonly<Record<string, WhatsNewEntry>> = {
+  '0.16.0': {
+    title: 'Automation rules',
+    highlights: [
+      'Trigger a rig, profile or page from OBS, Twitch, process or phone edges.',
+      'Rules stay disarmed until you arm automation on this PC.',
+      'Debounce, cooldown, guards, busy handling and run history keep it safe.',
+    ],
+  },
   '0.15.0': {
     title: 'Rigs: guarded action sequences',
     highlights: [
