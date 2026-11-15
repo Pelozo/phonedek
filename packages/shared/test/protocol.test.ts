@@ -263,11 +263,15 @@ describe('pointer protocol', () => {
       { type: 'keyboard', seq: 2, phase: 'text', text: 'Hello\n' },
       { type: 'keyboard', seq: 3, phase: 'key', keys: ['CTRL', 'C'] },
       { type: 'keyboard', seq: 4, phase: 'key', keys: ['BACKSPACE'], repeat: 8 },
-      { type: 'keyboard', seq: 5, phase: 'release' },
-      { type: 'keyboard', seq: 6, phase: 'end' },
-      { type: 'keyboard', seq: 7, phase: 'cancel' },
+      { type: 'keyboard', seq: 5, phase: 'key', keys: ['SHIFT'], action: 'down' },
+      { type: 'keyboard', seq: 6, phase: 'key', keys: ['A'], action: 'up' },
+      { type: 'keyboard', seq: 7, phase: 'keepalive' },
+      { type: 'keyboard', seq: 8, phase: 'release' },
+      { type: 'keyboard', seq: 9, phase: 'end' },
+      { type: 'keyboard', seq: 10, phase: 'cancel' },
     ]) {
-      expect(parseClientMessage(message).ok, JSON.stringify(message)).toBe(true)
+      const parsed = parseClientMessage(message)
+      expect(parsed.ok, `${JSON.stringify(message)} ${parsed.ok ? '' : parsed.error}`).toBe(true)
     }
   })
 
@@ -325,6 +329,35 @@ describe('pointer protocol', () => {
         seq: 10,
         phase: 'end',
         profileId: 'p',
+      }).ok,
+    ).toBe(false)
+    expect(
+      parseClientMessage({
+        type: 'keyboard',
+        seq: 11,
+        phase: 'key',
+        keys: ['A'],
+        action: 'hold',
+      }).ok,
+    ).toBe(false)
+    expect(
+      parseClientMessage({
+        type: 'keyboard',
+        seq: 12,
+        phase: 'text',
+        text: 'x',
+        action: 'down',
+      }).ok,
+    ).toBe(false)
+    expect(
+      parseClientMessage({
+        type: 'keyboard',
+        seq: 13,
+        phase: 'start',
+        profileId: 'p',
+        pageId: 'g',
+        controlId: 'kbd',
+        action: 'down',
       }).ok,
     ).toBe(false)
   })

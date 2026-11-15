@@ -129,21 +129,26 @@ describe('keyboard capability', () => {
     const info = await fetch(`http://127.0.0.1:${enabled.port}/api/info`)
     const body = (await info.json()) as { capabilities?: string[] }
     expect(body.capabilities).toContain('keyboard-v1')
+    expect(body.capabilities).toContain('keyboard-v2')
 
     const disabled = await harness(undefined, () => false)
     const offInfo = await fetch(`http://127.0.0.1:${disabled.port}/api/info`)
     const offBody = (await offInfo.json()) as { capabilities?: string[] }
     expect(offBody.capabilities).not.toContain('keyboard-v1')
+    expect(offBody.capabilities).not.toContain('keyboard-v2')
 
     const { ws, messages } = await openSocket(disabled)
     const hello = await waitFor(() => messages.find((message) => message.type === 'hello'))
     expect(hello.capabilities).not.toContain('keyboard-v1')
+    expect(hello.capabilities).not.toContain('keyboard-v2')
     ws.close()
   })
 
   it('lists keyboard-v1 in the host capability helper', () => {
     expect(serverCapabilities(true, false, false, false, false, true)).toContain('keyboard-v1')
+    expect(serverCapabilities(true, false, false, false, false, true)).toContain('keyboard-v2')
     expect(serverCapabilities(true, false, false, false, false, false)).not.toContain('keyboard-v1')
+    expect(serverCapabilities(true, false, false, false, false, false)).not.toContain('keyboard-v2')
   })
 
   it('notifies old phones when the deck uses the keyboard', () => {

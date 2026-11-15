@@ -286,6 +286,7 @@ class DeckConnection(
         text: String? = null,
         keys: List<String>? = null,
         repeat: Int? = null,
+        action: String? = null,
     ): Boolean {
         val socket = webSocketRef
         if (!active || !connected || socket == null) {
@@ -304,6 +305,7 @@ class DeckConnection(
             text = text,
             keys = keys,
             repeat = repeat,
+            action = action,
         )
         // Privacy: lengths and key counts are fine; never the text itself.
         Diag.d(
@@ -771,7 +773,8 @@ internal fun parsePointerResult(obj: JsonObject): PointerResultPayload = Pointer
     error = obj.string("error"),
 )
 
-private val KEYBOARD_PHASES = setOf("start", "text", "key", "release", "end", "cancel")
+private val KEYBOARD_PHASES = setOf("start", "text", "key", "release", "end", "cancel", "keepalive")
+private val KEYBOARD_KEY_ACTIONS = setOf("press", "down", "up")
 
 /**
  * Keyboard payload shared by [DeckConnection.sendKeyboard] and tests. Only
@@ -788,6 +791,7 @@ internal fun buildKeyboardPayload(
     text: String? = null,
     keys: List<String>? = null,
     repeat: Int? = null,
+    action: String? = null,
 ): JsonObject = buildJsonObject {
     val safePhase = phase.takeIf { it in KEYBOARD_PHASES } ?: "cancel"
     put("type", "keyboard")
@@ -822,6 +826,8 @@ internal fun buildKeyboardPayload(
                 })
             }
             repeat?.let { put("repeat", it.coerceIn(1, 100)) }
+            action?.lowercase()?.takeIf { it in KEYBOARD_KEY_ACTIONS }
+                ?.let { put("action", it) }
         }
 
         // release / end / cancel carry no payload.

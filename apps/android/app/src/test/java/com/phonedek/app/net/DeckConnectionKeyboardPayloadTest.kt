@@ -138,6 +138,45 @@ class DeckConnectionKeyboardPayloadTest {
     }
 
     @Test
+    fun keyCarriesPhysicalDownUpAction() {
+        val down = buildKeyboardPayload(
+            seq = 75,
+            phase = "key",
+            keys = listOf("SHIFT"),
+            action = "DOWN",
+        )
+        assertEquals("down", down.text("action"))
+
+        val up = buildKeyboardPayload(
+            seq = 76,
+            phase = "key",
+            keys = listOf("SHIFT"),
+            action = "up",
+        )
+        assertEquals("up", up.text("action"))
+
+        val press = buildKeyboardPayload(seq = 77, phase = "key", keys = listOf("A"))
+        assertNull(press["action"])
+    }
+
+    @Test
+    fun actionIsIgnoredOutsideTheKeyPhase() {
+        for (phase in listOf("start", "text", "release", "end", "cancel")) {
+            val payload = buildKeyboardPayload(
+                seq = 78,
+                phase = phase,
+                profileId = "p1",
+                pageId = "pg1",
+                controlId = "btn-kbd",
+                text = "x",
+                keys = listOf("A"),
+                action = "down",
+            )
+            assertNull(phase, payload["action"])
+        }
+    }
+
+    @Test
     fun emptyOrInvalidKeysAreDropped() {
         val payload = buildKeyboardPayload(
             seq = 75,

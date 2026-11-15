@@ -73,6 +73,8 @@ data class PointerPadOptions(
 data class KeyboardPadOptions(
     val controlId: String = "",
     val label: String = "",
+    /** Desktop advertises keyboard-v2, so physical down/up frames are safe. */
+    val direct: Boolean = false,
 )
 
 data class UiState(
@@ -90,6 +92,7 @@ data class UiState(
     val inputCapable: Boolean = false,
     val pointerCapable: Boolean = false,
     val keyboardCapable: Boolean = false,
+    val keyboardDirectCapable: Boolean = false,
     val stateCapable: Boolean = false,
     val controlStates: Map<String, ControlStateDto> = emptyMap(),
     val pointerPadOpen: Boolean = false,
@@ -242,6 +245,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val brightnessCapable = "brightness-v1" in capabilities
                 val pointerCapable = "pointer-v1" in capabilities
                 val keyboardCapable = "keyboard-v1" in capabilities
+                val keyboardDirectCapable = "keyboard-v2" in capabilities
                 val stateCapable = "control-state-v1" in capabilities
                 val mixerCapable = "mixer-v1" in capabilities
                 _state.update { current ->
@@ -249,6 +253,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         inputCapable = inputCapable,
                         pointerCapable = pointerCapable,
                         keyboardCapable = keyboardCapable,
+                        keyboardDirectCapable = keyboardDirectCapable,
                         stateCapable = stateCapable,
                         mixerCapable = mixerCapable,
                         // A hello starts a new socket; state from the previous
@@ -1307,12 +1312,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 keyboardPageId = launch.pageId
                 keyboardControlId = launch.controlId
                 keyboardStartSent = false
+                val directKeyboard = _state.value.keyboardDirectCapable
                 _state.update {
                     it.copy(
                         keyboardPadOpen = true,
                         keyboardPadOptions = KeyboardPadOptions(
                             controlId = launch.controlId,
                             label = launch.label,
+                            direct = directKeyboard,
                         ),
                         keyboardStatus = KeyboardStatus.OPENING,
                     )
@@ -1373,8 +1380,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(keyboardStatus = KeyboardStatus.READY) }
     }
 
-    /** Sends one atomic key or chord. [repeat] is capped by the payload. */
-    fun sendKeyboardKey(keys: List<String>, repeat: Int = 1) {
+    /** Refresh the desktop held-key watchdog while the panel is open. */
+    fun keepKeyboardAlive() {
+        val snapshot = _state.value
+        if (!snapshot.keyboardPadOpen || !snapshot.keyboardCapable) return
+        if (!snapshot.keyboardDirectCapable) return
+        if (snapshot.connection != ConnectionStatus.CONNECTED) return
+        sendKeyboardNow("keepalive")
+    }
+
+    /** Sends one key or chord, or a physical down/up state. [repeat] is capped. */
+    fun sendKeyboardKey(keys: List<String>, repeat: Int = 1, action: String = "press") {
         val snapshot = _state.value
         if (!snapshot.keyboardPadOpen || !snapshot.keyboardCapable) return
         if (snapshot.connection != ConnectionStatus.CONNECTED) {
@@ -1383,7 +1399,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         if (keys.isEmpty()) return
-        if (!sendKeyboardNow("key", keys = keys, repeat = repeat)) {
+        if (!sendKeyboardNow("key", keys = keys, repeat = repeat, action = action)) {
             closeKeyboardPad(cancel = false)
             emit("Keyboard key was not sent.")
         }
@@ -1395,6 +1411,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         text: String? = null,
         keys: List<String>? = null,
         repeat: Int? = null,
+        action: String? = null,
     ): Boolean {
         val profileId = keyboardProfileId
         val pageId = keyboardPageId
@@ -1413,6 +1430,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             text = text,
             keys = keys,
             repeat = repeat,
+            action = action,
         )
         if (sent && phase == "start") keyboardStartSent = true
         if (!sent) {

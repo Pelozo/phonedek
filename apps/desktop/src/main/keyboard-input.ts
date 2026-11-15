@@ -40,11 +40,11 @@ interface KeyboardClientState {
 export const KEYBOARD_MAX_TEXT = 4096
 export const KEYBOARD_MAX_KEYS = 8
 export const KEYBOARD_MAX_REPEAT = 100
-export const KEYBOARD_RATE_LIMIT = 60
+export const KEYBOARD_RATE_LIMIT = 120
 export const KEYBOARD_BYTES_PER_SEC = 64 * 1024
 export const KEYBOARD_WATCHDOG_MS = 15_000
 
-const EXEMPT_PHASES = new Set<KeyboardMessage['phase']>(['release', 'end', 'cancel'])
+const EXEMPT_PHASES = new Set<KeyboardMessage['phase']>(['release', 'end', 'cancel', 'keepalive'])
 
 /**
  * Keyboard control is allowed only when the Settings master switch is on and no
@@ -158,6 +158,9 @@ export class KeyboardRouter {
       if (EXEMPT_PHASES.has(message.phase)) {
         if (message.phase === 'release') {
           this.releaseHeld(clientId, 'keyboard released while blocked')
+        } else if (message.phase === 'keepalive') {
+          // Held keys were already released; do not tear down the session.
+          return { seq: message.seq, ok: true }
         } else {
           this.terminate(
             clientId,
@@ -210,6 +213,9 @@ export class KeyboardRouter {
         return this.key(clientId, state, message)
       case 'release':
         this.releaseHeld(clientId, 'keyboard released')
+        return { seq: message.seq, ok: true }
+      case 'keepalive':
+        this.touchWatchdog(clientId, state)
         return { seq: message.seq, ok: true }
       case 'end':
         this.terminate(clientId, state, 'keyboard session ended')
@@ -374,17 +380,24 @@ export class KeyboardRouter {
     }
 
     const repeat = Math.max(1, Math.min(KEYBOARD_MAX_REPEAT, Math.round(message.repeat ?? 1)))
+    const action = message.action ?? 'press'
     const accepted = this.sender.sendKeys(
       keys,
-      { repeat, action: 'press' },
+      { repeat, action },
       this.meta(clientId, message.seq),
     )
     if (!accepted.ok) return { seq: message.seq, ok: false, error: accepted.error }
 
+    if (action === 'down') {
+      for (const key of keys) state.held.add(key)
+    } else if (action === 'up') {
+      for (const key of keys) state.held.delete(key)
+    }
+
     this.touchWatchdog(clientId, state)
     this.logger?.info(
       `Keyboard chord queued (${keys.filter((key) => isModifier(key)).length} modifiers, ` +
-        `${keys.length} keys, repeat ${repeat})`,
+        `${keys.length} keys, ${action}, repeat ${repeat})`,
     )
     return { seq: message.seq, ok: true }
   }

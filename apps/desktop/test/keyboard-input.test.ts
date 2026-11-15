@@ -121,11 +121,26 @@ function text(value: string, seq = nextSeq()): KeyboardMessage {
   return { type: 'keyboard', seq, phase: 'text', text: value }
 }
 
-function key(keys: string[], seq = nextSeq(), repeat?: number): KeyboardMessage {
-  return { type: 'keyboard', seq, phase: 'key', keys, ...(repeat ? { repeat } : {}) }
+function key(
+  keys: string[],
+  seq = nextSeq(),
+  repeat?: number,
+  action?: 'press' | 'down' | 'up',
+): KeyboardMessage {
+  return {
+    type: 'keyboard',
+    seq,
+    phase: 'key',
+    keys,
+    ...(repeat ? { repeat } : {}),
+    ...(action ? { action } : {}),
+  }
 }
 
-function simple(phase: 'release' | 'end' | 'cancel', seq = nextSeq()): KeyboardMessage {
+function simple(
+  phase: 'release' | 'end' | 'cancel' | 'keepalive',
+  seq = nextSeq(),
+): KeyboardMessage {
   return { type: 'keyboard', seq, phase }
 }
 
@@ -206,6 +221,54 @@ describe('KeyboardRouter sessions', () => {
     expect(rejected.ok).toBe(false)
     expect(rejected.error).toContain('Another phone')
     expect(router.handle('c2', text('hello')).ok).toBe(true)
+  })
+
+  it('routes physical down and up actions for held keys', () => {
+    const sender = new FakeSender()
+    const router = new KeyboardRouter({ sender })
+    router.handle('c1', start(), target)
+    sender.events.length = 0
+
+    expect(router.handle('c1', key(['SHIFT'], nextSeq(), undefined, 'down')).ok).toBe(true)
+    expect(router.handle('c1', key(['A'], nextSeq(), undefined, 'down')).ok).toBe(true)
+    expect(router.handle('c1', key(['A'], nextSeq(), undefined, 'up')).ok).toBe(true)
+    expect(router.handle('c1', key(['SHIFT'], nextSeq(), undefined, 'up')).ok).toBe(true)
+
+    expect(sender.events).toEqual([
+      expect.objectContaining({ kind: 'keys', keys: ['SHIFT'], action: 'down' }),
+      expect.objectContaining({ kind: 'keys', keys: ['A'], action: 'down' }),
+      expect.objectContaining({ kind: 'keys', keys: ['A'], action: 'up' }),
+      expect.objectContaining({ kind: 'keys', keys: ['SHIFT'], action: 'up' }),
+    ])
+  })
+
+  it('defaults a key frame to press and releases held keys on end', () => {
+    const sender = new FakeSender()
+    const router = new KeyboardRouter({ sender })
+    router.handle('c1', start(), target)
+    sender.events.length = 0
+
+    expect(router.handle('c1', key(['CTRL'], nextSeq(), undefined, 'down')).ok).toBe(true)
+    expect(router.handle('c1', key(['C'])).ok).toBe(true)
+    expect(sender.events[1]).toMatchObject({ kind: 'keys', keys: ['C'], action: 'press' })
+
+    expect(router.handle('c1', simple('end')).ok).toBe(true)
+    expect(sender.events.at(-1)).toMatchObject({ kind: 'end' })
+  })
+
+  it('keeps held keys alive without changing their state', () => {
+    const sender = new FakeSender()
+    const router = new KeyboardRouter({ sender })
+    router.handle('c1', start(), target)
+    sender.events.length = 0
+
+    expect(router.handle('c1', key(['W'], nextSeq(), undefined, 'down')).ok).toBe(true)
+    expect(router.handle('c1', simple('keepalive')).ok).toBe(true)
+    expect(router.handle('c1', simple('keepalive')).ok).toBe(true)
+
+    expect(sender.events).toHaveLength(1)
+    expect(sender.events[0]).toMatchObject({ kind: 'keys', keys: ['W'], action: 'down' })
+    expect(router.activeClient).toBe('c1')
   })
 
   it('rejects text before start and after end', () => {

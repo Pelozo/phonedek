@@ -9,6 +9,7 @@ import {
   BRIGHTNESS_CAPABILITY,
   CONTROL_STATE_CAPABILITY,
   KEYBOARD_CAPABILITY,
+  KEYBOARD_STATE_CAPABILITY,
   LIGHT_CAPABILITY,
   MIXER_CAPABILITY,
   OBS_CAPABILITY,
@@ -61,6 +62,7 @@ export const SERVER_CAPABILITIES = [
   BRIGHTNESS_CAPABILITY,
   POINTER_CAPABILITY,
   KEYBOARD_CAPABILITY,
+  KEYBOARD_STATE_CAPABILITY,
   CONTROL_STATE_CAPABILITY,
   OBS_CAPABILITY,
   TWITCH_CAPABILITY,
@@ -89,6 +91,7 @@ export function serverCapabilities(
   return SERVER_CAPABILITIES.filter((capability) => {
     if (capability === POINTER_CAPABILITY) return pointerSupported
     if (capability === KEYBOARD_CAPABILITY) return keyboardSupported
+    if (capability === KEYBOARD_STATE_CAPABILITY) return keyboardSupported
     if (capability === CONTROL_STATE_CAPABILITY) return stateSupported
     if (capability === OBS_CAPABILITY) return obsSupported
     if (capability === TWITCH_CAPABILITY) return twitchSupported

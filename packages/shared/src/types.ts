@@ -22,6 +22,13 @@ export const CONTROL_STATE_CAPABILITY = 'control-state-v1' as const
 /** Desktop capability for phone keyboard text/key injection. */
 export const KEYBOARD_CAPABILITY = 'keyboard-v1' as const
 
+/**
+ * Desktop capability for physical key down/up frames (`action: 'down' | 'up'`).
+ * Old desktops treat every key frame as a one-shot press, so a direct keyboard
+ * must only stream held states when this is advertised.
+ */
+export const KEYBOARD_STATE_CAPABILITY = 'keyboard-v2' as const
+
 /** Desktop capability for OBS WebSocket input volume/mute control. */
 export const OBS_CAPABILITY = 'obs-v1' as const
 
@@ -947,7 +954,7 @@ export interface WatchMessage {
 }
 
 /** Keyboard text/chord entry from the phone. */
-export type KeyboardPhase = 'start' | 'text' | 'key' | 'release' | 'end' | 'cancel'
+export type KeyboardPhase = 'start' | 'text' | 'key' | 'release' | 'end' | 'cancel' | 'keepalive'
 
 export interface KeyboardStartMessage {
   type: 'keyboard'
@@ -974,13 +981,21 @@ export interface KeyboardKeyMessage {
   keys: string[]
   /** Repeat the chord 1..100 times. */
   repeat?: number
+  /**
+   * Physical key state. `press` (default) taps the chord; `down`/`up` let the
+   * phone hold Shift/Tab or stream a live key while the finger is down.
+   */
+  action?: 'press' | 'down' | 'up'
 }
 
 export interface KeyboardSimpleMessage {
   type: 'keyboard'
   seq: number
-  /** Release latched keys/modifiers, finish, or abort. */
-  phase: 'release' | 'end' | 'cancel'
+  /**
+   * Release latched keys/modifiers, finish, abort, or refresh the held-key
+   * watchdog while a key is kept down (no key state changes).
+   */
+  phase: 'release' | 'end' | 'cancel' | 'keepalive'
 }
 
 export type KeyboardMessage =

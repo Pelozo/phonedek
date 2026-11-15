@@ -126,13 +126,14 @@ export const KeyboardMessageSchema = z
   .object({
     type: z.literal('keyboard'),
     seq: z.number().int().min(0),
-    phase: z.enum(['start', 'text', 'key', 'release', 'end', 'cancel']),
+    phase: z.enum(['start', 'text', 'key', 'release', 'end', 'cancel', 'keepalive']),
     profileId: z.string().min(1).max(64).optional(),
     pageId: z.string().min(1).max(64).optional(),
     controlId: z.string().min(1).max(128).optional(),
     text: z.string().min(1).max(4096).optional(),
     keys: z.array(z.string().min(1).max(24)).min(1).max(8).optional(),
     repeat: z.number().int().min(1).max(100).optional(),
+    action: z.enum(['press', 'down', 'up']).optional(),
   })
   .superRefine((message, ctx) => {
     const hasIds =
@@ -150,10 +151,15 @@ export const KeyboardMessageSchema = z
           })
         }
       }
-      if (message.text !== undefined || message.keys !== undefined || message.repeat !== undefined) {
+      if (
+        message.text !== undefined ||
+        message.keys !== undefined ||
+        message.repeat !== undefined ||
+        message.action !== undefined
+      ) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'start must not carry text, keys or repeat',
+          message: 'start must not carry text, keys, repeat or action',
         })
       }
       return
@@ -174,10 +180,10 @@ export const KeyboardMessageSchema = z
           message: 'text phase requires text',
         })
       }
-      if (message.keys !== undefined || message.repeat !== undefined) {
+      if (message.keys !== undefined || message.repeat !== undefined || message.action !== undefined) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'text phase must not carry keys or repeat',
+          message: 'text phase must not carry keys, repeat or action',
         })
       }
       return
@@ -203,11 +209,12 @@ export const KeyboardMessageSchema = z
     if (
       message.text !== undefined ||
       message.keys !== undefined ||
-      message.repeat !== undefined
+      message.repeat !== undefined ||
+      message.action !== undefined
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `${message.phase} must not carry text, keys or repeat`,
+        message: `${message.phase} must not carry text, keys, repeat or action`,
       })
     }
   })
