@@ -10,6 +10,15 @@ export interface WhatsNewEntry {
  * Keep highlights short: the dialog is a summary, not release notes.
  */
 const WHATS_NEW: Readonly<Record<string, WhatsNewEntry>> = {
+  '0.15.0': {
+    title: 'Rigs: guarded action sequences',
+    highlights: [
+      'Build reusable rigs from OBS, Twitch, lights, audio, app volume, Streamer.bot and shortcut steps.',
+      'Check OBS/Twitch/mic/light/app guards before a run; one tap runs the sequence.',
+      'Watch live n/total progress and the last-run result on the deck.',
+      'Run, stop and inspect exact failures from the new Rig library.',
+    ],
+  },
   '0.14.0': {
     title: 'Streamer.bot actions',
     highlights: [

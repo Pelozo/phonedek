@@ -11,6 +11,14 @@ data class WhatsNewEntry(
  * each release; versions without a key fall back to [GENERIC_WHATS_NEW].
  */
 private val WHATS_NEW: Map<String, WhatsNewEntry> = mapOf(
+    "0.15.0" to WhatsNewEntry(
+        title = "Rigs: guarded action sequences",
+        highlights = listOf(
+            "Build reusable rigs from OBS, Twitch, lights, audio, app volume, Streamer.bot and shortcut steps.",
+            "Check OBS/Twitch/mic/light/app guards before a run; one tap runs the sequence.",
+            "See live progress and the last-run result on the deck.",
+        ),
+    ),
     "0.14.0" to WhatsNewEntry(
         title = "Streamer.bot actions",
         highlights = listOf(
