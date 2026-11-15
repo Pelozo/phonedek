@@ -249,7 +249,7 @@ export function Sidebar({
       details: ruleReferences.slice(0, 5).map((rule) => `Automation rule: ${rule.name}`),
       warning:
         ruleReferences.length > 0
-          ? `Every page, button and action in the profile is removed. ${ruleReferences.length} automation rule${ruleReferences.length === 1 ? '' : 's'} reference it; those actions are removed and rules with no actions left are deleted. This cannot be undone.`
+          ? `Every page, button and action in the profile is removed. ${ruleReferences.length} automation rule${ruleReferences.length === 1 ? ' references' : 's reference'} it; those actions are removed and rules with no actions left are deleted. This cannot be undone.`
           : 'Every page, button and action in the profile is removed. This cannot be undone.',
       confirmLabel: 'Delete profile',
       danger: true,
@@ -289,7 +289,7 @@ export function Sidebar({
       details: ruleReferences.slice(0, 5).map((rule) => `Automation rule: ${rule.name}`),
       warning:
         ruleReferences.length > 0
-          ? `The page and its buttons are removed. ${ruleReferences.length} automation rule${ruleReferences.length === 1 ? '' : 's'} reference this page; those actions are removed and rules with no actions left are deleted. This cannot be undone.`
+          ? `The page and its buttons are removed. ${ruleReferences.length} automation rule${ruleReferences.length === 1 ? ' references' : 's reference'} this page; those actions are removed and rules with no actions left are deleted. This cannot be undone.`
           : 'The page and its buttons are removed. This cannot be undone.',
       confirmLabel: 'Delete page',
       danger: true,

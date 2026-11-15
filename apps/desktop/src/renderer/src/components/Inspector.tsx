@@ -92,7 +92,7 @@ import { useObsInputs } from '../lib/useObsInputs'
 import { backgroundStyle, buttonBackground, textColorFor } from '../lib/ui'
 import { KEYBOARD_ACTION_TITLE, keyboardAction } from '../lib/keyboard'
 import { MIXER_ACTION_TITLE, mixerAction } from '../lib/mixer'
-import { streamerbotActionSummary } from '../lib/streamerbot'
+import { STREAMERBOT_ACTION_PLACEHOLDER, streamerbotActionSummary } from '../lib/streamerbot'
 import {
   findRig,
   formatRigDuration,
@@ -1276,12 +1276,19 @@ export function Inspector({
     const current = button.label.trim().toLowerCase()
     const untitled =
       current === '' || current === 'untitled' || current === 'untitled button' || current === 'new button'
-    const action: StreamerBotAction = { type: 'streamerbot', action: 'doAction', actionName: '' }
+    // The schema requires a non-empty action name. A valid placeholder keeps
+    // the config savable while the editor's picker is filled in; pressing it
+    // before choosing reports a normal missing-action error.
+    const action: StreamerBotAction = {
+      type: 'streamerbot',
+      action: 'doAction',
+      actionName: STREAMERBOT_ACTION_PLACEHOLDER,
+    }
     update({
       actions: [...button.actions, action as unknown as Action],
       ...(untitled ? { label: 'Streamer.bot', icon: '⚡', sublabel: 'Do action' } : {}),
     })
-    onToast('Streamer.bot action added — choose its action to save', 'info')
+    onToast('Streamer.bot action added — choose its action before using it', 'info')
   }
 
   const chooseIconMedia = async (kind: 'image' | 'video'): Promise<void> => {

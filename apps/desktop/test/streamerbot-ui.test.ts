@@ -27,6 +27,7 @@ import {
   streamerbotStatusSummary,
   updateStreamerbotArg,
   type StreamerBotArgRow,
+  STREAMERBOT_ACTION_PLACEHOLDER,
 } from '../src/renderer/src/lib/streamerbot'
 
 function status(patch: Partial<StreamerBotStatus> = {}): StreamerBotStatus {
@@ -199,6 +200,17 @@ describe('Streamer.bot action list helpers', () => {
     expect(streamerbotNameError('   ')).toContain('Required')
     expect(streamerbotNameError('x'.repeat(128))).toBeNull()
     expect(streamerbotNameError('x'.repeat(129))).toContain('128')
+  })
+
+  it('keeps a newly added action schema-valid until a real name is picked', () => {
+    expect(streamerbotNameError(STREAMERBOT_ACTION_PLACEHOLDER)).toBeNull()
+    expect(
+      ActionSchema.safeParse({
+        type: 'streamerbot',
+        action: 'doAction',
+        actionName: STREAMERBOT_ACTION_PLACEHOLDER,
+      }).success,
+    ).toBe(true)
   })
 
   it('builds the collapsed STREAMER.BOT summary', () => {

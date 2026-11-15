@@ -12,6 +12,13 @@ import type {
 
 export type StreamerBotTone = 'ok' | 'warn' | 'error' | 'muted'
 
+/**
+ * A schema-valid placeholder used while a new Streamer.bot action has no name.
+ * Keeping the draft valid avoids an autosave error and an "Unsaved" deck; the
+ * action editor immediately invites the user to pick the real action.
+ */
+export const STREAMERBOT_ACTION_PLACEHOLDER = 'Pick an action'
+
 export interface StreamerBotStatusSummary {
   label: string
   detail: string

@@ -234,7 +234,7 @@ export function RigLibraryDialog({
         details: ruleReferences.slice(0, 6).map((rule) => `Automation rule: ${rule.name}`),
         warning:
           ruleReferences.length > 0
-            ? `${ruleReferences.length} automation rule${ruleReferences.length === 1 ? '' : 's'} use this rig. Those actions are removed; rules with no actions left are deleted. Its guards and steps are removed. This cannot be undone.`
+            ? `${ruleReferences.length} automation rule${ruleReferences.length === 1 ? ' uses' : 's use'} this rig. Those actions are removed; rules with no actions left are deleted. Its guards and steps are removed. This cannot be undone.`
             : 'Its guards and steps are removed. This cannot be undone.',
         confirmLabel: 'Delete rig',
         danger: true,
