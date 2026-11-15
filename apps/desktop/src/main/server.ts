@@ -14,6 +14,7 @@ import {
   MIXER_CAPABILITY,
   OBS_CAPABILITY,
   POINTER_CAPABILITY,
+  RIG_CAPABILITY,
   STREAMERBOT_CAPABILITY,
   TWITCH_CAPABILITY,
   PROTOCOL_VERSION,
@@ -69,6 +70,7 @@ export const SERVER_CAPABILITIES = [
   LIGHT_CAPABILITY,
   MIXER_CAPABILITY,
   STREAMERBOT_CAPABILITY,
+  RIG_CAPABILITY,
 ] as const
 
 /**
@@ -77,6 +79,8 @@ export const SERVER_CAPABILITIES = [
  * state reader must not advertise `control-state-v1`, `mixer-v1` is omitted on
  * macOS (no public per-app volume API), and `obs-v1`/`twitch-v1` are dynamic:
  * they are advertised only while that integration is identified/authorized.
+ * `rig-v1` is unconditional: every desktop can run config-owned rigs, and old
+ * phones simply ignore the extra marker.
  */
 export function serverCapabilities(
   pointerSupported: boolean,
@@ -647,6 +651,36 @@ export class DeckServer {
       this.options.logger?.warn(`Could not send WebSocket message: ${String(error)}`)
       return false
     }
+  }
+
+  /**
+   * Send a message to every open phone whose hello advertised `capability`.
+   *
+   * Rigs use this for `rigProgress`: old apps treat a rig button as an ordinary
+   * press and must never receive an unknown frame. Closed/failed sockets are
+   * skipped (the close handler cleans them up) and this never throws.
+   * Returns the number of clients that accepted the frame.
+   */
+  sendToClientsWithCapability(capability: string, message: ServerMessage): number {
+    let payload: string
+    try {
+      payload = JSON.stringify(message)
+    } catch (error) {
+      this.options.logger?.warn(`Could not serialize WebSocket message: ${String(error)}`)
+      return 0
+    }
+    let sent = 0
+    for (const record of this.clients.values()) {
+      if (record.ws.readyState !== WebSocket.OPEN) continue
+      if (!record.info.capabilities?.includes(capability)) continue
+      try {
+        record.ws.send(payload)
+        sent += 1
+      } catch (error) {
+        this.options.logger?.warn(`Could not send WebSocket message: ${String(error)}`)
+      }
+    }
+    return sent
   }
 
   /**

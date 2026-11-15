@@ -43,8 +43,24 @@ export interface BackupPreview {
   assets: number
   bytes: number
   warnings: string[]
-  /** launch + command actions (including macro steps). */
+  /** launch + command actions (including macro and rig steps). */
   dangerousActions: number
+}
+
+function countRigActions(rigs: DeckConfig['rigs']): number {
+  let count = 0
+  for (const rig of rigs ?? []) {
+    for (const step of rig.steps) {
+      const action = step.action
+      if (action.type === 'launch' || action.type === 'command') count += 1
+      if (action.type === 'macro') {
+        for (const nested of action.steps) {
+          if (nested.type === 'launch' || nested.type === 'command') count += 1
+        }
+      }
+    }
+  }
+  return count
 }
 
 function countDangerousActions(backup: BackupReadResult): number {
@@ -63,7 +79,9 @@ function countDangerousActions(backup: BackupReadResult): number {
       }
     }
   }
-  return count
+  // Rig steps run as the same user as buttons; count them in the approval
+  // warning without changing the existing button/macro totals.
+  return count + countRigActions(backup.config.rigs)
 }
 
 /** Build the approval preview from an already validated backup. */

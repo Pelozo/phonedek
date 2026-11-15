@@ -17,6 +17,9 @@ import type {
   OperationResult,
   PermissionStatus,
   PhoneDeckApi,
+  RigPreviewView,
+  RigRunView,
+  RigStatusView,
   SaveConfigResult,
   ServerInfoView,
   StreamerBotActionsResult,
@@ -107,6 +110,11 @@ const api: PhoneDeckApi = {
     ipcRenderer.invoke(IPC.setMixerMute, sessionId, muted),
   setAutoProfileSettings: (input: AutoProfileSettingsInput): Promise<OperationResult> =>
     ipcRenderer.invoke(IPC.setAutoProfileSettings, input),
+  previewRig: (presetId: string): Promise<RigPreviewView> =>
+    ipcRenderer.invoke(IPC.previewRig, presetId),
+  runRig: (presetId: string): Promise<RigRunView> => ipcRenderer.invoke(IPC.runRig, presetId),
+  abortRig: (): Promise<OperationResult> => ipcRenderer.invoke(IPC.abortRig),
+  getRigStatuses: (): Promise<RigStatusView[]> => ipcRenderer.invoke(IPC.getRigStatuses),
   exportConfig: (): Promise<OperationResult> => ipcRenderer.invoke(IPC.exportConfig),
   importConfig: (): Promise<SaveConfigResult> => ipcRenderer.invoke(IPC.importConfig),
   openLogs: (): Promise<void> => ipcRenderer.invoke(IPC.openLogs),

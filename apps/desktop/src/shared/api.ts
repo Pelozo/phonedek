@@ -6,6 +6,8 @@ import type {
   LightDeviceType,
   MixerSnapshot,
   PressResult,
+  RigGuardProbe,
+  RigRunStatus,
 } from '@phonedek/shared'
 
 export interface PairView {
@@ -338,6 +340,84 @@ export interface StreamerBotSettingsInput {
   clearPassword?: boolean
 }
 
+/* Rig presets (P2 wiring; the renderer UI lands in P3) */
+
+/** One evaluated guard in a rig pre-flight/run report. */
+export interface RigGuardView {
+  probe: RigGuardProbe
+  /** Human description, e.g. `Not OBS streaming` or `App running (discord)`. */
+  label: string
+  /** Effective expectation (`expect` defaults to true). */
+  expect: boolean
+  /** Observed value, or null when unavailable/timed out. */
+  actual: boolean | null
+  ok: boolean
+  available: boolean
+  error?: string
+}
+
+/** Guard pre-flight result; never updates the last-run chip. */
+export interface RigPreviewView {
+  presetId: string
+  name: string
+  ok: boolean
+  total: number
+  estimatedMs: number
+  guards: RigGuardView[]
+  /** Guards that would block the run (in preset order). */
+  blocked: RigGuardView[]
+  error?: string
+}
+
+/** One failed step in a rig run report. */
+export interface RigFailureView {
+  /** 1-based step index. */
+  index: number
+  label: string
+  error: string
+}
+
+/** Final outcome of one editor-started rig. */
+export interface RigRunView {
+  presetId: string
+  name: string
+  status: RigRunStatus
+  ok: boolean
+  completed: number
+  total: number
+  durationMs: number
+  /** End time in ms, for `NOW`/`12m`/`3h` chips. */
+  at: number
+  failures: RigFailureView[]
+  error?: string
+  /** Success summary, e.g. `Studio: 9/9 steps in 12.3s`. */
+  message?: string
+  guards?: RigGuardView[]
+  /** Present on `busy`: the run that currently owns the runner. */
+  active?: {
+    presetId: string
+    name: string
+    index: number
+    total: number
+  }
+}
+
+/** Last-run/active reading for one configured rig status tile. */
+export interface RigStatusView {
+  presetId: string
+  name: string
+  /** ≤12-char tile detail: `READY`, `3/9`, `RUN 2m`, `FAILED`, `NO RIG`, … */
+  detail: string
+  active: boolean
+  available: boolean
+  status?: RigRunStatus
+  error?: string
+  /** Last run end time in ms; absent when the rig has never run. */
+  at?: number
+  durationMs?: number
+  message?: string
+}
+
 export type UpdateState =
   | 'disabled'
   | 'idle'
@@ -455,6 +535,14 @@ export interface PhoneDeckApi {
   setMixerVolume(sessionId: string, volume: number): Promise<PressResult>
   setMixerMute(sessionId: string, muted: boolean): Promise<PressResult>
   setAutoProfileSettings(input: AutoProfileSettingsInput): Promise<OperationResult>
+  /** Evaluate a rig's guards without running it (no last-run/progress changes). */
+  previewRig(presetId: string): Promise<RigPreviewView>
+  /** Run one configured rig from the editor; shares the runner gate. */
+  runRig(presetId: string): Promise<RigRunView>
+  /** Abort the active rig at the next step/delay boundary. */
+  abortRig(): Promise<OperationResult>
+  /** Last-run/active readings for every configured rig. */
+  getRigStatuses(): Promise<RigStatusView[]>
   exportConfig(): Promise<OperationResult>
   importConfig(): Promise<SaveConfigResult>
   openLogs(): Promise<void>
@@ -518,6 +606,10 @@ export const IPC = {
   setMixerVolume: 'phonedek:mixer-set-volume',
   setMixerMute: 'phonedek:mixer-set-mute',
   setAutoProfileSettings: 'phonedek:auto-profile-set-settings',
+  previewRig: 'phonedek:rig-preview',
+  runRig: 'phonedek:rig-run',
+  abortRig: 'phonedek:rig-abort',
+  getRigStatuses: 'phonedek:rig-get-statuses',
   exportConfig: 'phonedek:export-config',
   importConfig: 'phonedek:import-config',
   openLogs: 'phonedek:open-logs',

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AdmZip from 'adm-zip'
 import { createDefaultConfig } from '@phonedek/shared'
-import { applyBackupImport, readBackupFile, writeBackupFile } from '../src/main/backup'
+import { applyBackupImport, previewBackup, readBackupFile, writeBackupFile } from '../src/main/backup'
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), 'phonedek-backup-'))
@@ -185,6 +185,29 @@ describe('backup archives', () => {
     const preImport = readBackupFile(result.preImportPath)
     expect(preImport.config.serverName).toBe('Target PC')
     expect(preImport.assets.get('current.png')).toEqual(Buffer.from([1, 2]))
+  })
+
+  it('counts launch/command actions inside rig steps for the approval warning', () => {
+    const config = createDefaultConfig()
+    const baseline = previewBackup({ config, assets: new Map(), warnings: [] }).dangerousActions
+    config.rigs = [
+      {
+        id: 'go-live',
+        name: 'Go Live',
+        steps: [
+          { action: { type: 'command', command: 'echo hi' } },
+          { action: { type: 'launch', path: '/apps/game' } },
+          {
+            action: {
+              type: 'macro',
+              steps: [{ type: 'launch', path: '/apps/obs' }],
+            },
+          },
+        ],
+      },
+    ]
+    const preview = previewBackup({ config, assets: new Map(), warnings: [] })
+    expect(preview.dangerousActions).toBe(baseline + 3)
   })
 
   it('aborts before importing assets when the pre-import backup fails', () => {

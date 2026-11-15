@@ -33,6 +33,7 @@ export type ControlStateSource =
   | 'twitch'
   | 'light'
   | 'appVolume'
+  | 'rig'
 
 export interface StateControl {
   id: string
@@ -56,6 +57,28 @@ export interface StateControl {
   appMatch?: AppVolumeMatch
   /** Per-app volume vs mute readout on a status tile. */
   appTarget?: AppVolumeStateTarget
+  /** Rig preset id for a `type:'rig'` last-run status tile. */
+  rigPresetId?: string
+}
+
+/** Read-only last-run status for one rig preset (implemented by the runner). */
+export interface RigStatusReading {
+  /** ≤12-char tile detail: `READY`, `3/9`, `RUN 2m`, `FAILED`, `NO RIG`, … */
+  detail: string
+  /** True while that preset owns the runner. */
+  active?: boolean
+  /** False for an unknown/deleted preset or an unavailable desktop. */
+  available?: boolean
+  error?: string
+}
+
+/**
+ * Reads rig status by preset id. The desktop adapter resolves the id against
+ * the current config and reports `NO RIG` for a deleted preset, so the service
+ * never needs its own copy of the deck config.
+ */
+export interface RigStateReader {
+  readStatus(presetId: string): RigStatusReading | Promise<RigStatusReading>
 }
 
 export interface AbsoluteVolumeControl {
@@ -154,6 +177,23 @@ export function isAppVolumeStateButton(button: DeckButton): boolean {
 }
 
 /**
+ * Read the staged `type:'rig'` state binding structurally.
+ *
+ * `StateBinding` is intentionally still the pre-rig union until P3 widens it;
+ * this helper lets P1/P2 resolve a rig tile without a half-finished compile.
+ */
+export function rigPresetOf(button: DeckButton): string | null {
+  const state = button.state as { type?: unknown; presetId?: unknown } | undefined
+  if (!state || state.type !== 'rig') return null
+  return typeof state.presetId === 'string' && state.presetId.length > 0 ? state.presetId : null
+}
+
+/** A normal button with a rig last-run read-only state binding (status tile). */
+export function isRigStateButton(button: DeckButton): boolean {
+  return rigPresetOf(button) !== null
+}
+
+/**
  * Resolve the page's absolute-volume controls. Returns null when the profile
  * or page does not exist; unknown requested ids are ignored.
  */
@@ -188,6 +228,17 @@ export function resolveStateControls(
   const controls: StateControl[] = []
   for (const button of page.buttons) {
     if (requested !== null && !requested.has(button.id)) continue
+    const rigPresetId = rigPresetOf(button)
+    if (rigPresetId) {
+      controls.push({
+        id: button.id,
+        label: button.label,
+        source: 'rig',
+        rigPresetId,
+      })
+      if (controls.length >= 32) break
+      continue
+    }
     const state = button.state
     if (state?.type === 'obs') {
       controls.push({
@@ -303,6 +354,7 @@ export interface ControlStateServiceOptions {
   twitchReader?: TwitchStateReader | null
   lightReader?: LightStateReader | null
   appReader?: AppVolumeReader | null
+  rigReader?: RigStateReader | null
   logger?: Logger
   now?: () => number
   defaultIntervalMs?: number
@@ -347,8 +399,9 @@ function isStatusReading(
     | ObsStatusReading
     | TwitchStatusReading
     | LightStatusReading
-    | AppVolumeReading,
-): reading is ObsStatusReading | TwitchStatusReading | LightStatusReading {
+    | AppVolumeReading
+    | RigStatusReading,
+): reading is ObsStatusReading | TwitchStatusReading | LightStatusReading | RigStatusReading {
   return typeof (reading as ObsStatusReading).detail === 'string'
 }
 
@@ -437,6 +490,7 @@ function readingEntry(
     | TwitchStatusReading
     | LightStatusReading
     | AppVolumeReading
+    | RigStatusReading
     | null,
   error: string | null,
   max?: number,
@@ -516,7 +570,7 @@ function readingEntry(
       revision: 0,
       available: true,
       detail: reading.detail,
-      ...(reading.value === undefined ? {} : { value: reading.value }),
+      ...('value' in reading && reading.value !== undefined ? { value: reading.value } : {}),
       ...('muted' in reading && reading.muted !== undefined ? { muted: reading.muted } : {}),
       ...(reading.active === undefined ? {} : { active: reading.active }),
     }
@@ -556,6 +610,7 @@ export class ControlStateService {
   private readonly twitchReader?: TwitchStateReader | null
   private readonly lightReader?: LightStateReader | null
   private readonly appReader?: AppVolumeReader | null
+  private readonly rigReader?: RigStateReader | null
   private readonly logger?: Logger
   private readonly now: () => number
   private readonly defaultIntervalMs: number
@@ -581,6 +636,7 @@ export class ControlStateService {
     this.twitchReader = options.twitchReader
     this.lightReader = options.lightReader
     this.appReader = options.appReader
+    this.rigReader = options.rigReader
     this.logger = options.logger
     this.now = options.now ?? Date.now
     this.defaultIntervalMs = clampInterval(options.defaultIntervalMs, DEFAULT_WATCH_INTERVAL_MS)
@@ -786,6 +842,20 @@ export class ControlStateService {
     if (this.disposed) return Promise.resolve()
     return this.enqueue(async () => {
       this.appReader?.invalidate(match)
+      this.suppressUntil = Math.max(this.suppressUntil, this.now() + this.writeGraceMs)
+      await this.refresh(undefined, false, true)
+    })
+  }
+
+  /**
+   * A rig started, advanced a step or finished: push the changed last-run
+   * entries immediately. The runner owns the state, so there is no cache to
+   * invalidate; `presetId` is accepted for symmetry with the other notes.
+   */
+  noteRigChanged(presetId?: string): Promise<void> {
+    void presetId
+    if (this.disposed) return Promise.resolve()
+    return this.enqueue(async () => {
       this.suppressUntil = Math.max(this.suppressUntil, this.now() + this.writeGraceMs)
       await this.refresh(undefined, false, true)
     })
@@ -1029,6 +1099,34 @@ export class ControlStateService {
       }
     }
 
+    const rigControls = watched.filter((control) => control.source === 'rig')
+    if (rigControls.length > 0) {
+      // Every tile for one rig shares a single reading (one runner lookup).
+      const groups = new Map<string, typeof rigControls>()
+      for (const control of rigControls) {
+        const key = control.rigPresetId ?? ''
+        const group = groups.get(key)
+        if (group) group.push(control)
+        else groups.set(key, [control])
+      }
+      for (const [presetId, controls] of groups) {
+        let reading: RigStatusReading | null = null
+        let error: string | null = null
+        if (!this.rigReader) {
+          error = 'Rig status is not available on this desktop.'
+        } else {
+          try {
+            reading = await this.rigReader.readStatus(presetId)
+          } catch (caught) {
+            error = caught instanceof Error ? caught.message : String(caught)
+          }
+        }
+        for (const control of controls) {
+          this.updateEntry(control.key, control.controlId, 'rig', reading, error)
+        }
+      }
+    }
+
     const now = this.now()
     for (const sub of [...this.subscriptions.values()]) {
       if (immediate === sub) {
@@ -1067,6 +1165,7 @@ export class ControlStateService {
     lightTarget?: LightTarget
     appMatch?: AppVolumeMatch
     appTarget?: AppVolumeStateTarget
+    rigPresetId?: string
   }> {
     const controls = new Map<
       string,
@@ -1083,6 +1182,7 @@ export class ControlStateService {
         lightTarget?: LightTarget
         appMatch?: AppVolumeMatch
         appTarget?: AppVolumeStateTarget
+        rigPresetId?: string
       }
     >()
     for (const sub of this.subscriptions.values()) {
@@ -1103,6 +1203,7 @@ export class ControlStateService {
           ...(meta?.lightTarget ? { lightTarget: meta.lightTarget } : {}),
           ...(meta?.appMatch ? { appMatch: { ...meta.appMatch } } : {}),
           ...(meta?.appTarget ? { appTarget: meta.appTarget } : {}),
+          ...(meta?.rigPresetId ? { rigPresetId: meta.rigPresetId } : {}),
         })
       }
     }

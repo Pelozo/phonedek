@@ -6,8 +6,10 @@ import {
   isAbsoluteVolumeControl,
   isMicGainControl,
   isObsVolumeControl,
+  isRigStateButton,
   resolveAbsoluteVolumeControls,
   resolveStateControls,
+  type RigStateReader,
 } from '../src/main/control-state'
 import type { MicReader, MicReading } from '../src/main/microphone-source'
 import type { ObsStateTarget } from '@phonedek/shared'
@@ -1119,3 +1121,141 @@ class FakeStatusClient implements ObsClientLike {
     for (const listener of this.listeners) listener(type, data)
   }
 }
+
+describe('rig control state', () => {
+  class FakeRigReader implements RigStateReader {
+    detail = 'READY'
+    active = false
+    available = true
+    failure: Error | null = null
+    reads: string[] = []
+
+    async readStatus(presetId: string): Promise<{
+      detail: string
+      active?: boolean
+      available?: boolean
+    }> {
+      this.reads.push(presetId)
+      if (this.failure) throw this.failure
+      return { detail: this.detail, active: this.active, available: this.available }
+    }
+  }
+
+  function rigFixture(): {
+    config: DeckConfig
+    profileId: string
+    pageId: string
+    tileId: string
+  } {
+    const config = createDefaultConfig()
+    const profile = config.profiles[0]!
+    const page = profile.pages[0]!
+    const tile = page.buttons.find((item) => item.id === 'btn-copy')!
+    ;(tile as unknown as { state?: unknown }).state = { type: 'rig', presetId: 'go-live' }
+    return { config, profileId: profile.id, pageId: page.id, tileId: tile.id }
+  }
+
+  it('resolves a staged rig state tile structurally', () => {
+    const { config, profileId, pageId, tileId } = rigFixture()
+    const tile = config.profiles[0]!.pages[0]!.buttons.find((item) => item.id === tileId)!
+    expect(isRigStateButton(tile)).toBe(true)
+    expect(resolveStateControls(config, profileId, pageId)).toEqual([
+      { id: tileId, label: tile.label, source: 'rig', rigPresetId: 'go-live' },
+    ])
+    expect(resolveStateControls(config, profileId, pageId, [tileId])).toHaveLength(1)
+  })
+
+  it('maps detail/active/available and refreshes on noteRigChanged', async () => {
+    const { profileId, pageId, tileId } = rigFixture()
+    const reader = new FakeRigReader()
+    const messages: ControlStateMessage[] = []
+    const state = new ControlStateService({ rigReader: reader })
+    services.push(state)
+
+    await state.subscribe('client-1', {
+      profileId,
+      pageId,
+      controlIds: [tileId],
+      controls: [{ id: tileId, label: '', source: 'rig', rigPresetId: 'go-live' }],
+      intervalMs: 1000,
+      send: (message) => messages.push(message),
+    })
+
+    expect(reader.reads).toEqual(['go-live'])
+    expect(messages[0]!.states).toEqual([
+      { controlId: tileId, revision: 1, available: true, detail: 'READY', active: false },
+    ])
+
+    reader.detail = '3/9'
+    reader.active = true
+    await state.noteRigChanged('go-live')
+
+    expect(messages.at(-1)!.states[0]).toMatchObject({
+      controlId: tileId,
+      revision: 2,
+      available: true,
+      detail: '3/9',
+      active: true,
+    })
+  })
+
+  it('keeps a deleted rig tile quiet as NO RIG', async () => {
+    const { profileId, pageId, tileId } = rigFixture()
+    const reader = new FakeRigReader()
+    reader.detail = 'NO RIG'
+    reader.available = false
+    const messages: ControlStateMessage[] = []
+    const state = new ControlStateService({ rigReader: reader })
+    services.push(state)
+
+    await state.subscribe('client-1', {
+      profileId,
+      pageId,
+      controlIds: [tileId],
+      controls: [{ id: tileId, label: '', source: 'rig', rigPresetId: 'deleted-rig' }],
+      intervalMs: 1000,
+      send: (message) => messages.push(message),
+    })
+
+    expect(messages[0]!.states[0]).toMatchObject({
+      controlId: tileId,
+      available: false,
+      detail: 'NO RIG',
+    })
+  })
+
+  it('marks rig tiles unavailable when the reader fails or is missing', async () => {
+    const { profileId, pageId, tileId } = rigFixture()
+    const failing = new FakeRigReader()
+    failing.failure = new Error('Rig status exploded')
+    const failedMessages: ControlStateMessage[] = []
+    const failingState = new ControlStateService({ rigReader: failing })
+    services.push(failingState)
+
+    await failingState.subscribe('client-1', {
+      profileId,
+      pageId,
+      controlIds: [tileId],
+      controls: [{ id: tileId, label: '', source: 'rig', rigPresetId: 'go-live' }],
+      intervalMs: 1000,
+      send: (message) => failedMessages.push(message),
+    })
+    expect(failedMessages[0]!.states[0]).toMatchObject({
+      available: false,
+      detail: 'Rig status exploded',
+    })
+
+    const missingMessages: ControlStateMessage[] = []
+    const missingState = new ControlStateService({})
+    services.push(missingState)
+    await missingState.subscribe('client-2', {
+      profileId,
+      pageId,
+      controlIds: [tileId],
+      controls: [{ id: tileId, label: '', source: 'rig', rigPresetId: 'go-live' }],
+      intervalMs: 1000,
+      send: (message) => missingMessages.push(message),
+    })
+    expect(missingMessages[0]!.states[0]).toMatchObject({ available: false })
+  })
+})

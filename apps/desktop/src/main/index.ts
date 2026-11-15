@@ -21,6 +21,10 @@ import {
   controlToActions,
   HUE_DEFAULT_PORT,
   lightControlDefaults,
+  normalizeProfileId,
+  rigActionOf,
+  rigById,
+  RIG_CAPABILITY,
   validateConfig,
 } from '@phonedek/shared'
 import type {
@@ -30,13 +34,15 @@ import type {
   LightBinding,
   MixerSnapshot,
   PressResult,
+  RigPreset,
+  RigProgressMessage,
 } from '@phonedek/shared'
 import { AssetStore } from './assets'
 import { applyBackupImport, readBackupFile, writeBackupFile } from './backup'
 import { ConfigStore } from './config-store'
 import { DiscoveryService } from './discovery'
 import { ActionExecutor } from './executor'
-import { GameWatcher } from './game-watcher'
+import { GameWatcher, createProcessProvider, type ProcessProvider } from './game-watcher'
 import { createHostActions } from './host-actions'
 import { ControlInputRouter } from './control-input'
 import { ControlStateService } from './control-state'
@@ -47,6 +53,9 @@ import { createLogger, type Logger } from './logger'
 import { lanAddresses, primaryLanAddress, urlsForPort } from './lan'
 import { keyboardHelperPath } from './platform'
 import { PointerRouter, pointerInputAllowed } from './pointer-input'
+import { RigRunner } from './rig-runner'
+import type { RigPreview, RigRunResult } from './rig-runner'
+import type { RigGuardProbes } from './rig-guards'
 import {
   createPointerSender,
   pointerPlatformSupport,
@@ -69,6 +78,7 @@ import {
   sanitizeObsPort,
   sanitizeStreamerBotHost,
   sanitizeStreamerBotPort,
+  normalizeProcessName,
   type AppSettings,
   type LightDeviceSettings,
 } from './settings-store'
@@ -119,6 +129,10 @@ import type {
   OperationResult,
   PairView,
   PermissionStatus,
+  RigGuardView,
+  RigPreviewView,
+  RigRunView,
+  RigStatusView,
   SaveConfigResult,
   ServerInfoView,
   StreamerBotActionsResult,
@@ -144,6 +158,7 @@ let server: DeckServer
 let discovery: DiscoveryService
 let keySender: KeySender
 let executor: ActionExecutor
+let rigRunner: RigRunner | null = null
 let inputRouter: ControlInputRouter | null = null
 let controlState: ControlStateService | null = null
 let volumeProbe: HelperVolumeProbe | null = null
@@ -480,6 +495,130 @@ function pruneAutoProfileRevertProfile(): void {
 function applyInputGates(): void {
   pointerRouter?.setBlocked(!pointerInputAllowed(settings.get().allowPointerControl, dialogOpen))
   keyboardRouter?.setBlocked(!keyboardInputAllowed(settings.get().allowKeyboardControl, dialogOpen))
+}
+
+/** Guard-triggered process scans share one snapshot for this long. */
+const RIG_PROCESS_SNAPSHOT_TTL_MS = 2_000
+let rigProcessProvider: ProcessProvider | null = null
+let rigProcessSnapshot: { at: number; names: Set<string> } | null = null
+let rigProcessSnapshotInFlight: Promise<Set<string>> | null = null
+
+/**
+ * Normalized process names for rig `appRunning` guards.
+ *
+ * Uses the same tasklist/ps snapshot helper and `normalizeProcessName` as the
+ * auto-profile watcher, with a 2 s TTL (and single-flight) so several guards in
+ * one rig cost one scan. A scan failure rejects: the guard then fails closed.
+ */
+async function rigRunningProcesses(): Promise<Set<string>> {
+  const now = Date.now()
+  if (rigProcessSnapshot && now - rigProcessSnapshot.at < RIG_PROCESS_SNAPSHOT_TTL_MS) {
+    return rigProcessSnapshot.names
+  }
+  if (rigProcessSnapshotInFlight) return rigProcessSnapshotInFlight
+
+  rigProcessProvider ??= createProcessProvider(process.platform)
+  const pending = rigProcessProvider
+    .list()
+    .then((names) => {
+      const normalized = new Set<string>()
+      for (const name of names) {
+        const value = normalizeProcessName(name)
+        if (value) normalized.add(value)
+      }
+      rigProcessSnapshot = { at: Date.now(), names: normalized }
+      return normalized
+    })
+    .finally(() => {
+      rigProcessSnapshotInFlight = null
+    })
+  rigProcessSnapshotInFlight = pending
+  return pending
+}
+
+/**
+ * Rig guard probes wired to the integrations this desktop actually has.
+ *
+ * A source that was never constructed omits its probe, so the guard reports
+ * "unavailable" and blocks the rig (fail closed). A constructed source that is
+ * disabled/offline throws from `readStatus`, which fails closed the same way.
+ */
+function createRigGuardProbes(): RigGuardProbes {
+  const probes: RigGuardProbes = {}
+  const obs = obsSource
+  if (obs) {
+    probes.obsStreaming = async () => (await obs.readStatus('streaming')).active === true
+    probes.obsRecording = async () => (await obs.readStatus('recording')).active === true
+  }
+  const twitch = twitchSource
+  if (twitch) {
+    probes.twitchLive = async () => (await twitch.readStatus('live')).active === true
+  }
+  const mic = microphone
+  if (mic) {
+    probes.micMuted = async () => (await mic.read()).muted === true
+  }
+  const lights = lightSource
+  if (lights) {
+    probes.lightOn = async (lightId?: string) =>
+      (await lights.readStatus(lightId, 'power')).active === true
+  }
+  probes.appRunning = async (arg: string) => {
+    const name = normalizeProcessName(arg)
+    if (!name) throw new Error(`"${arg}" is not a process name`)
+    return (await rigRunningProcesses()).has(name)
+  }
+  return probes
+}
+
+/** Copy guard results into the renderer-safe API shape. */
+function rigGuardViews(guards: readonly RigGuardView[]): RigGuardView[] {
+  return guards.map((guard) => ({
+    probe: guard.probe,
+    label: guard.label,
+    expect: guard.expect,
+    actual: guard.actual,
+    ok: guard.ok,
+    available: guard.available,
+    ...(guard.error !== undefined ? { error: guard.error } : {}),
+  }))
+}
+
+function rigPreviewView(preview: RigPreview): RigPreviewView {
+  return {
+    presetId: preview.presetId,
+    name: preview.name,
+    ok: preview.ok,
+    total: preview.total,
+    estimatedMs: preview.estimatedMs,
+    guards: rigGuardViews(preview.guards),
+    blocked: rigGuardViews(preview.blocked),
+    ...(preview.error !== undefined ? { error: preview.error } : {}),
+  }
+}
+
+function rigRunView(result: RigRunResult): RigRunView {
+  return {
+    presetId: result.presetId,
+    name: result.name,
+    status: result.status,
+    ok: result.ok,
+    completed: result.completed,
+    total: result.total,
+    durationMs: result.durationMs,
+    at: result.at,
+    failures: result.failures.map((failure) => ({ ...failure })),
+    ...(result.error !== undefined ? { error: result.error } : {}),
+    ...(result.message !== undefined ? { message: result.message } : {}),
+    ...(result.guards !== undefined ? { guards: rigGuardViews(result.guards) } : {}),
+    ...(result.active !== undefined ? { active: { ...result.active } } : {}),
+  }
+}
+
+/** Resolve a validated rig id against the current config. */
+function configuredRig(presetId: unknown): RigPreset | undefined {
+  const id = normalizeProfileId(presetId)
+  return id ? rigById(store.get().rigs, id) : undefined
 }
 
 function setDialogOpen(open: boolean): void {
@@ -1327,6 +1466,81 @@ function registerIpc(): void {
     },
   )
 
+  ipcMain.handle(IPC.previewRig, async (_event, presetId: unknown): Promise<RigPreviewView> => {
+    const requestedId = typeof presetId === 'string' ? presetId.slice(0, 64) : ''
+    const failed = (error: string): RigPreviewView => ({
+      presetId: requestedId,
+      name: requestedId,
+      ok: false,
+      total: 0,
+      estimatedMs: 0,
+      guards: [],
+      blocked: [],
+      error,
+    })
+    const rig = configuredRig(presetId)
+    if (!rig) {
+      return failed(
+        requestedId ? `Rig "${requestedId}" is not configured.` : 'Choose a valid rig.',
+      )
+    }
+    if (!rigRunner) return failed('Rigs are not available on this desktop.')
+    // Preview only evaluates guards: no last-run write and no progress frames.
+    return rigPreviewView(await rigRunner.preview(rig, rig.id))
+  })
+
+  ipcMain.handle(IPC.runRig, async (_event, presetId: unknown): Promise<RigRunView> => {
+    const at = Date.now()
+    const requestedId = typeof presetId === 'string' ? presetId.slice(0, 64) : ''
+    const failed = (error: string): RigRunView => ({
+      presetId: requestedId,
+      name: requestedId,
+      status: 'failed',
+      ok: false,
+      completed: 0,
+      total: 0,
+      durationMs: 0,
+      at,
+      failures: [],
+      error,
+    })
+    const rig = configuredRig(presetId)
+    if (!rig) {
+      return failed(
+        requestedId ? `Rig "${requestedId}" is not configured.` : 'Choose a valid rig.',
+      )
+    }
+    if (!rigRunner) return failed('Rigs are not available on this desktop.')
+    // Editor-started runs carry no button id and share the phone/HTTP runner gate.
+    logger.info(`Rig "${rig.name}" started from the editor`)
+    return rigRunView(await rigRunner.run(rig, { presetId: rig.id }))
+  })
+
+  ipcMain.handle(IPC.abortRig, async (): Promise<OperationResult> => {
+    if (rigRunner?.abort() === true) return { ok: true }
+    return { ok: false, error: 'No rig is running.' }
+  })
+
+  ipcMain.handle(IPC.getRigStatuses, async (): Promise<RigStatusView[]> => {
+    const runner = rigRunner
+    if (!runner) return []
+    return (store.get().rigs ?? []).map((rig) => {
+      const reading = runner.readStatus(rig)
+      const last = runner.lastRun(rig.id)
+      return {
+        presetId: rig.id,
+        name: rig.name,
+        detail: reading.detail,
+        active: reading.active,
+        available: reading.available,
+        ...(reading.status !== undefined ? { status: reading.status } : {}),
+        ...(reading.error !== undefined ? { error: reading.error } : {}),
+        ...(last ? { at: last.at, durationMs: last.durationMs } : {}),
+        ...(last?.message !== undefined ? { message: last.message } : {}),
+      }
+    })
+  })
+
   ipcMain.handle(IPC.getLightStatuses, async (): Promise<LightStatusView[]> => {
     if (!lightSource) return []
     const statuses = await lightSource.listStatuses()
@@ -2045,26 +2259,62 @@ async function bootstrap(): Promise<void> {
           ? createVolumeReader('win32', { windowsRead: () => volumeProbe!.read() })
           : null)
       : createVolumeReader(process.platform)
-  controlState =
-    volumeReader ||
-    microphone ||
-    mediaSource ||
-    appVolumeSource ||
-    settings.get().obsEnabled ||
-    settings.get().twitchEnabled ||
-    lightsActive(settings.get())
-      ? new ControlStateService({
-          ...(volumeReader ? { reader: volumeReader } : {}),
-          ...(microphone ? { micReader: microphone } : {}),
-          ...(mediaSource ? { mediaReader: mediaSource } : {}),
-          ...(appVolumeSource ? { appReader: appVolumeSource } : {}),
-          ...(obsSource ? { obsReader: obsSource } : {}),
-          ...(twitchSource ? { twitchReader: twitchSource } : {}),
-          ...(lightSource ? { lightReader: lightSource } : {}),
-          logger,
-        })
-      : null
-  if (controlState) {
+
+  // One runner owns every rig (phone presses, HTTP presses and the editor):
+  // guards, single-flight, abort and last-run state live in one place.
+  const runner = new RigRunner(
+    {
+      executePlan: (groups, label, options) => executor.executePlan(groups, label, options),
+      probes: createRigGuardProbes(),
+      now: () => Date.now(),
+      logger,
+    },
+    {
+      onProgress: (frame) => {
+        const message: RigProgressMessage = {
+          type: 'rigProgress',
+          phase: frame.phase,
+          presetId: frame.presetId,
+          ...(frame.buttonId !== undefined ? { buttonId: frame.buttonId } : {}),
+          index: frame.index,
+          total: frame.total,
+          ...(frame.label !== undefined ? { label: frame.label } : {}),
+          ...(frame.status !== undefined ? { status: frame.status } : {}),
+          ...(frame.ok !== undefined ? { ok: frame.ok } : {}),
+          ...(frame.error !== undefined ? { error: frame.error } : {}),
+          ...(frame.durationMs !== undefined ? { durationMs: frame.durationMs } : {}),
+        }
+        // Only phones that advertised `rig-v1` receive progress; old apps see
+        // the ordinary press and its final pressResult.
+        try {
+          server?.sendToClientsWithCapability(RIG_CAPABILITY, message)
+        } catch (error) {
+          logger.warn(
+            `Could not send rig progress: ${error instanceof Error ? error.message : String(error)}`,
+          )
+        }
+        void controlState?.noteRigChanged(frame.presetId)
+      },
+    },
+  )
+  rigRunner = runner
+
+  controlState = new ControlStateService({
+    ...(volumeReader ? { reader: volumeReader } : {}),
+    ...(microphone ? { micReader: microphone } : {}),
+    ...(mediaSource ? { mediaReader: mediaSource } : {}),
+    ...(appVolumeSource ? { appReader: appVolumeSource } : {}),
+    ...(obsSource ? { obsReader: obsSource } : {}),
+    ...(twitchSource ? { twitchReader: twitchSource } : {}),
+    ...(lightSource ? { lightReader: lightSource } : {}),
+    // Rig status is in-memory, so it is always readable (even with no device
+    // integrations) and `control-state-v1` must stay advertised for rig tiles.
+    rigReader: {
+      readStatus: (presetId) => runner.readStatus(rigById(store.get().rigs, presetId)),
+    },
+    logger,
+  })
+  {
     const sources = [
       volumeReader ? 'volume' : null,
       microphone ? 'microphone' : null,
@@ -2073,12 +2323,11 @@ async function bootstrap(): Promise<void> {
       obsSource ? 'OBS' : null,
       twitchSource ? 'Twitch' : null,
       lightSource && lightsActive(settings.get()) ? 'lights' : null,
+      'rigs',
     ]
       .filter(Boolean)
       .join(' + ')
     logger.info(`Live control state enabled on ${process.platform} (${sources})`)
-  } else {
-    logger.info('Live control state disabled: no system volume, microphone or OBS reader on this host')
   }
 
   mixer = appVolumeSource
@@ -2198,8 +2447,24 @@ async function bootstrap(): Promise<void> {
     getConfig: () => store.get(),
     getServerName: () => store.get().serverName,
     logger,
-    onPress: async (_client, _message, context: PressContext) =>
-      executor.execute(context.button.actions, context.button.label),
+    onPress: async (_client, _message, context: PressContext) => {
+      // A rig button is schema-restricted to its single rig action. Resolve it
+      // before touching the executor so a rig can never also run stale extras.
+      const rigAction = rigActionOf(context.button.actions)
+      if (rigAction) {
+        if (!rigRunner) return { ok: false, error: 'Rigs are not available on this desktop.' }
+        const result = await rigRunner.run(rigById(store.get().rigs, rigAction.presetId), {
+          presetId: rigAction.presetId,
+          buttonId: context.button.id,
+        })
+        return {
+          ok: result.ok,
+          ...(result.error !== undefined ? { error: result.error } : {}),
+          ...(result.message !== undefined ? { message: result.message } : {}),
+        }
+      }
+      return executor.execute(context.button.actions, context.button.label)
+    },
     onInput: async (client, message, context) =>
       router.handle(message, {
         control: context.control,
@@ -2375,8 +2640,16 @@ async function bootstrap(): Promise<void> {
   })
 
   store.onChange(() => {
+    // A rig that is mid-run must not keep executing steps after its preset was
+    // deleted; abort at the next group/delay boundary. Renames/edits keep running.
+    const activeRig = rigRunner?.active
+    if (activeRig && !rigById(store.get().rigs, activeRig.presetId)) {
+      rigRunner?.abort()
+      logger.warn(`Rig "${activeRig.presetId}" was deleted from the config; stopping it.`)
+    }
     pruneAutoProfileRevertProfile()
     server.broadcastConfig()
+    void controlState?.noteRigChanged()
     pairCache = null
     void pushServerInfo()
   })
@@ -2466,6 +2739,7 @@ if (!gotLock) {
     void (async () => {
       try {
         await inputRouter?.dispose()
+        rigRunner?.abort()
         controlState?.dispose()
         mixer?.dispose()
         twitchAuth?.dispose()

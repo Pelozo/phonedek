@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AdmZip from 'adm-zip'
 import { WebSocket } from 'ws'
-import { createDefaultConfig } from '@phonedek/shared'
+import { createDefaultConfig, RIG_CAPABILITY } from '@phonedek/shared'
 import { ProfileMessageSchema } from '@phonedek/shared'
 import type {
   ClientMessage,
@@ -1542,5 +1542,64 @@ describe('DeckServer phone backup import', () => {
     expect(result.status).toBe(413)
     expect(result.body).toContain('300 MB')
     await waitForImportCleanup(before)
+  })
+})
+
+describe('DeckServer rig capability', () => {
+  function rigHello(capabilities: string[]): ClientMessage {
+    return {
+      type: 'hello',
+      protocol: 1,
+      device: { name: 'Test phone', model: 'test', appVersion: '0.15.0' },
+      capabilities,
+    }
+  }
+
+  it('advertises rig-v1 in /api/info and hello without extra configuration', async () => {
+    const h = await harness()
+    const info = await fetch(`http://127.0.0.1:${h.port}/api/info`)
+    const body = (await info.json()) as { capabilities: string[] }
+    expect(body.capabilities).toContain(RIG_CAPABILITY)
+
+    const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    const hello = await waitFor(() =>
+      messages.find((message) => message.type === 'hello'),
+    )
+    expect(hello.type === 'hello' && hello.capabilities).toContain(RIG_CAPABILITY)
+    ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
+  it('sends capability messages only to clients that advertised it', async () => {
+    const h = await harness()
+    const capable = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    const old = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await waitFor(
+      () =>
+        capable.messages.some((message) => message.type === 'hello') &&
+        old.messages.some((message) => message.type === 'hello'),
+    )
+    capable.ws.send(JSON.stringify(rigHello(['rig-v1'])))
+    old.ws.send(JSON.stringify(rigHello([])))
+    await new Promise((resolve) => setTimeout(resolve, 60))
+
+    const progress = {
+      type: 'rigProgress',
+      phase: 'start',
+      presetId: 'go-live',
+      index: 0,
+      total: 3,
+      label: 'Go Live',
+    } as const
+    expect(h.server.sendToClientsWithCapability(RIG_CAPABILITY, progress)).toBe(1)
+    await waitFor(() =>
+      capable.messages.find((message) => message.type === 'rigProgress'),
+    )
+    expect(old.messages.some((message) => message.type === 'rigProgress')).toBe(false)
+
+    capable.ws.close()
+    old.ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+    expect(h.server.sendToClientsWithCapability(RIG_CAPABILITY, progress)).toBe(0)
   })
 })
