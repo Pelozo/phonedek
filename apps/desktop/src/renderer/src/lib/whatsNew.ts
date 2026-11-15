@@ -10,6 +10,15 @@ export interface WhatsNewEntry {
  * Keep highlights short: the dialog is a summary, not release notes.
  */
 const WHATS_NEW: Readonly<Record<string, WhatsNewEntry>> = {
+  '0.14.0': {
+    title: 'Streamer.bot actions',
+    highlights: [
+      'Trigger any action in your local Streamer.bot from a deck button.',
+      'Pick actions from the live list, or type an exact name when offline.',
+      'Pass up to 16 arguments and test the action from the editor.',
+      'Configure the WebSocket host and password in Settings → Integrations.',
+    ],
+  },
   '0.13.2': {
     title: 'Live keyboard and What\u2019s New',
     highlights: [

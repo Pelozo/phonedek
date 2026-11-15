@@ -11,6 +11,14 @@ data class WhatsNewEntry(
  * each release; versions without a key fall back to [GENERIC_WHATS_NEW].
  */
 private val WHATS_NEW: Map<String, WhatsNewEntry> = mapOf(
+    "0.14.0" to WhatsNewEntry(
+        title = "Streamer.bot actions",
+        highlights = listOf(
+            "Buttons can trigger any action in your local Streamer.bot.",
+            "Configure the WebSocket host and password in desktop Settings → Integrations.",
+            "Pass arguments from the button and test the action from the editor.",
+        ),
+    ),
     "0.13.2" to WhatsNewEntry(
         title = "Live keyboard",
         highlights = listOf(
