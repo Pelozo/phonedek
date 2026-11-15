@@ -1,13 +1,17 @@
 import {
   ELGATO_TEMPERATURE_MAX,
   ELGATO_TEMPERATURE_MIN,
+  HUE_DEFAULT_PORT,
   LIGHT_DEFAULT_PORT,
+  NANOLEAF_DEFAULT_PORT,
   lightControlDefaults,
+  lightDefaultPort,
   miredToKelvin,
   normalizeLightValue,
 } from '@phonedek/shared'
 import type {
   LightAction,
+  LightDeviceType,
   LightStateBinding,
   LightTarget,
   SliderOrDialControlSpec,
@@ -45,6 +49,104 @@ export interface LightTargetInfo {
 
 /** Elgato Key Light family HTTP port. Shared with the main process. */
 export { LIGHT_DEFAULT_PORT }
+
+/* ------------------------------------------------------------------ */
+/* Provider metadata                                                   */
+/* ------------------------------------------------------------------ */
+
+export type LightCredentialKind = 'username' | 'token' | null
+
+export interface LightProviderInfo {
+  type: LightDeviceType
+  /** Select label. */
+  label: string
+  /** Compact uppercase badge for device rows and status lines. */
+  badge: string
+  /** Default API port, applied whenever the provider changes. */
+  port: number
+  hostPlaceholder: string
+  credential: LightCredentialKind
+  /** Short editor note under the provider controls. */
+  note: string
+}
+
+const PROVIDER_INFO: Record<LightDeviceType, LightProviderInfo> = {
+  elgato: {
+    type: 'elgato',
+    label: 'Elgato',
+    badge: 'ELGATO',
+    port: LIGHT_DEFAULT_PORT,
+    hostPlaceholder: '192.168.1.42',
+    credential: null,
+    note: 'Key Light local HTTP API. No account or credential is involved.',
+  },
+  hue: {
+    type: 'hue',
+    label: 'Hue',
+    badge: 'HUE',
+    port: HUE_DEFAULT_PORT,
+    hostPlaceholder: '192.168.1.50',
+    credential: 'username',
+    note: 'Philips Hue bridge CLIP v1 over HTTPS. Pairing stores the application key; it is never shown again.',
+  },
+  nanoleaf: {
+    type: 'nanoleaf',
+    label: 'Nanoleaf',
+    badge: 'NANOLEAF',
+    port: NANOLEAF_DEFAULT_PORT,
+    hostPlaceholder: '192.168.1.60',
+    credential: 'token',
+    note: 'Nanoleaf OpenAPI over HTTP. The token is write-only and stored in the encrypted secret store.',
+  },
+}
+
+/** Stable provider order for the device type selector. */
+export const LIGHT_PROVIDERS: readonly LightProviderInfo[] = [
+  PROVIDER_INFO.elgato,
+  PROVIDER_INFO.hue,
+  PROVIDER_INFO.nanoleaf,
+]
+
+/** Provider metadata; unknown/missing types fall back to Elgato. */
+export function lightProviderInfo(type: LightDeviceType | undefined): LightProviderInfo {
+  return PROVIDER_INFO[type ?? 'elgato'] ?? PROVIDER_INFO.elgato
+}
+
+export function lightProviderBadge(type: LightDeviceType | undefined): string {
+  return lightProviderInfo(type).badge
+}
+
+/**
+ * Fields that must reset when the user switches provider. Keeping this pure
+ * makes the "default port + provider-specific fields" rule testable.
+ */
+export interface LightTypeSwitchPatch {
+  port: string
+  lightId: string
+  credential: string
+}
+
+export function lightTypeSwitch(type: LightDeviceType): LightTypeSwitchPatch {
+  return {
+    port: String(lightDefaultPort(type)),
+    lightId: '',
+    credential: '',
+  }
+}
+
+/**
+ * Mirrors the main process credential rule so obvious typos are caught before
+ * Save. The value is transient form state and is never read back from the app.
+ */
+export function lightCredentialError(value: string): string | null {
+  const token = value.trim()
+  if (token.length === 0) return null
+  if (token.length > 128) return 'Use 128 characters or fewer.'
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(token)) {
+    return 'Use letters, digits, dots, dashes and underscores only.'
+  }
+  return null
+}
 
 const TARGET_INFO: Record<LightTarget, LightTargetInfo> = {
   power: {
@@ -121,9 +223,10 @@ export function lightStatusSummary(
     }
   }
   if (!status.available) {
+    const reason = status.error?.trim()
     return {
-      label: 'OFFLINE',
-      detail: status.error?.trim() || `No response from ${lightEndpoint(status)}.`,
+      label: reason && /no lights?/i.test(reason) ? 'NO LIGHT' : 'OFFLINE',
+      detail: reason || `No response from ${lightEndpoint(status)}.`,
       tone: 'error',
     }
   }
@@ -160,7 +263,7 @@ export function lightAvailability({
   if (lights.length === 0) {
     return {
       label: 'NO LIGHT',
-      detail: 'Add an Elgato Key Light in Settings → Lights.',
+      detail: 'Add an Elgato, Hue or Nanoleaf light in Settings → Lights.',
       tone: 'muted',
     }
   }

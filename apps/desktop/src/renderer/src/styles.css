@@ -5590,8 +5590,15 @@ select[aria-invalid="true"] {
 
 .light-device-fields {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.35fr) 86px;
+  grid-template-columns: minmax(0, 1.05fr) 104px minmax(0, 1.25fr) 86px;
   gap: 8px;
+}
+
+.light-type-field select {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding-left: 7px;
 }
 
 .light-port-field input {
@@ -5660,6 +5667,207 @@ select[aria-invalid="true"] {
 
 .light-actions {
   flex-wrap: wrap;
+}
+
+/* Provider panels: Hue pairing, Nanoleaf token and Elgato notes. */
+
+.light-credential-tag.set {
+  color: var(--ok);
+  background: rgba(101, 179, 122, 0.12);
+}
+
+.light-credential-tag.missing {
+  color: var(--muted);
+  background: var(--surface);
+}
+
+.light-provider-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.light-provider-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.light-provider-label {
+  color: var(--text-soft);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.light-provider-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.light-provider-hint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--faint);
+  font-size: 8.5px;
+  letter-spacing: 0.04em;
+}
+
+.light-provider-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.light-pair-prompt {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  background: var(--surface-2);
+}
+
+.light-pair-prompt > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--accent);
+}
+
+.light-pair-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.light-pair-copy strong {
+  font-size: 11.5px;
+}
+
+.light-pair-copy p {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.light-pair-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.light-pair-track {
+  flex: 1;
+  height: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.light-pair-track > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.9s linear;
+}
+
+.light-pair-meta {
+  color: var(--accent);
+  font-size: 8.5px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.light-pair-error,
+.light-list-error {
+  margin: 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--danger);
+  color: var(--danger);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.light-discovery {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.light-discovery-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.light-discovery-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-soft);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
+.light-discovery-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.light-hue-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.light-hue-picker select {
+  font-size: 11.5px;
+}
+
+.light-token-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.light-token-row input {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+
+.light-status-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.light-status-provider {
+  flex: 0 0 auto;
+  color: var(--faint);
+  background: var(--surface);
 }
 
 /* ------------------------------------------------------------------ */

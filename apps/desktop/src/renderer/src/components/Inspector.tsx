@@ -1369,8 +1369,8 @@ export function Inspector({
             </div>
             <p className="hint">
               Add a live readout to this button without replacing its tap actions. OBS uses its
-              WebSocket connection, Twitch uses the Helix account, lights use the Elgato HTTP
-              devices from Settings → Lights, and app audio uses the desktop mixer. All feed the
+              WebSocket connection, Twitch uses the Helix account, lights use the local device
+              APIs from Settings → Lights, and app audio uses the desktop mixer. All feed the
               phone through control-state-v1.
             </p>
             <label className="field">
@@ -2079,7 +2079,7 @@ export function Inspector({
                 )}
                 {lights.length === 0 && (
                   <p className="hint">
-                    Add an Elgato light in Settings → Lights. The control stays saved and fails
+                    Add a light in Settings → Lights. The control stays saved and fails
                     clearly until a light is configured.
                   </p>
                 )}
@@ -2282,8 +2282,8 @@ export function Inspector({
                   { label: 'Twitch create marker', icon: 'clock', description: 'Drop a marker on the live stream', onClick: () => addTwitchAction({ type: 'twitch', action: 'createMarker' }, 'Marker', '🔖') },
                   { label: 'Twitch set title', icon: 'monitor', description: 'Replace the live stream title', onClick: () => addTwitchAction({ type: 'twitch', action: 'setTitle', title: '' }, 'Title', '📝') },
                   { label: 'Twitch set game / category', icon: 'grid', description: 'Change the Twitch category by name', onClick: () => addTwitchAction({ type: 'twitch', action: 'setGame', game: '' }, 'Game', '🎮') },
-                  { label: 'Light power on', section: 'Lighting', icon: 'light', description: 'Turn a configured Elgato light on', onClick: () => addLightAction('on') },
-                  { label: 'Light power off', icon: 'light', description: 'Turn a configured Elgato light off', onClick: () => addLightAction('off') },
+                  { label: 'Light power on', section: 'Lighting', icon: 'light', description: 'Turn a configured light on', onClick: () => addLightAction('on') },
+                  { label: 'Light power off', icon: 'light', description: 'Turn a configured light off', onClick: () => addLightAction('off') },
                   { label: 'Toggle light power', icon: 'light', description: 'Switch a configured light on or off', onClick: () => addLightAction('toggle') },
                   { label: 'Delay', icon: 'clock', description: 'Wait before the next action', onClick: () => update({ actions: [...button.actions, makeAction('delay')] }) },
                   { label: 'Change page', icon: 'layers', description: 'Navigate to another deck page', onClick: () => update({ actions: [...button.actions, makeAction('page')] }) },

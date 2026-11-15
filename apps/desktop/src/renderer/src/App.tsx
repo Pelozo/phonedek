@@ -861,7 +861,7 @@ function AppContent() {
   const openLightPicker = (request: LightPickerRequest): void => {
     if (!server) return
     if (server.settings.lights.length === 0) {
-      showToast('No lights configured — add an Elgato light in Settings → Lights first.', 'info')
+      showToast('No lights configured — add a light in Settings → Lights first.', 'info')
       return
     }
     if (!server.settings.lightsEnabled) {

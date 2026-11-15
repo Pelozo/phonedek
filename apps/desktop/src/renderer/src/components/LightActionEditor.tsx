@@ -77,8 +77,8 @@ export function LightActionEditor({
 
       <p className="hint">
         {enabled && lights.length > 0
-          ? 'Talks to the light over local HTTP. No Elgato account or cloud login is used. Tapping the tile presses every action in order.'
-          : 'Add an Elgato light in Settings → Lights, then enable local light control. The action stays saved until a light is available.'}
+          ? 'Talks to the light over its local API. No manufacturer account or cloud login is used. Tapping the tile presses every action in order.'
+          : 'Add a light in Settings → Lights, then enable local light control. The action stays saved until a light is available.'}
       </p>
     </div>
   )

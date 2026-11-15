@@ -1,5 +1,5 @@
 import type { LightDeviceView } from '../../../shared/api'
-import { lightEndpoint } from '../lib/lights'
+import { lightEndpoint, lightProviderBadge } from '../lib/lights'
 import { Icon } from './Icons'
 import { Modal } from './Primitives'
 
@@ -30,8 +30,8 @@ export function LightPickerDialog({
           <Icon name="light" size={26} />
           <strong>No lights configured</strong>
           <p>
-            Add an Elgato Key Light in Settings → Lights. PhoneDeck talks to each light over local
-            HTTP — no Elgato account is needed.
+            Add an Elgato Key Light, Hue bridge or Nanoleaf controller in Settings → Lights.
+            PhoneDeck talks to each light over its local API — no manufacturer account is needed.
           </p>
           <button type="button" className="button primary small" onClick={onOpenSettings}>
             <Icon name="settings" size={14} /> Open Settings → Lights
@@ -66,7 +66,7 @@ export function LightPickerDialog({
               <span>
                 <strong>{light.name}</strong>
                 <small className="mono">
-                  {lightEndpoint(light)} · ELGATO
+                  {lightEndpoint(light)} · {lightProviderBadge(light.type)}
                 </small>
               </span>
               <span className="mono light-pick-tag">{light.id}</span>

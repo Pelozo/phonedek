@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { LightDeviceView, LightStatusView } from '../src/shared/api'
 import {
+  LIGHT_PROVIDERS,
   LIGHT_TARGETS,
   LIGHT_TEMPERATURE_HINT,
   LIGHT_VALUE_TARGETS,
@@ -13,17 +14,21 @@ import {
   lightActionWithOperation,
   lightAvailability,
   lightControlSpec,
+  lightCredentialError,
   lightDeviceName,
   lightEndpoint,
   lightHostError,
   lightNameError,
   lightPortError,
+  lightProviderBadge,
+  lightProviderInfo,
   lightStateBadge,
   lightStateBindingSummary,
   lightStatusSummary,
   lightTargetControlPatch,
   lightTargetInfo,
   lightTestValue,
+  lightTypeSwitch,
   nextLightId,
 } from '../src/renderer/src/lib/lights'
 import {
@@ -73,6 +78,21 @@ describe('light status summaries', () => {
     expect(offline.tone).toBe('error')
     expect(offline.detail).toContain('timed out')
     expect(lightStatusSummary(null).label).toBe('Status unavailable')
+  })
+
+  it('distinguishes an empty Hue bridge from an unreachable device', () => {
+    const empty = lightStatusSummary(
+      status({
+        type: 'hue',
+        available: false,
+        error: 'Hue bridge at 192.168.1.50:443 reports no lights',
+      }),
+    )
+    expect(empty.label).toBe('NO LIGHT')
+    expect(empty.tone).toBe('error')
+    expect(lightStatusSummary(status({ available: false, error: 'No route to host' })).label).toBe(
+      'OFFLINE',
+    )
   })
 
   it('formats mireds with the Kelvin equivalent', () => {
@@ -206,6 +226,46 @@ describe('light actions', () => {
 })
 
 describe('light settings validation', () => {
+  it('exposes Elgato, Hue and Nanoleaf with their default ports', () => {
+    expect(LIGHT_PROVIDERS.map((provider) => provider.type)).toEqual([
+      'elgato',
+      'hue',
+      'nanoleaf',
+    ])
+    expect(LIGHT_PROVIDERS.map((provider) => provider.port)).toEqual([9123, 443, 16021])
+    expect(lightProviderInfo(undefined).type).toBe('elgato')
+    expect(lightProviderInfo('hue')).toMatchObject({
+      badge: 'HUE',
+      credential: 'username',
+      port: 443,
+    })
+    expect(lightProviderInfo('nanoleaf')).toMatchObject({
+      badge: 'NANOLEAF',
+      credential: 'token',
+      port: 16021,
+    })
+    expect(lightProviderBadge('hue')).toBe('HUE')
+    expect(lightProviderInfo('elgato').credential).toBeNull()
+  })
+
+  it('applies the provider default port and resets provider fields on type switch', () => {
+    expect(lightTypeSwitch('hue')).toEqual({ port: '443', lightId: '', credential: '' })
+    expect(lightTypeSwitch('nanoleaf')).toEqual({
+      port: '16021',
+      lightId: '',
+      credential: '',
+    })
+    expect(lightTypeSwitch('elgato')).toEqual({ port: '9123', lightId: '', credential: '' })
+  })
+
+  it('validates write-only credentials before save', () => {
+    expect(lightCredentialError('')).toBeNull()
+    expect(lightCredentialError('abcDEF0123._-')).toBeNull()
+    expect(lightCredentialError('-leading')).toContain('letters, digits')
+    expect(lightCredentialError('has space')).toContain('letters, digits')
+    expect(lightCredentialError('x'.repeat(129))).toContain('128')
+  })
+
   it('validates names, hosts and ports like the main process', () => {
     expect(lightNameError('Key Light')).toBeNull()
     expect(lightNameError('')).toContain('Required')
