@@ -44,6 +44,22 @@ export const MIXER_CAPABILITY = 'mixer-v1' as const
 /** Desktop capability for triggering Streamer.bot actions over its local API. */
 export const STREAMERBOT_CAPABILITY = 'streamerbot-v1' as const
 
+/**
+ * Desktop capability for rig presets (`rigProgress` frames and last-run
+ * readback). Old phones treat a rig button as an ordinary press.
+ */
+export const RIG_CAPABILITY = 'rig-v1' as const
+
+/** Hard limits for rig presets, enforced by the config schema. */
+export const RIG_MAX_PRESETS = 16
+export const RIG_MAX_STEPS = 32
+export const RIG_MAX_GUARDS = 8
+export const RIG_MAX_STEP_DELAY_MS = 10_000
+export const RIG_MAX_DEADLINE_MS = 600_000
+export const RIG_DEFAULT_DEADLINE_MS = 120_000
+/** Serialized `config.rigs` must stay below this to keep the hello frame small. */
+export const RIG_MAX_SERIALIZED_BYTES = 128 * 1024
+
 /** Streamer.bot WebSocket API default port (`ws://127.0.0.1:8080/`). */
 export const STREAMERBOT_DEFAULT_PORT = 8080
 /** Streamer.bot WebSocket API default host. */
@@ -532,6 +548,106 @@ export type AppVolumeAction =
   | { type: 'appVolume'; action: 'setMute'; match: AppVolumeMatch; muted: boolean }
   | { type: 'appVolume'; action: 'toggleMute'; match: AppVolumeMatch }
 
+/* ------------------------------------------------------------------ */
+/* Rig presets                                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A read-only environment check evaluated before a rig starts. `expect`
+ * defaults to true; `expect: false` means "only run if NOT …".
+ *
+ * `arg` is the process/application name for `appRunning` (required) and the
+ * configured light id for `lightOn` (optional = first light).
+ */
+export type RigGuardProbe =
+  | 'obsStreaming'
+  | 'obsRecording'
+  | 'twitchLive'
+  | 'micMuted'
+  | 'appRunning'
+  | 'lightOn'
+
+export interface RigGuard {
+  probe: RigGuardProbe
+  /** Default true. False inverts the probe ("run only if not …"). */
+  expect?: boolean
+  /** Process name for `appRunning`; light id for `lightOn`. */
+  arg?: string
+  /** Optional display override; defaults to `describeRigGuard`. */
+  label?: string
+}
+
+/**
+ * One host action allowed inside a rig step.
+ *
+ * Deliberately explicit: page navigation, phone-local keyboard/mixer launchers
+ * and nested rigs are not valid steps, so a rig can never recurse or move the
+ * phone away while it runs. AppVolume is already accepted by the schema and the
+ * planner; it stays outside `PlannableAction` until the renderer catches up.
+ */
+export type RigStepAction = Exclude<PlannableAction, PageAction> | AppVolumeAction
+
+export interface RigStep {
+  /** Optional stable id, unique within its rig. */
+  id?: string
+  /** Defaults to `describeAction(action)`, ≤60 chars. */
+  label?: string
+  action: RigStepAction
+  /** Pause after a successful step, 0..10000 ms. */
+  delayMs?: number
+  /** Overrides the rig's `onError` for this step. */
+  continueOnError?: boolean
+}
+
+/**
+ * A named, guarded, ordered list of existing host actions.
+ *
+ * A rig is not a transaction: there is no rollback and no automatic retry.
+ * Guards run first; the desktop runs one rig at a time.
+ */
+export interface RigPreset {
+  id: string
+  /** 1..60 chars. */
+  name: string
+  icon?: string
+  /** ≤140 chars. */
+  description?: string
+  /** 1..32 steps, executed in order. */
+  steps: RigStep[]
+  /** 0..8 guards, evaluated before the first step. */
+  guards?: RigGuard[]
+  /** Default `failFast`. */
+  onError?: 'failFast' | 'continue'
+  /** 1000..600000 ms, default 120000. */
+  deadlineMs?: number
+}
+
+/**
+ * A button action that starts one configured rig.
+ *
+ * Staged union: this is intentionally NOT part of `Action` or `ConfigAction`
+ * yet. The schema accepts it so new configs validate and round-trip, while old
+ * renderers keep compiling against the narrower union. The renderer widening
+ * lands in P3 (P1/P2 only consume it structurally through `rigs.ts`).
+ */
+export interface RigRunAction {
+  type: 'rig'
+  action: 'run'
+  /** Existing `DeckConfig.rigs[].id`. */
+  presetId: string
+}
+
+/**
+ * A status tile that shows the last run of one rig through `control-state-v1`.
+ *
+ * Staged union: like `RigRunAction`, it is accepted by the schema but not added
+ * to `StateBinding` until the renderers can display it.
+ */
+export interface RigStateBinding {
+  type: 'rig'
+  presetId: string
+}
+
 /**
  * One mixer channel. `id` is desktop-defined and opaque (stable while the
  * session lives); `process` is the normalized match name and `name` is the
@@ -781,6 +897,11 @@ export interface DeckConfig {
   serverName: string
   defaultProfileId: string
   profiles: DeckProfile[]
+  /**
+   * Optional config-owned rig presets. Additive in schema version 1: configs
+   * without rigs stay byte-identical after round-trip.
+   */
+  rigs?: RigPreset[]
 }
 
 /* ------------------------------------------------------------------ */
@@ -905,6 +1026,23 @@ export type PlanStep =
   | StreamerBotPlanStep
 
 export type KeyboardPlanStep = KeyPlanStep | TextPlanStep | DelayPlanStep | MediaPlanStep | MousePlanStep
+
+/**
+ * A contiguous slice of a plan that can fail/pause independently. A rig step
+ * maps to one group (a macro expands into many plan steps but stays one group),
+ * so `continueOnError` and `delayMs` apply at the rig-step boundary.
+ *
+ * Existing button presses remain a single implicit group; the executor
+ * refactor in P1 makes `execute()` a one-group call.
+ */
+export interface PlanGroup {
+  label: string
+  steps: PlanStep[]
+  /** Pause after the group succeeds, in milliseconds. */
+  delayMs?: number
+  /** Continue after a failed step instead of aborting the rig. */
+  continueOnError?: boolean
+}
 
 /* ------------------------------------------------------------------ */
 /* Wire protocol                                                       */
@@ -1174,6 +1312,33 @@ export interface ControlStateMessage {
   states: ControlStateEntry[]
 }
 
+/** Final status of one rig run. `partial` is a failure with some steps done. */
+export type RigRunStatus = 'ok' | 'partial' | 'failed' | 'blocked' | 'cancelled' | 'timeout' | 'busy'
+
+/**
+ * Live rig progress, sent only to clients that advertised `rig-v1`.
+ *
+ * - `start`: the run was accepted; `index` is 0 and `total` is the step count.
+ * - `step`: `index` is the 1-based step that just finished.
+ * - `done`: the run ended; `status`/`ok`/`durationMs` are populated.
+ */
+export interface RigProgressMessage {
+  type: 'rigProgress'
+  phase: 'start' | 'step' | 'done'
+  presetId: string
+  /** Present when the run was started from a deck button. */
+  buttonId?: string
+  /** 1-based step index; 0 on `start`. */
+  index: number
+  total: number
+  /** Step label or rig name, ≤60 chars. */
+  label?: string
+  status?: RigRunStatus
+  ok?: boolean
+  error?: string
+  durationMs?: number
+}
+
 export type ServerMessage =
   | {
       type: 'hello'
@@ -1192,6 +1357,7 @@ export type ServerMessage =
   | BrightnessMessage
   | ProfileMessage
   | ControlStateMessage
+  | RigProgressMessage
   | MixerStateMessage
   | ({ type: 'mixerResult' } & MixerResult)
   | ({ type: 'keyboardResult' } & KeyboardResult)

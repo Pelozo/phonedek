@@ -87,6 +87,19 @@ describe('client protocol', () => {
     expect(parseClientMessage({ ...hello, capabilities: 'brightness-v1' }).ok).toBe(false)
   })
 
+  it('advertises rig-v1 but never accepts rigProgress from a phone', () => {
+    expect(parseClientMessage({ ...hello, capabilities: ['rig-v1'] }).ok).toBe(true)
+    expect(
+      parseClientMessage({
+        type: 'rigProgress',
+        phase: 'start',
+        presetId: 'rig-one',
+        index: 0,
+        total: 2,
+      }).ok,
+    ).toBe(false)
+  })
+
   it('defines the brightness server message shape', () => {
     const level: BrightnessMessage = { type: 'brightness', level: 0.45 }
     const system: BrightnessMessage = { type: 'brightness', level: null }

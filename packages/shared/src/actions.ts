@@ -14,6 +14,7 @@ import type {
   PagePlanStep,
   PlannableAction,
   PlanStep,
+  RigRunAction,
   StreamerBotAction,
   StreamerBotPlanStep,
   TwitchAction,
@@ -210,7 +211,7 @@ function streamerBotActionToPlan(action: StreamerBotAction): StreamerBotPlanStep
  * while the desktop executor ignores them.
  */
 export function actionsToPlan(
-  actions: readonly (ConfigAction | AppVolumeAction | StreamerBotAction)[],
+  actions: readonly (ConfigAction | AppVolumeAction | StreamerBotAction | RigRunAction)[],
   options: PlanOptions = {},
 ): PlanStep[] {
   const plan: PlanStep[] = []
@@ -276,6 +277,10 @@ export function actionsToPlan(
         break
       case 'mixer':
         // Phone-local per-app mixer launcher; no desktop plan step.
+        break
+      case 'rig':
+        // A rig starts through the desktop rig runner, not as an inline plan
+        // step. `rigToPlan` expands its steps; this plain plan stays empty.
         break
     }
   }
@@ -631,7 +636,10 @@ export function describeStep(step: MacroStep): string {
   }
 }
 
-export function describeAction(action: PlannableAction | AppVolumeAction, platform?: string): string {
+export function describeAction(
+  action: PlannableAction | AppVolumeAction | RigRunAction,
+  platform?: string,
+): string {
   switch (action.type) {
     case 'hotkey':
       return formatCombo(action.keys, platform)
@@ -733,5 +741,7 @@ export function describeAction(action: PlannableAction | AppVolumeAction, platfo
         ? `Streamer.bot "${label}" (${argCount} arg${argCount === 1 ? '' : 's'})`
         : `Streamer.bot "${label}"`
     }
+    case 'rig':
+      return `Run rig "${action.presetId}"`
   }
 }

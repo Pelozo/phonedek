@@ -1,12 +1,21 @@
 import { z } from 'zod'
 import {
   CONFIG_SCHEMA_VERSION,
+  RIG_MAX_DEADLINE_MS,
+  RIG_MAX_GUARDS,
+  RIG_MAX_PRESETS,
+  RIG_MAX_SERIALIZED_BYTES,
+  RIG_MAX_STEPS,
+  RIG_MAX_STEP_DELAY_MS,
   STREAMERBOT_MAX_ACTION_NAME,
   STREAMERBOT_MAX_ARGS,
   STREAMERBOT_MAX_ARG_KEY,
   STREAMERBOT_MAX_ARG_VALUE,
+  type AppVolumeAction,
+  type ConfigAction,
   type DeckConfig,
   type ScrollModifier,
+  type StreamerBotAction,
 } from './types'
 import { MODIFIER_KEYS, isModifier, isValidKeyName, normalizeCombo, normalizeKey } from './keys'
 import { isImageAssetName, isVideoAssetName } from './media'
@@ -323,15 +332,31 @@ export const MacroStepSchema = z.discriminatedUnion('type', [
   commandSchema,
 ])
 
+/** Start one configured rig. Only the desktop can resolve `presetId`. */
+export const rigRunSchema = z.object({
+  type: z.literal('rig'),
+  action: z.literal('run'),
+  presetId: id,
+})
+
+const macroSchema = z.object({
+  type: z.literal('macro'),
+  steps: z.array(MacroStepSchema).max(300),
+  repeat: z.number().int().min(1).max(50).optional(),
+  repeatDelayMs: z.number().int().min(0).max(60_000).optional(),
+})
+
+/**
+ * Runtime union accepts `rig.run`, but its static output deliberately stays the
+ * pre-rig wired union. Old desktop/renderer code passes parsed actions into
+ * APIs typed with `ConfigAction`, so widening here would break P0's "old code
+ * still compiles" rule. P1/P2 widen those consumers, then this annotation is
+ * removed. Inspect rig actions structurally via `rigActionOf`/`isRigRunAction`.
+ */
 export const ActionSchema = z.union([
   hotkeySchema,
   textSchema,
-  z.object({
-    type: z.literal('macro'),
-    steps: z.array(MacroStepSchema).max(300),
-    repeat: z.number().int().min(1).max(50).optional(),
-    repeatDelayMs: z.number().int().min(0).max(60_000).optional(),
-  }),
+  macroSchema,
   launchSchema,
   urlSchema,
   commandSchema,
@@ -346,7 +371,121 @@ export const ActionSchema = z.union([
   keyboardSchema,
   mixerLauncherSchema,
   streamerBotSchema,
+  rigRunSchema,
+]) as unknown as z.ZodType<ConfigAction | AppVolumeAction | StreamerBotAction>
+
+/* ------------------------------------------------------------------ */
+/* Rig presets                                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Host actions allowed inside a rig step. Explicitly excludes `page`,
+ * `keyboard`, `mixer` and `rig`, so a step cannot navigate the phone, open a
+ * phone-local panel, or nest another rig.
+ */
+const rigStepActionSchema = z.union([
+  hotkeySchema,
+  textSchema,
+  macroSchema,
+  launchSchema,
+  urlSchema,
+  commandSchema,
+  mediaSchema,
+  delaySchema,
+  micSchema,
+  obsSchema,
+  twitchSchema,
+  lightSchema,
+  appVolumeSchema,
+  streamerBotSchema,
 ])
+
+const rigGuardArg = z.string().min(1).max(260)
+export const rigGuardSchema = z
+  .object({
+    probe: z.enum(['obsStreaming', 'obsRecording', 'twitchLive', 'micMuted', 'appRunning', 'lightOn']),
+    expect: z.boolean().optional(),
+    arg: rigGuardArg.optional(),
+    label: z.string().min(1).max(60).optional(),
+  })
+  .superRefine((guard, ctx) => {
+    if (guard.probe === 'appRunning') {
+      if (guard.arg === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['arg'],
+          message: 'appRunning guards require an application name',
+        })
+      } else if (guard.arg.trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['arg'],
+          message: 'appRunning guards require a non-blank application name',
+        })
+      }
+      return
+    }
+
+    if (guard.arg === undefined) return
+    if (guard.probe !== 'lightOn') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['arg'],
+        message: `${guard.probe} guards do not accept an argument`,
+      })
+      return
+    }
+    if (guard.arg.length > 64 || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(guard.arg)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['arg'],
+        message: 'Light ids may only contain letters, digits, "-" and "_"',
+      })
+    }
+  })
+
+export const rigStepSchema = z.object({
+  id: id.optional(),
+  label: z.string().min(1).max(60).optional(),
+  action: rigStepActionSchema,
+  delayMs: z.number().int().min(0).max(RIG_MAX_STEP_DELAY_MS).optional(),
+  continueOnError: z.boolean().optional(),
+})
+
+export const rigPresetSchema = z
+  .object({
+    id,
+    name: z.string().min(1).max(60),
+    icon: z.string().max(32).optional(),
+    description: z.string().max(140).optional(),
+    steps: z
+      .array(rigStepSchema)
+      .min(1, 'A rig needs at least one step')
+      .max(RIG_MAX_STEPS, `A rig accepts at most ${RIG_MAX_STEPS} steps`),
+    guards: z.array(rigGuardSchema).max(RIG_MAX_GUARDS, `A rig accepts at most ${RIG_MAX_GUARDS} guards`).optional(),
+    onError: z.enum(['failFast', 'continue']).optional(),
+    deadlineMs: z.number().int().min(1000).max(RIG_MAX_DEADLINE_MS).optional(),
+  })
+  .superRefine((rig, ctx) => {
+    const stepIds = new Set<string>()
+    for (const step of rig.steps) {
+      if (!step.id) continue
+      if (stepIds.has(step.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['steps'],
+          message: `Duplicate step id in rig ${rig.name}: ${step.id}`,
+        })
+      }
+      stepIds.add(step.id)
+    }
+  })
+
+/** Read-only last-run status tile for one rig. */
+export const rigStateBindingSchema = z.object({
+  type: z.literal('rig'),
+  presetId: id,
+})
 
 export const GridSchema = z.object({
   columns: z.number().int().min(1).max(10),
@@ -711,6 +850,7 @@ export const StateBindingSchema = z.union([
   TwitchStateBindingSchema,
   LightStateBindingSchema,
   AppVolumeStateBindingSchema,
+  rigStateBindingSchema,
 ])
 
 export const ButtonSchema = z.object({
@@ -752,8 +892,33 @@ export const DeckConfigSchema = z
     serverName: z.string().min(1).max(80),
     defaultProfileId: id,
     profiles: z.array(ProfileSchema).min(1).max(20),
+    rigs: z
+      .array(rigPresetSchema)
+      .max(RIG_MAX_PRESETS, `A config accepts at most ${RIG_MAX_PRESETS} rigs`)
+      .optional(),
   })
   .superRefine((config, ctx) => {
+    // Rig ids are config-scoped; buttons reference them by id only.
+    const rigIds = new Set<string>()
+    for (const rig of config.rigs ?? []) {
+      if (rigIds.has(rig.id)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Duplicate rig id: ${rig.id}` })
+      }
+      rigIds.add(rig.id)
+    }
+
+    if (config.rigs) {
+      const serialized = JSON.stringify(config.rigs)
+      const bytes =
+        typeof TextEncoder === 'undefined' ? serialized.length : new TextEncoder().encode(serialized).length
+      if (bytes > RIG_MAX_SERIALIZED_BYTES) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Rigs are too large to sync (max ${RIG_MAX_SERIALIZED_BYTES / 1024} KB)`,
+        })
+      }
+    }
+
     const profileIds = new Set<string>()
     for (const profile of config.profiles) {
       if (profileIds.has(profile.id)) {
@@ -830,6 +995,43 @@ export const DeckConfigSchema = z
                 message: `Button "${button.label}" has a "goto page" action without a page`,
               })
             }
+          }
+
+          // `ActionSchema` is staged narrow on purpose; inspect the parsed
+          // runtime value structurally so this rule still runs.
+          const rigActions = (button.actions as unknown as readonly { type: string; presetId?: unknown }[]).filter(
+            (action): action is { type: 'rig'; presetId: string } =>
+              action.type === 'rig' && typeof action.presetId === 'string',
+          )
+          if (rigActions.length > 0) {
+            // A rig owns the button: mixing it with other actions or a
+            // continuous control would make ordering and readback ambiguous.
+            if (button.actions.length !== 1) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Button "${button.label}" must use a rig action on its own (remove its other actions)`,
+              })
+            }
+            if (button.control) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Button "${button.label}" cannot combine a rig action with a control`,
+              })
+            }
+            for (const action of rigActions) {
+              if (!rigIds.has(action.presetId)) {
+                ctx.addIssue({
+                  code: z.ZodIssueCode.custom,
+                  message: `Button "${button.label}" references an unknown rig: ${action.presetId}`,
+                })
+              }
+            }
+          }
+          if (button.state?.type === 'rig' && !rigIds.has(button.state.presetId)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `Button "${button.label}" has an unknown rig state: ${button.state.presetId}`,
+            })
           }
         }
       }
