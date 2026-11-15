@@ -49,8 +49,8 @@ android {
         applicationId = "com.phonedek.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 29
-        versionName = "0.13.1"
+        versionCode = 30
+        versionName = "0.13.2"
     }
 
     signingConfigs {
