@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -90,6 +91,7 @@ fun SettingsSheet(
     onSaveBackup: (Uri) -> Unit,
     onSendBackup: (Uri) -> Unit,
     onShowSetupGuide: () -> Unit,
+    onShowWhatsNew: () -> Unit,
     confirmChangeOnOpen: Boolean = false,
 ) {
     val configuration = LocalConfiguration.current
@@ -140,6 +142,7 @@ fun SettingsSheet(
             onLaunchBackup = launchBackup,
             onLaunchImport = launchImport,
             onShowSetupGuide = onShowSetupGuide,
+            onShowWhatsNew = onShowWhatsNew,
             onRefreshLogs = refreshLogs,
             onCopyLogs = copyLogs,
             onClearLogs = clearLogs,
@@ -158,6 +161,7 @@ fun SettingsSheet(
             onLaunchBackup = launchBackup,
             onLaunchImport = launchImport,
             onShowSetupGuide = onShowSetupGuide,
+            onShowWhatsNew = onShowWhatsNew,
             onRefreshLogs = refreshLogs,
             onCopyLogs = copyLogs,
             onClearLogs = clearLogs,
@@ -190,6 +194,7 @@ private fun SettingsBottomSheet(
     onLaunchBackup: () -> Unit,
     onLaunchImport: () -> Unit,
     onShowSetupGuide: () -> Unit,
+    onShowWhatsNew: () -> Unit,
     onRefreshLogs: () -> Unit,
     onCopyLogs: () -> Unit,
     onClearLogs: () -> Unit,
@@ -252,7 +257,7 @@ private fun SettingsBottomSheet(
                 onLaunchImport = onLaunchImport,
             )
             Spacer(Modifier.height(18.dp))
-            SettingsMeta()
+            SettingsAboutSection(onShowWhatsNew = onShowWhatsNew)
         }
     }
 }
@@ -271,6 +276,7 @@ private fun SettingsConsolePanel(
     onLaunchBackup: () -> Unit,
     onLaunchImport: () -> Unit,
     onShowSetupGuide: () -> Unit,
+    onShowWhatsNew: () -> Unit,
     onRefreshLogs: () -> Unit,
     onCopyLogs: () -> Unit,
     onClearLogs: () -> Unit,
@@ -363,7 +369,7 @@ private fun SettingsConsolePanel(
                                 onLaunchImport = onLaunchImport,
                             )
                             Spacer(Modifier.height(18.dp))
-                            SettingsMeta()
+                            SettingsAboutSection(onShowWhatsNew = onShowWhatsNew)
                         }
                     }
                 }
@@ -771,6 +777,47 @@ private fun SettingsBackupSection(
             )
         }
     }
+}
+
+@Composable
+private fun SettingsAboutSection(onShowWhatsNew: () -> Unit) {
+    ConsoleSectionLabel(index = "05", label = "ABOUT")
+    Spacer(Modifier.height(4.dp))
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onShowWhatsNew)
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = "What's new",
+                color = TextPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = "Highlights from recent PhoneDeck releases.",
+                color = TextMuted,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = "OPEN",
+            color = Accent,
+            fontFamily = ConsoleMono,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.sp,
+        )
+    }
+    HorizontalDivider(color = Hairline)
+    Spacer(Modifier.height(12.dp))
+    SettingsMeta()
 }
 
 @Composable

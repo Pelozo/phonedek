@@ -123,6 +123,16 @@ fun PhoneDeckApp(viewModel: MainViewModel, state: UiState) {
                 )
             }
 
+            // Automatic after an update, or opened explicitly from Settings.
+            // Wait for onboarding on a fresh install so the two never stack.
+            val whatsNewVersion = state.whatsNewVersion
+            if (whatsNewVersion != null && state.onboardingSeen) {
+                WhatsNewDialog(
+                    version = whatsNewVersion,
+                    onDismiss = viewModel::dismissWhatsNew,
+                )
+            }
+
             SnackbarHost(
                 hostState = snackbarHostState,
                 modifier = Modifier

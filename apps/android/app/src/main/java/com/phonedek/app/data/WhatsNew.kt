@@ -1,0 +1,90 @@
+package com.phonedek.app.data
+
+/** Copy shown by the What's New dialog for one app version. */
+data class WhatsNewEntry(
+    val title: String,
+    val highlights: List<String>,
+)
+
+/**
+ * Curated highlights keyed by release version. Add a new entry at the top for
+ * each release; versions without a key fall back to [GENERIC_WHATS_NEW].
+ */
+private val WHATS_NEW: Map<String, WhatsNewEntry> = mapOf(
+    // 0.13.1 is a patch after 0.13.0; include the headline feature plus the fix.
+    "0.13.1" to WhatsNewEntry(
+        title = "Auto-profile return",
+        highlights = listOf(
+            "Desktop profile actions can now return to the profile you were using.",
+            "Windows keyboard helper now builds on older C# toolchains.",
+            "Stability improvements across the deck.",
+        ),
+    ),
+    "0.13.0" to WhatsNewEntry(
+        title = "Auto-profile return",
+        highlights = listOf(
+            "Desktop profile actions can now return to the profile you were using.",
+            "Automatic returns wait for the action to finish before switching back.",
+        ),
+    ),
+    "0.12.0" to WhatsNewEntry(
+        title = "Modifier scroll and Ctrl zoom",
+        highlights = listOf(
+            "Hold a modifier while scrolling on the trackpad.",
+            "Hold Ctrl and scroll to zoom.",
+            "Horizontal scrolling is supported on modifier-aware controls.",
+        ),
+    ),
+    "0.11.0" to WhatsNewEntry(
+        title = "Hue and Nanoleaf lights",
+        highlights = listOf(
+            "Hue and Nanoleaf light controls are available on the deck.",
+            "Lights report their current state back to the control grid.",
+        ),
+    ),
+    "0.10.0" to WhatsNewEntry(
+        title = "Full-screen mixer and trackpad inertia",
+        highlights = listOf(
+            "Open the full-screen per-app mixer from a mixer control.",
+            "Trackpad scrolling now keeps its momentum.",
+        ),
+    ),
+    "0.9.0" to WhatsNewEntry(
+        title = "Per-app volume and settings categories",
+        highlights = listOf(
+            "Set the volume of individual desktop apps.",
+            "Settings are grouped into server, behavior, diagnostics, backup and about.",
+        ),
+    ),
+)
+
+private val GENERIC_WHATS_NEW = WhatsNewEntry(
+    title = "Fixes and improvements",
+    highlights = listOf(
+        "Bug fixes and stability improvements.",
+        "Small refinements across the deck and settings.",
+    ),
+)
+
+internal fun normalizeVersion(version: String): String =
+    version.trim().removePrefix("v").removePrefix("V")
+
+/**
+ * True only when the app already has prior use and the running version differs
+ * from the stored one. A genuine first install (no stored version, no prior
+ * use) must not open the dialog. A user upgrading from a build that predates
+ * the stored key counts as prior use, so the first update still gets a prompt.
+ */
+fun shouldShowWhatsNew(
+    lastSeenVersion: String?,
+    currentVersion: String,
+    hasPriorUse: Boolean = false,
+): Boolean {
+    val seen = lastSeenVersion?.trim().orEmpty()
+    if (seen.isEmpty()) return hasPriorUse
+    return normalizeVersion(seen) != normalizeVersion(currentVersion)
+}
+
+/** Curated entry for [version], or the generic "Fixes and improvements" copy. */
+fun whatsNewFor(version: String): WhatsNewEntry =
+    WHATS_NEW[normalizeVersion(version)] ?: GENERIC_WHATS_NEW

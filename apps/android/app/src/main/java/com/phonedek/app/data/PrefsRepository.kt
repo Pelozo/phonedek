@@ -24,6 +24,8 @@ data class StoredSettings(
     val onboardingSeen: Boolean,
     val lastProfileId: String?,
     val lastPageId: String?,
+    /** Version whose What's New dialog was dismissed, or recorded on first install. */
+    val lastSeenVersion: String?,
 )
 
 /**
@@ -50,6 +52,7 @@ class PrefsRepository(private val context: Context) {
         val ONBOARDING_SEEN = booleanPreferencesKey("onboarding_seen")
         val LAST_PROFILE = stringPreferencesKey("last_profile")
         val LAST_PAGE = stringPreferencesKey("last_page")
+        val LAST_SEEN_VERSION = stringPreferencesKey("last_seen_version")
     }
 
     suspend fun load(): StoredSettings {
@@ -101,6 +104,7 @@ class PrefsRepository(private val context: Context) {
             ),
             lastProfileId = prefs[Keys.LAST_PROFILE]?.takeIf { it.isNotBlank() },
             lastPageId = prefs[Keys.LAST_PAGE]?.takeIf { it.isNotBlank() },
+            lastSeenVersion = prefs[Keys.LAST_SEEN_VERSION]?.takeIf { it.isNotBlank() },
         )
     }
 
@@ -149,6 +153,11 @@ class PrefsRepository(private val context: Context) {
 
     suspend fun setOnboardingSeen(seen: Boolean) {
         context.deckDataStore.edit { prefs -> prefs[Keys.ONBOARDING_SEEN] = seen }
+    }
+
+    suspend fun setLastSeenVersion(version: String) {
+        if (version.isBlank()) return
+        context.deckDataStore.edit { prefs -> prefs[Keys.LAST_SEEN_VERSION] = version.trim() }
     }
 
     suspend fun setLastPage(profileId: String, pageId: String) {

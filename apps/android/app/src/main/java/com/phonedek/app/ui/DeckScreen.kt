@@ -294,6 +294,7 @@ fun DeckScreen(
                 settingsChangeServerOnOpen = false
                 onShowSetupGuide()
             },
+            onShowWhatsNew = viewModel::showWhatsNew,
             confirmChangeOnOpen = settingsChangeServerOnOpen,
         )
     }

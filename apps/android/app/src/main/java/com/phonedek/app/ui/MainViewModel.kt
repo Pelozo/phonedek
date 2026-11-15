@@ -22,6 +22,7 @@ import com.phonedek.app.data.Pairing
 import com.phonedek.app.data.PairingDraft
 import com.phonedek.app.data.PointerButtonEvent
 import com.phonedek.app.data.PrefsRepository
+import com.phonedek.app.data.shouldShowWhatsNew
 import com.phonedek.app.net.BackupResult
 import com.phonedek.app.net.ConnectionStatus
 import com.phonedek.app.net.DeckConnection
@@ -77,6 +78,10 @@ data class KeyboardPadOptions(
 data class UiState(
     val ready: Boolean = false,
     val onboardingSeen: Boolean = true,
+    /** Version to show in the What's New dialog, or null when it is closed. */
+    val whatsNewVersion: String? = null,
+    /** True when the dialog was opened automatically by a version change. */
+    val whatsNewAuto: Boolean = false,
     val pairing: Pairing? = null,
     val config: DeckConfig? = null,
     val activeProfileId: String? = null,
@@ -674,6 +679,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun completeOnboarding() {
         _state.update { it.copy(onboardingSeen = true) }
         viewModelScope.launch { runCatching { prefs.setOnboardingSeen(true) } }
+    }
+
+    /**
+     * Opens What's New for the running version. This is an explicit revisit and
+     * must not advance the stored seen version.
+     */
+    fun showWhatsNew() {
+        _state.update {
+            it.copy(whatsNewVersion = BuildConfig.VERSION_NAME, whatsNewAuto = false)
+        }
+    }
+
+    /**
+     * Closes the dialog. Only the automatic post-update prompt records the
+     * version as seen; a manual revisit leaves the stored flag untouched.
+     */
+    fun dismissWhatsNew() {
+        val automatic = _state.value.whatsNewAuto
+        _state.update { it.copy(whatsNewVersion = null, whatsNewAuto = false) }
+        if (automatic) {
+            viewModelScope.launch {
+                runCatching { prefs.setLastSeenVersion(BuildConfig.VERSION_NAME) }
+                    .onFailure { Diag.w("Could not store the seen version: ${it.message}") }
+            }
+        }
     }
 
     /**
@@ -2002,6 +2032,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         lastPageId = stored.lastPageId
         lastProfileId = stored.lastProfileId
 
+        val currentVersion = BuildConfig.VERSION_NAME
+        // Pairing or a completed onboarding means this is not a fresh install;
+        // it may be an upgrade from a build without the stored version key.
+        val hasPriorUse = stored.onboardingSeen || stored.pairing != null
+        val showWhatsNew = shouldShowWhatsNew(
+            lastSeenVersion = stored.lastSeenVersion,
+            currentVersion = currentVersion,
+            hasPriorUse = hasPriorUse,
+        )
+        if (stored.lastSeenVersion == null && !showWhatsNew) {
+            // First install is covered by onboarding: remember the version
+            // silently so the first update is the first What's New prompt.
+            runCatching { prefs.setLastSeenVersion(currentVersion) }
+                .onFailure { Diag.w("Could not record the initial version: ${it.message}") }
+        }
+
         val cachedRaw = cache.read()
         val current = _state.value
         val cached = cachedRaw?.let {
@@ -2021,6 +2067,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.value = current.copy(
             ready = true,
             onboardingSeen = stored.onboardingSeen,
+            whatsNewVersion = current.whatsNewVersion ?: currentVersion.takeIf { showWhatsNew },
+            whatsNewAuto = current.whatsNewAuto || showWhatsNew,
             pairing = pairing,
             config = current.config ?: cached,
             activeProfileId = profileId,
