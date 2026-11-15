@@ -1,6 +1,6 @@
 import { z } from 'zod'
-import { CONFIG_SCHEMA_VERSION, type DeckConfig } from './types'
-import { isValidKeyName, normalizeCombo } from './keys'
+import { CONFIG_SCHEMA_VERSION, type DeckConfig, type ScrollModifier } from './types'
+import { MODIFIER_KEYS, isModifier, isValidKeyName, normalizeCombo, normalizeKey } from './keys'
 import { isImageAssetName, isVideoAssetName } from './media'
 
 const hexColor = z
@@ -323,6 +323,60 @@ export const CellSpanSchema = z.object({
 
 const controlAxis = z.enum(['horizontal', 'vertical']).optional()
 
+/**
+ * Scroll modifiers accept the usual key aliases (`Control`, `Cmd`, `Option`, …)
+ * and normalize to CTRL/ALT/SHIFT/WIN. Duplicates are rejected rather than
+ * silently deduplicated so a hand-edited config reports the mistake.
+ */
+const ScrollModifierListSchema = z
+  .array(z.string())
+  .max(4, 'At most 4 scroll modifiers')
+  .superRefine((values, ctx) => {
+    const seen = new Set<string>()
+    values.forEach((raw, index) => {
+      let key: string
+      try {
+        key = normalizeKey(raw)
+      } catch {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [index],
+          message: `Unknown scroll modifier: ${raw}`,
+        })
+        return
+      }
+      if (!isModifier(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [index],
+          message: `Scroll modifiers must be CTRL, SHIFT, ALT or WIN: ${raw}`,
+        })
+        return
+      }
+      if (seen.has(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [index],
+          message: `Duplicate scroll modifier: ${key}`,
+        })
+        return
+      }
+      seen.add(key)
+    })
+  })
+  .transform((values) => {
+    const normalized = new Set<ScrollModifier>()
+    for (const raw of values) {
+      try {
+        const key = normalizeKey(raw)
+        if (isModifier(key)) normalized.add(key as ScrollModifier)
+      } catch {
+        // The refinement above already reported this value.
+      }
+    }
+    return MODIFIER_KEYS.filter((key) => normalized.has(key))
+  })
+
 export const ControlBindingSchema = z.union([
   z.discriminatedUnion('mode', [
     z.object({
@@ -339,6 +393,7 @@ export const ControlBindingSchema = z.union([
     type: z.literal('scroll'),
     axis: z.enum(['vertical', 'horizontal']),
     invert: z.boolean().optional(),
+    modifiers: ScrollModifierListSchema.optional(),
   }),
   z.object({
     type: z.literal('mic'),

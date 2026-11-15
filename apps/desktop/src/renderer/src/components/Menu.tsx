@@ -70,15 +70,23 @@ export function PopMenu({
       if (event.key === 'Escape') setOpen(false)
     }
     const close = (): void => setOpen(false)
+    // Close when the page scrolls, but not when the popover's own scrollable
+    // list scrolls. Without this distinction a long Add-control menu closes
+    // as soon as the user wheels toward its lower sections.
+    const onScroll = (event: Event): void => {
+      const target = event.target as Node | null
+      if (target && panelRef.current?.contains(target)) return
+      close()
+    }
     window.addEventListener('pointerdown', onPointer)
     window.addEventListener('keydown', onKey)
     window.addEventListener('resize', close)
-    window.addEventListener('scroll', close, true)
+    window.addEventListener('scroll', onScroll, true)
     return () => {
       window.removeEventListener('pointerdown', onPointer)
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('resize', close)
-      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('scroll', onScroll, true)
     }
   }, [open])
 

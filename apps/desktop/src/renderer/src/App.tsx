@@ -51,6 +51,14 @@ import {
   shortcutPresetControl,
   type ShortcutPresetId,
 } from './lib/shortcut'
+import {
+  SCROLL_PRESETS,
+  isScrollControlKind,
+  scrollControlKind,
+  scrollPresetControl,
+  scrollPresetForKind,
+  type ScrollControlKind,
+} from './lib/scroll'
 
 type ToastKind = 'info' | 'success' | 'error'
 interface ToastState {
@@ -469,7 +477,7 @@ function AppContent() {
   const addNewControl = (
     kind:
       | 'volume'
-      | 'scroll'
+      | ScrollControlKind
       | 'volume-wheel'
       | 'mic'
       | 'trackpad'
@@ -484,6 +492,7 @@ function AppContent() {
   ): void => {
     if (!config || !profile || !page) return
     const preset = kind === 'shortcut' ? (shortcutId ? shortcutPreset(shortcutId) : null) : null
+    const scrollPreset = isScrollControlKind(kind) ? scrollPresetForKind(kind) : null
     if (kind === 'shortcut' && !preset) {
       showToast('Unknown shortcut preset', 'error')
       return
@@ -628,14 +637,8 @@ function AppContent() {
           ? shortcutPresetControl(preset, hostPlatform)
           : kind === 'media'
           ? mediaScrubControl()
-          : kind === 'scroll'
-          ? {
-              kind: 'dial',
-              emit: 'delta',
-              binding: { type: 'scroll', axis: 'vertical' },
-              step: 1,
-              haptics: true,
-            }
+          : scrollPreset
+          ? scrollPresetControl(scrollPreset)
           : kind === 'mic'
             ? {
                 kind: 'slider',
@@ -680,8 +683,8 @@ function AppContent() {
               ? 'Mic'
               : kind === 'obs'
                 ? obsInput?.trim() || 'OBS input'
-                : kind === 'scroll'
-                  ? 'Scroll'
+                : scrollPreset
+                  ? scrollPreset.label
                   : 'Trackpad'
     // `DeckButton.actions` is still typed as the legacy `Action` union while the
     // config schema accepts `MicAction`; keep the cast local to this builder.
@@ -696,15 +699,17 @@ function AppContent() {
       icon:
         preset
           ? preset.tileIcon
-          : kind === 'scroll' || kind === 'trackpad'
-            ? '🖱️'
-            : kind === 'media'
-              ? '🎵'
-              : kind === 'mic'
-                ? '🎙️'
-                : kind === 'obs'
-                  ? '🎚️'
-                  : '🔊',
+          : scrollPreset
+            ? scrollPreset.tileIcon
+            : kind === 'trackpad'
+              ? '🖱️'
+              : kind === 'media'
+                ? '🎵'
+                : kind === 'mic'
+                  ? '🎙️'
+                  : kind === 'obs'
+                    ? '🎚️'
+                    : '🔊',
       ...(kind === 'media' ? { sublabel: 'Media' } : {}),
       span,
       control,
@@ -731,8 +736,8 @@ function AppContent() {
                   ? 'Mic gain'
                   : kind === 'obs'
                     ? 'OBS input'
-                    : kind === 'scroll'
-                      ? 'Scroll wheel'
+                    : scrollPreset
+                      ? scrollPreset.name
                       : 'Trackpad'
       showToast(
         fallback
@@ -1170,13 +1175,13 @@ function AppContent() {
                       : `${preset.menuDescription} · add a light in Settings`,
                   onClick: () => openLightPicker({ kind: 'status', preset }),
                 })),
-                {
-                  label: 'Scroll wheel',
-                  section: 'Navigation',
-                  icon: 'mouse',
-                  description: '2 × 1 · one mouse-wheel notch per step',
-                  onClick: () => addNewControl('scroll'),
-                },
+                ...SCROLL_PRESETS.map((preset) => ({
+                  label: preset.name,
+                  section: preset.section,
+                  icon: preset.menuIcon,
+                  description: preset.description,
+                  onClick: () => addNewControl(scrollControlKind(preset.id)),
+                })),
                 ...SHORTCUT_PRESETS.map((preset) => ({
                   label: preset.name,
                   section: preset.section,

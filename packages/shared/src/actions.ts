@@ -17,7 +17,7 @@ import type {
   TwitchAction,
   TwitchPlanStep,
 } from './types'
-import { normalizeCombo, isModifier, formatCombo } from './keys'
+import { normalizeCombo, normalizeModifiers, isModifier, formatCombo } from './keys'
 
 const DEFAULT_HOLD_MS = 35
 const DEFAULT_CHAR_MS = 4
@@ -286,7 +286,9 @@ export function hasHostActions(actions: readonly ConfigAction[]): boolean {
  *   `stepPercent` is display metadata for now, not applied here.
  * - `scroll`: one macro containing a mouse wheel action; positive delta means
  *   up/right, negative means down/left, flipped by `invert`. Amount is capped
- *   at 100.
+ *   at 100. When `modifiers` is set the same macro also presses each modifier
+ *   down before the wheel and releases them in reverse order after it, so the
+ *   release steps are part of the plan even if wheel dispatch fails.
  * - `shortcut`: repeated `hotkey` actions; positive delta uses `keys` and
  *   negative uses `reverseKeys ?? keys`. Sliders emit one chord per
  *   `travelSteps` slice (a 100-unit full travel), dials one per detent. `repeat`
@@ -337,10 +339,35 @@ export function controlToActions(control: ControlSpec, delta: number): Action[] 
           : positive
             ? 'right'
             : 'left'
+      const wheel: MacroStep = {
+        type: 'mouse',
+        button: 'left',
+        action: 'scroll',
+        direction,
+        amount,
+      }
+      // Ignore invalid hand-edited modifiers rather than breaking a gesture;
+      // the schema already rejects them on save.
+      let modifiers: string[] = []
+      try {
+        modifiers = normalizeModifiers(control.binding.modifiers ?? [])
+      } catch {
+        modifiers = []
+      }
+      if (modifiers.length === 0) {
+        return [{ type: 'macro', steps: [wheel] }]
+      }
       return [
         {
           type: 'macro',
-          steps: [{ type: 'mouse', button: 'left', action: 'scroll', direction, amount }],
+          steps: [
+            ...modifiers.map((key): MacroStep => ({ type: 'hotkey', keys: [key], action: 'down' })),
+            wheel,
+            ...modifiers
+              .slice()
+              .reverse()
+              .map((key): MacroStep => ({ type: 'hotkey', keys: [key], action: 'up' })),
+          ],
         },
       ]
     }

@@ -98,7 +98,9 @@ const NAMED = new Set([
 
 const PUNCTUATION = new Set(['`', '\\', '/', ',', '.', ';', "'", '[', ']', '-', '=', '+', '*'])
 
-const MODIFIER_ORDER = ['CTRL', 'ALT', 'SHIFT', 'WIN'] as const
+export type ModifierKey = 'CTRL' | 'ALT' | 'SHIFT' | 'WIN'
+
+export const MODIFIER_KEYS: readonly ModifierKey[] = ['CTRL', 'ALT', 'SHIFT', 'WIN']
 
 /** Normalize one key name. Throws a descriptive error for unknown names. */
 export function normalizeKey(raw: string): string {
@@ -127,7 +129,30 @@ export function isValidKeyName(raw: string): boolean {
 }
 
 export function isModifier(key: string): boolean {
-  return (MODIFIER_ORDER as readonly string[]).includes(key)
+  return (MODIFIER_KEYS as readonly string[]).includes(key)
+}
+
+/**
+ * Normalize one modifier name with the shared key aliases (`Control` -> `CTRL`,
+ * `Cmd` -> `WIN`, `Option` -> `ALT`). Throws for unknown names and non-modifiers.
+ */
+export function normalizeModifier(raw: string): ModifierKey {
+  const key = normalizeKey(raw)
+  if (!isModifier(key)) throw new Error(`Not a modifier: ${raw}`)
+  return key as ModifierKey
+}
+
+/**
+ * Normalize, deduplicate and canonicalize modifier names (CTRL, ALT, SHIFT, WIN).
+ * Used by scroll bindings so a hand-edited config cannot press a key twice.
+ */
+export function normalizeModifiers(raw: readonly string[]): ModifierKey[] {
+  const seen = new Set<ModifierKey>()
+  for (const value of raw) {
+    const key = normalizeModifier(value)
+    seen.add(key)
+  }
+  return MODIFIER_KEYS.filter((key) => seen.has(key))
 }
 
 /**
@@ -146,7 +171,7 @@ export function normalizeCombo(keys: readonly string[]): string[] {
     if (isModifier(key)) mods.push(key)
     else rest.push(key)
   }
-  mods.sort((a, b) => MODIFIER_ORDER.indexOf(a as (typeof MODIFIER_ORDER)[number]) - MODIFIER_ORDER.indexOf(b as (typeof MODIFIER_ORDER)[number]))
+  mods.sort((a, b) => MODIFIER_KEYS.indexOf(a as ModifierKey) - MODIFIER_KEYS.indexOf(b as ModifierKey))
   return [...mods, ...rest]
 }
 

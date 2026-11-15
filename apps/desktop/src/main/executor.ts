@@ -127,6 +127,10 @@ export class ActionExecutor {
 
     this.logger?.info(`Pressed "${label}" (${plan.length} step${plan.length === 1 ? '' : 's'})`)
     const screenshots: string[] = []
+    // Modifier keys pressed by this run. If a later step throws (for example a
+    // mouse-wheel dispatch failure inside a Ctrl+wheel macro), release them
+    // before returning so the user's Ctrl key cannot stay stuck down.
+    const heldByRun = new Set<string>()
     try {
       for (const step of plan) {
         switch (step.kind) {
@@ -195,7 +199,15 @@ export class ActionExecutor {
                 this.logger?.info(`Captured the screen for "${label}"`)
                 break
               }
-              await this.keys.send(step as KeyboardPlanStep)
+              const keyStep = step as KeyboardPlanStep
+              await this.keys.send(keyStep)
+              if (keyStep.kind === 'keys') {
+                if (keyStep.action === 'down') {
+                  for (const key of keyStep.keys) heldByRun.add(key)
+                } else if (keyStep.action === 'up') {
+                  for (const key of keyStep.keys) heldByRun.delete(key)
+                }
+              }
             }
             break
         }
@@ -208,6 +220,17 @@ export class ActionExecutor {
       }
       return { ok: true }
     } catch (error) {
+      if (heldByRun.size > 0) {
+        const keys = [...heldByRun].reverse()
+        heldByRun.clear()
+        try {
+          await this.keys.send({ kind: 'keys', keys, holdMs: 0, action: 'up' })
+        } catch (releaseError) {
+          this.logger?.warn(
+            `Could not release ${keys.join('+')} after "${label}" failed: ${releaseError instanceof Error ? releaseError.message : String(releaseError)}`,
+          )
+        }
+      }
       const message = error instanceof Error ? error.message : String(error)
       this.logger?.error(`Action for "${label}" failed: ${message}`)
       return { ok: false, error: message }

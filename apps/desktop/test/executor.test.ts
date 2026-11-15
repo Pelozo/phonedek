@@ -87,6 +87,34 @@ describe('ActionExecutor', () => {
     expect(log).toContain('keys:WIN+D')
   })
 
+  it('releases modifier keys when a macro step fails', async () => {
+    const log: string[] = []
+    const keys: KeySender = {
+      async send(step) {
+        if (step.kind === 'keys') {
+          log.push(`keys:${step.action}:${step.keys.join('+')}`)
+          return
+        }
+        if (step.kind === 'mouse') throw new Error('wheel dispatch failed')
+      },
+    }
+    const executor = new ActionExecutor(keys, fakeHost(log))
+    const actions: Action[] = [
+      {
+        type: 'macro',
+        steps: [
+          { type: 'hotkey', keys: ['CTRL'], action: 'down' },
+          { type: 'mouse', button: 'left', action: 'scroll', direction: 'up', amount: 2 },
+          { type: 'hotkey', keys: ['CTRL'], action: 'up' },
+        ],
+      },
+    ]
+    const result = await executor.execute(actions, 'zoom')
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/wheel dispatch failed/)
+    expect(log).toEqual(['keys:down:CTRL', 'keys:up:CTRL'])
+  })
+
   it('treats a button without actions as a successful no-op', async () => {
     const log: string[] = []
     const executor = new ActionExecutor(fakeKeys(log), fakeHost(log))

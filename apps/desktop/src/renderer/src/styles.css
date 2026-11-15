@@ -2026,6 +2026,43 @@ input[type="range"]:disabled {
   gap: 8px;
 }
 
+.scroll-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.scroll-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-deep);
+}
+
+.scroll-readout .mono {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modifier-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding-top: 2px;
+}
+
+.modifier-checks .checkbox-row {
+  gap: 6px;
+}
+
 .shortcut-summary {
   display: grid;
   grid-template-columns: 58px minmax(0, 1fr) auto auto;

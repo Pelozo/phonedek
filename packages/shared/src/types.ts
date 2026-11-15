@@ -5,6 +5,8 @@
  * Keep it JSON-serializable: no Dates, Maps or class instances.
  */
 
+import type { ModifierKey } from './keys'
+
 export const PROTOCOL_VERSION = 1 as const
 export const CONFIG_SCHEMA_VERSION = 1 as const
 
@@ -573,6 +575,28 @@ export interface MediaBinding {
 }
 
 /**
+ * A modifier held around a scroll gesture, e.g. Ctrl+wheel for zoom.
+ * Aliases (`Control`, `Cmd`, `Option`, …) are normalized by the schema.
+ */
+export type ScrollModifier = ModifierKey
+
+/**
+ * Mouse-wheel control. Optional `modifiers` turn it into Ctrl+wheel zoom or
+ * Shift+wheel horizontal scroll; they are pressed around each wheel notch.
+ */
+export interface ScrollBinding {
+  type: 'scroll'
+  axis: 'vertical' | 'horizontal'
+  /** Reverse the wheel direction. */
+  invert?: boolean
+  /**
+   * Modifiers held down around the wheel notch (Ctrl+wheel zoom, Shift+wheel
+   * horizontal scroll). Pressed in order, released in reverse order.
+   */
+  modifiers?: ScrollModifier[]
+}
+
+/**
  * What a continuous control drives.
  *
  * Relative volume emits deltas that become repeated media-volume keys. Absolute
@@ -591,12 +615,7 @@ export type ControlBinding =
       /** Not used in absolute mode; kept for older renderer type access. */
       stepPercent?: never
     }
-  | {
-      type: 'scroll'
-      axis: 'vertical' | 'horizontal'
-      /** Reverse the wheel direction. */
-      invert?: boolean
-    }
+  | ScrollBinding
   | {
       /** Default capture device gain (MVP: gain only, no device picker). */
       type: 'mic'

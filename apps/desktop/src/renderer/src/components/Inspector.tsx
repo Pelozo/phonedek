@@ -10,6 +10,7 @@ import type {
   PointerBinding,
   ShortcutBinding,
   SliderOrDialControlSpec,
+  ScrollModifier,
   TrackpadControlSpec,
   DeckConfig,
   DeckPage,
@@ -102,6 +103,13 @@ import { PresetPicker } from './PresetPicker'
 import { ColorField, NumberField, Toggle, useConfirm } from './Primitives'
 import { ShortcutDialog } from './ShortcutDialog'
 import { useHostPlatform } from '../lib/platform'
+import {
+  SCROLL_MODIFIERS,
+  scrollBadge,
+  scrollModifierLabel,
+  scrollSummary,
+  toggleScrollModifier,
+} from '../lib/scroll'
 import {
   destructiveShortcutWarning,
   formatKeysCompact,
@@ -642,7 +650,11 @@ export function Inspector({
     updateControl({ binding: { ...binding, ...patch } })
   }
 
-  const updateScrollBinding = (patch: { axis?: 'vertical' | 'horizontal'; invert?: boolean }): void => {
+  const updateScrollBinding = (patch: {
+    axis?: 'vertical' | 'horizontal'
+    invert?: boolean
+    modifiers?: ScrollModifier[]
+  }): void => {
     if (!button.control || button.control.kind === 'trackpad') return
     if (button.control.binding.type !== 'scroll') return
     updateControl({ binding: { ...button.control.binding, ...patch } })
@@ -724,6 +736,7 @@ export function Inspector({
     obsInputsState.loaded &&
     !obsInputsState.inputs.some((input) => input.name === obsSelectedInput)
   const lightControlBinding = control?.binding.type === 'light' ? control.binding : null
+  const scrollControlBinding = control?.binding.type === 'scroll' ? control.binding : null
   const lights = server?.settings.lights ?? []
   const lightSelected = lightControlBinding?.light?.trim() ?? ''
   const lightSelectedDevice = lights.find((light) => light.id === lightSelected)
@@ -2112,26 +2125,58 @@ export function Inspector({
               />
             )}
 
-            {control.binding.type === 'scroll' && (
-              <div className="two-col">
-                <label className="field">
-                  <span>Scroll axis</span>
-                  <select
-                    value={control.binding.axis}
-                    onChange={(event) =>
-                      updateScrollBinding({ axis: event.target.value as 'vertical' | 'horizontal' })
-                    }
-                  >
-                    <option value="vertical">Vertical</option>
-                    <option value="horizontal">Horizontal</option>
-                  </select>
-                </label>
-                <Toggle
-                  label="Invert"
-                  description="Reverse wheel direction"
-                  checked={control.binding.invert === true}
-                  onChange={(invert) => updateScrollBinding({ invert })}
-                />
+            {scrollControlBinding && (
+              <div className="scroll-editor">
+                <div className="scroll-readout">
+                  <span className="tag">{scrollBadge(scrollControlBinding)}</span>
+                  <span className="mono">{scrollSummary(scrollControlBinding, platform)}</span>
+                </div>
+                <div className="two-col">
+                  <label className="field">
+                    <span>Scroll axis</span>
+                    <select
+                      value={scrollControlBinding.axis}
+                      onChange={(event) =>
+                        updateScrollBinding({ axis: event.target.value as 'vertical' | 'horizontal' })
+                      }
+                    >
+                      <option value="vertical">Vertical</option>
+                      <option value="horizontal">Horizontal</option>
+                    </select>
+                  </label>
+                  <Toggle
+                    label="Invert"
+                    description="Reverse wheel direction"
+                    checked={scrollControlBinding.invert === true}
+                    onChange={(invert) => updateScrollBinding({ invert })}
+                  />
+                </div>
+                <div className="field">
+                  <span>Modifiers held</span>
+                  <div className="modifier-checks">
+                    {SCROLL_MODIFIERS.map((modifier) => (
+                      <label className="checkbox-row" key={modifier}>
+                        <input
+                          type="checkbox"
+                          checked={(scrollControlBinding.modifiers ?? []).includes(modifier)}
+                          onChange={() =>
+                            updateScrollBinding({
+                              modifiers: toggleScrollModifier(
+                                scrollControlBinding.modifiers,
+                                modifier,
+                              ),
+                            })
+                          }
+                        />
+                        {scrollModifierLabel(modifier, platform)}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <p className="hint">
+                  Down → wheel → up, released even if the wheel fails. Ctrl+wheel zooms in
+                  Chrome, Figma and Photoshop; Shift+wheel scrolls sideways in many apps.
+                </p>
               </div>
             )}
 

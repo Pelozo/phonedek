@@ -12,6 +12,7 @@ import {
   shortcutDirectionLabel,
 } from '../lib/shortcut'
 import { APP_VOLUME_BADGE } from '../lib/appVolume'
+import { scrollBadge } from '../lib/scroll'
 
 function initialPercent(control: SliderOrDialControlSpec): number {
   const min = control.min ?? 0
@@ -36,6 +37,7 @@ export function controlBadge(control: SliderOrDialControlSpec): string {
   }
   if (control.binding.type === 'shortcut') return 'SHORTCUT'
   if (control.binding.type === 'media') return MEDIA_SCRUB_BADGE
+  if (control.binding.type === 'scroll') return scrollBadge(control.binding)
   return 'SCROLL'
 }
 
