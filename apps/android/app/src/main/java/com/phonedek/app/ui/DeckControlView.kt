@@ -117,6 +117,11 @@ fun DeckControlView(
     val isLight = control.binding.type == "light"
     val isAppVolume = control.binding.type == "appVolume"
     val scrollControl = control.binding.type == "scroll"
+    val scrollHorizontal = scrollControl && control.binding.axis == "horizontal"
+    // A scroll control has no meaningful absolute value. Render it as a wheel
+    // even if an older config (or the Inspector type change) left kind=slider,
+    // so it cannot look like a progress bar.
+    val dialLike = control.kind == "dial" || scrollControl
     // Shortcut wheels are delta-only: the readout is a chord badge, not a
     // numeric value, and there is no live desktop state to follow.
     val isShortcut = control.binding.type == "shortcut"
@@ -205,7 +210,7 @@ fun DeckControlView(
         if (absolute) {
             // A dial only commits a value when it actually turned; tapping a
             // wheel must not jump the desktop volume to the shown readout.
-            if (changed || control.kind != "dial") {
+            if (changed || !dialLike) {
                 onInput("end", null, fractionOf(value))
             } else {
                 onInput("end", null, null)
@@ -230,13 +235,16 @@ fun DeckControlView(
         }
     }
 
-    val valueText = if (isShortcut) {
-        // Chord + optional hold indicator, e.g. `⌃⇥ +ALT`.
-        listOf(shortcutChord, shortcutHold)
-            .filter { it.isNotEmpty() }
-            .joinToString(" ")
-    } else {
-        ValueEntry.formatValue(value, displayUnit)
+    val valueText = when {
+        isShortcut -> {
+            // Chord + optional hold indicator, e.g. `⌃⇥ +ALT`.
+            listOf(shortcutChord, shortcutHold)
+                .filter { it.isNotEmpty() }
+                .joinToString(" ")
+        }
+
+        scrollControl -> if (scrollHorizontal) "↔" else "↕"
+        else -> ValueEntry.formatValue(value, displayUnit)
     }
     val displayText = if (isShortcut) {
         valueText
@@ -268,7 +276,7 @@ fun DeckControlView(
     // An unavailable mic/OBS input still knows the desktop supports live state;
     // showing LOCAL beside NO INPUT/NO OBS would be misleading. Key wheels are
     // delta-only and never have a live value to fall back from.
-    val showStateBadge = !isShortcut && !statePresent && (tileHeightPx == 0 ||
+    val showStateBadge = !isShortcut && !scrollControl && !statePresent && (tileHeightPx == 0 ||
         with(density) { tileHeightPx.toDp() } >= 48.dp)
 
     Column(
@@ -294,10 +302,14 @@ fun DeckControlView(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            if (control.kind == "dial") {
+            if (dialLike) {
                 // A small affordance: the tile is a wheel, not a slider track.
                 Text(
-                    text = "↻",
+                    text = if (scrollControl) {
+                        if (scrollHorizontal) "↔" else "↕"
+                    } else {
+                        "↻"
+                    },
                     color = textColor.copy(alpha = 0.45f),
                     fontFamily = ConsoleMono,
                     fontSize = 10.sp,
@@ -385,7 +397,7 @@ fun DeckControlView(
                         down.consume()
                         interacting = true
                         onInteractingChange(true)
-                        if (control.kind == "dial") {
+                        if (dialLike) {
                             // A dial has no value until it turns; sending the
                             // readout on touch-down would teleport the desktop
                             // volume every time the wheel is tapped.
@@ -398,7 +410,7 @@ fun DeckControlView(
 
                         var moved = false
 
-                        if (control.kind == "dial") {
+                        if (dialLike) {
                             val centerX = size.width / 2f
                             val centerY = size.height / 2f
                             val wheelRadius = min(size.width, size.height) / 2f
@@ -437,14 +449,14 @@ fun DeckControlView(
                             val startRadius = hypot(radiusX, radiusY)
                             val modeRotate = 1
                             val modeVertical = 2
-                            // Scrolling is a vertical gesture, not a rotary
-                            // one. Near the hub the polar angle is unstable,
-                            // so those touches also scrub vertically.
-                            var mode = if (
-                                scrollControl ||
-                                wheelRadius <= 1f ||
-                                startRadius < wheelRadius * 0.35f
-                            ) {
+                            val modeHorizontal = 3
+                            // Scroll wheels scrub along their configured axis;
+                            // they never use the rotary gesture. Other dials
+                            // also scrub vertically near the hub, where the
+                            // polar angle is unstable.
+                            var mode = if (scrollControl) {
+                                if (scrollHorizontal) modeHorizontal else modeVertical
+                            } else if (wheelRadius <= 1f || startRadius < wheelRadius * 0.35f) {
                                 modeVertical
                             } else {
                                 0
@@ -458,8 +470,12 @@ fun DeckControlView(
                             var lastY = down.position.y
                             var verticalResidual = 0f
                             var verticalTravel = 0f
+                            var lastX = down.position.x
+                            var horizontalResidual = 0f
+                            var horizontalTravel = 0f
                             var lastMotionTime = down.uptimeMillis
                             var velocityY = 0f
+                            var velocityX = 0f
                             // Crossing the hub flips the angle by 180°; pause
                             // there instead of firing a burst of detents.
                             val hubDeadZone = wheelRadius * 0.12f
@@ -508,6 +524,21 @@ fun DeckControlView(
                                                 detents * DIAL_DETENT_DEGREES
                                             applyDetents(detents)
                                         }
+                                    }
+                                } else if (mode == modeHorizontal) {
+                                    val dx = change.position.x - lastX
+                                    horizontalResidual += dx
+                                    horizontalTravel += abs(dx)
+                                    val dt = (change.uptimeMillis - lastMotionTime)
+                                        .coerceAtLeast(1)
+                                    velocityX = 0.7f * velocityX +
+                                        0.3f * (dx / dt * 1000f)
+                                    lastMotionTime = change.uptimeMillis
+                                    lastX = change.position.x
+                                    val detents = (horizontalResidual / dialDetentPx).toInt()
+                                    if (detents != 0) {
+                                        horizontalResidual -= detents * dialDetentPx
+                                        applyDetents(detents)
                                     }
                                 } else {
                                     val dy = change.position.y - lastY
@@ -585,6 +616,19 @@ fun DeckControlView(
                                                 if (verticalResidual > 0f) 1 else -1,
                                             )
                                         }
+                                    } else if (mode == modeHorizontal) {
+                                        if (horizontalTravel < dialDecidePx) {
+                                            // Tap left/right of the hub.
+                                            applyDetents(
+                                                if (change.position.x > centerX) 1 else -1,
+                                            )
+                                        } else if (
+                                            abs(horizontalResidual) >= dialDetentPx / 2f
+                                        ) {
+                                            applyDetents(
+                                                if (horizontalResidual > 0f) 1 else -1,
+                                            )
+                                        }
                                     } else if (
                                         mode == modeRotate &&
                                         abs(angleAccumulator) >=
@@ -599,12 +643,13 @@ fun DeckControlView(
                                     // add a bounded burst of notches. The
                                     // gesture scope cannot delay, and the VM
                                     // coalesces moves anyway, so send one batch.
-                                    if (scrollControl && abs(velocityY) > 800f) {
-                                        val fling = (abs(velocityY) / 650f)
+                                    val flingVelocity = if (scrollHorizontal) velocityX else velocityY
+                                    if (scrollControl && abs(flingVelocity) > 800f) {
+                                        val fling = (abs(flingVelocity) / 650f)
                                             .toInt()
                                             .coerceIn(1, 14)
                                         applyDetents(
-                                            fling * (if (velocityY < 0f) 1 else -1),
+                                            fling * (if (flingVelocity < 0f) 1 else -1),
                                         )
                                     }
                                     break
@@ -692,7 +737,7 @@ fun DeckControlView(
             contentAlignment = Alignment.Center,
         ) {
             val fraction = fractionOf(value)
-            if (control.kind == "dial") {
+            if (dialLike) {
                 Canvas(Modifier.fillMaxSize()) {
                     val diameter = min(size.width, size.height) - 12.dp.toPx()
                     val topLeft = Offset(
@@ -715,8 +760,9 @@ fun DeckControlView(
                         style = Stroke(width = stroke, cap = StrokeCap.Round),
                     )
                     // The travelled-value arc and knob are meaningless for a
-                    // key wheel; only the static track frames the chord.
-                    if (!isShortcut) {
+                    // key wheel and a scroll wheel; only the static track
+                    // frames them.
+                    if (!isShortcut && !scrollControl) {
                         drawArc(
                             color = Accent,
                             startAngle = DIAL_ARC_START,
@@ -801,6 +847,17 @@ fun DeckControlView(
                 }
             }
 
+            if (scrollControl) {
+                Text(
+                    text = if (scrollHorizontal) "↔" else "↕",
+                    color = textColor.copy(alpha = 0.9f),
+                    fontFamily = ConsoleMono,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
+            }
+
             if (isShortcut) {
                 // The value indicator is gone; the body carries the chord so
                 // the tile still reads as an input at a glance.
@@ -815,7 +872,7 @@ fun DeckControlView(
                         text = shortcutChord,
                         color = textColor,
                         fontFamily = ConsoleMono,
-                        fontSize = if (control.kind == "dial") 13.sp else 14.sp,
+                        fontSize = if (dialLike) 13.sp else 14.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,

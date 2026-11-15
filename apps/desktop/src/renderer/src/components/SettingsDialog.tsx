@@ -159,6 +159,7 @@ export function SettingsDialog({
   onServerUpdate,
   onConfigImported,
   onToast,
+  onShowWhatsNew,
   initialCategory = DEFAULT_SETTINGS_CATEGORY,
 }: {
   server: ServerInfoView
@@ -176,6 +177,8 @@ export function SettingsDialog({
   onServerUpdate: (server: ServerInfoView) => void
   onConfigImported: (config: DeckConfig) => void
   onToast: (message: string, kind?: 'info' | 'success' | 'error') => void
+  /** Reopen the current version's What's New without consuming the seen flag. */
+  onShowWhatsNew: () => void
   /** Deep links (update notice, light picker, …) choose the landing category. */
   initialCategory?: SettingsCategoryId
 }) {
@@ -1054,6 +1057,15 @@ export function SettingsDialog({
 
             <div className="settings-section">
               <h3>About PhoneDeck</h3>
+              <div className="settings-row">
+                <div>
+                  <strong>What&apos;s new</strong>
+                  <small>Highlights from recent PhoneDeck releases.</small>
+                </div>
+                <button type="button" className="button secondary" onClick={onShowWhatsNew}>
+                  <Icon name="bolt" size={15} /> Open
+                </button>
+              </div>
               <p className="muted">
                 PhoneDeck turns an Android phone into a wireless Stream Deck. The desktop app owns the configuration and runs
                 the actions; the phone renders the deck and sends presses over your local network.

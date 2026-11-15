@@ -25,6 +25,7 @@ import { PermissionBanner } from './components/PermissionBanner'
 import { ConfirmProvider } from './components/Primitives'
 import { SettingsDialog } from './components/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
+import { WhatsNewDialog } from './components/WhatsNewDialog'
 import { cutButtonFromPage, moveButtonToPage, pasteButtonIntoPage } from './lib/clipboard'
 import {
   APP_VOLUME_STATUS_TILES,
@@ -45,6 +46,7 @@ import {
   type TwitchStatusTilePreset,
 } from './lib/twitchStatus'
 import { HostPlatformProvider } from './lib/platform'
+import { whatsNewDecision } from './lib/whatsNew'
 import {
   SHORTCUT_PRESETS,
   shortcutPreset,
@@ -64,6 +66,12 @@ type ToastKind = 'info' | 'success' | 'error'
 interface ToastState {
   message: string
   kind: ToastKind
+}
+
+interface WhatsNewRequest {
+  version: string
+  /** Automatic upgrade prompt: closing it records the version as seen. */
+  record: boolean
 }
 
 type SaveStatus = 'saved' | 'saving' | 'error'
@@ -98,6 +106,7 @@ function AppContent() {
   const [pairOpen, setPairOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsCategory, setSettingsCategory] = useState<SettingsCategoryId>('general')
+  const [whatsNew, setWhatsNew] = useState<WhatsNewRequest | null>(null)
   const [obsPickerOpen, setObsPickerOpen] = useState(false)
   const [lightPicker, setLightPicker] = useState<LightPickerRequest | null>(null)
   const [appVolumePicker, setAppVolumePicker] = useState<AppVolumePickerRequest | null>(null)
@@ -110,6 +119,7 @@ function AppContent() {
   const saveNonce = useRef(0)
   const toastTimer = useRef<number | null>(null)
   const lastErrorShown = useRef('')
+  const whatsNewChecked = useRef(false)
   const hostPlatform = normalizeHostPlatform(server?.platform)
 
   const showToast = useCallback((message: string, kind: ToastKind = 'info') => {
@@ -167,6 +177,40 @@ function AppContent() {
       offPair()
     }
   }, [])
+
+  // Decide once per launch: a fresh install records the version silently, an
+  // upgrade opens the highlights dialog, and a known version does nothing.
+  useEffect(() => {
+    if (!server || whatsNewChecked.current) return
+    whatsNewChecked.current = true
+    const decision = whatsNewDecision(server.settings.lastSeenVersion, server.version)
+    if (decision === 'show') {
+      setWhatsNew({ version: server.version, record: true })
+      return
+    }
+    if (decision === 'first-run') {
+      void window.phonedek
+        .setLastSeenVersion(server.version)
+        .then((result) => {
+          if (result.state) setServer(result.state.server)
+        })
+        .catch(() => {
+          // Non-critical: if this fails the next launch retries silently.
+        })
+    }
+  }, [server])
+
+  const closeWhatsNew = useCallback(async (): Promise<void> => {
+    const request = whatsNew
+    setWhatsNew(null)
+    if (!request?.record) return
+    try {
+      const result = await window.phonedek.setLastSeenVersion(request.version)
+      if (result.state) setServer(result.state.server)
+    } catch {
+      // Keep the app usable; an unrecorded version shows again next launch.
+    }
+  }, [whatsNew])
 
   useEffect(() => {
     let active = true
@@ -1339,8 +1383,12 @@ function AppContent() {
           onServerUpdate={setServer}
           onConfigImported={handleConfigImported}
           onToast={showToast}
+          onShowWhatsNew={() => setWhatsNew({ version: server.version, record: false })}
           initialCategory={settingsCategory}
         />
+      )}
+      {whatsNew && (
+        <WhatsNewDialog version={whatsNew.version} onClose={() => void closeWhatsNew()} />
       )}
       {toast && <div className={`toast ${toast.kind}`}>{toast.message}</div>}
       </div>

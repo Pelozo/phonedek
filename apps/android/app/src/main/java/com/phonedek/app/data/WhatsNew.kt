@@ -11,6 +11,16 @@ data class WhatsNewEntry(
  * each release; versions without a key fall back to [GENERIC_WHATS_NEW].
  */
 private val WHATS_NEW: Map<String, WhatsNewEntry> = mapOf(
+    "0.13.2" to WhatsNewEntry(
+        title = "Live keyboard",
+        highlights = listOf(
+            "The phone keyboard now types live: each key sends its own down and up events.",
+            "Hold Shift, Ctrl, Alt or Tab; tap a modifier to latch it for the next key.",
+            "One keyboard only: the full QWERTY panel replaces the phone IME.",
+            "Paste your phone clipboard on the PC; Backspace and arrows repeat while held.",
+            "Scroll controls render as wheels, and horizontal scroll follows left/right drags.",
+        ),
+    ),
     // 0.13.1 is a patch after 0.13.0; include the headline feature plus the fix.
     "0.13.1" to WhatsNewEntry(
         title = "Auto-profile return",

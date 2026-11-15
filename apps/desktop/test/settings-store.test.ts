@@ -8,6 +8,7 @@ import {
   normalizeProcessName,
   sanitizeAutoProfileRevertProfileId,
   sanitizeAutoProfileRules,
+  sanitizeLastSeenVersion,
   SettingsStore,
 } from '../src/main/settings-store'
 
@@ -361,5 +362,53 @@ describe('SettingsStore auto-profile settings', () => {
     expect(normalizeProcessName('/Applications/Game.app/Game')).toBe('game')
     expect(normalizeProcessName('  ')).toBeNull()
     expect(normalizeProcessName(7)).toBeNull()
+  })
+})
+
+describe('SettingsStore What’s New version', () => {
+  it('defaults the last seen version to empty (first run)', () => {
+    const settings = new SettingsStore(tempDir())
+    expect(settings.get().lastSeenVersion).toBe('')
+    expect(defaultSettings().lastSeenVersion).toBe('')
+  })
+
+  it('persists a normalized version and keeps unrelated settings intact', () => {
+    const dir = tempDir()
+    const settings = new SettingsStore(dir)
+    settings.update({ lastSeenVersion: '0.13.1', discovery: false })
+
+    const reloaded = new SettingsStore(dir)
+    expect(reloaded.get().lastSeenVersion).toBe('0.13.1')
+    expect(reloaded.get().discovery).toBe(false)
+  })
+
+  it('drops an optional v prefix and trims whitespace', () => {
+    const settings = new SettingsStore(tempDir())
+    settings.update({ lastSeenVersion: '  v0.13.1 ' })
+    expect(settings.get().lastSeenVersion).toBe('0.13.1')
+    expect(sanitizeLastSeenVersion('V0.13.1')).toBe('0.13.1')
+  })
+
+  it('treats an existing pre-feature settings file as an upgrade', () => {
+    const dir = tempDir()
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ port: 49030, discovery: false }))
+    const settings = new SettingsStore(dir)
+    expect(settings.get().port).toBe(49030)
+    expect(settings.get().lastSeenVersion).toBe('0.0.0')
+
+    // The sentinel is persisted, so a second launch still has a decision to make.
+    expect(new SettingsStore(dir).get().lastSeenVersion).toBe('0.0.0')
+  })
+
+  it('sanitizes malformed stored values and treats the file as an upgrade', () => {
+    for (const value of ['', '   ', 'v', 42, null, '0.13.1 beta', 'x'.repeat(33)]) {
+      expect(sanitizeLastSeenVersion(value)).toBe('')
+    }
+
+    const dir = tempDir()
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ port: 49010, lastSeenVersion: 'bad version' }))
+    const settings = new SettingsStore(dir)
+    expect(settings.get().port).toBe(49010)
+    expect(settings.get().lastSeenVersion).toBe('0.0.0')
   })
 })

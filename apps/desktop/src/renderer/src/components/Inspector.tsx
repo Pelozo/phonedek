@@ -513,8 +513,18 @@ export function Inspector({
     }
     if (type === 'scroll') {
       updateControl({
+        // A scroll control has no absolute value; make the wheel shape
+        // explicit even when the previous binding was a 3x1 slider. This
+        // keeps the phone from rendering a progress bar for a wheel.
+        kind: 'dial',
+        axis: undefined,
         emit: 'delta',
         binding: { type: 'scroll', axis: 'vertical' },
+        min: 0,
+        max: 100,
+        step: 1,
+        initial: 0,
+        unit: undefined,
         commit: undefined,
         display: undefined,
       })

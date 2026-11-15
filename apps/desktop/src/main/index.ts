@@ -60,6 +60,7 @@ import {
   SettingsStore,
   sanitizeAutoProfileRevertProfileId,
   sanitizeAutoProfileRules,
+  sanitizeLastSeenVersion,
   sanitizeLightDevices,
   sanitizeLightHost,
   sanitizeLightPort,
@@ -129,7 +130,9 @@ import type {
 
 app.setName('PhoneDeck')
 
-const APP_VERSION = '0.2.3'
+// Read the packaged/dev package version instead of a hand-maintained constant;
+// update checks already use app.getVersion(), and the What's New flow must agree.
+const APP_VERSION = app.getVersion()
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -290,6 +293,7 @@ async function buildServerInfo(): Promise<ServerInfoView> {
       allowKeyboardControl: currentSettings.allowKeyboardControl,
       pairHost: currentSettings.pairHost,
       screenshotDirectory: currentSettings.screenshotDirectory,
+      lastSeenVersion: currentSettings.lastSeenVersion,
       obsEnabled: currentSettings.obsEnabled,
       obsHost: currentSettings.obsHost,
       obsPort: currentSettings.obsPort,
@@ -437,6 +441,7 @@ async function buildState(): Promise<AppState> {
       allowKeyboardControl: settings.get().allowKeyboardControl,
       pairHost: settings.get().pairHost,
       screenshotDirectory: settings.get().screenshotDirectory,
+      lastSeenVersion: settings.get().lastSeenVersion,
       obsEnabled: settings.get().obsEnabled,
       obsHost: settings.get().obsHost,
       obsPort: settings.get().obsPort,
@@ -1558,6 +1563,19 @@ function registerIpc(): void {
         return { ok: false, error: 'Choose an absolute folder path' }
       }
       settings.update({ screenshotDirectory: clean })
+      await pushServerInfo()
+      return { ok: true, state: await buildState() }
+    },
+  )
+
+  ipcMain.handle(
+    IPC.setLastSeenVersion,
+    async (_event, version: unknown): Promise<OperationResult> => {
+      const clean = sanitizeLastSeenVersion(version)
+      if (!clean) {
+        return { ok: false, error: 'Invalid app version', state: await buildState() }
+      }
+      settings.update({ lastSeenVersion: clean })
       await pushServerInfo()
       return { ok: true, state: await buildState() }
     },

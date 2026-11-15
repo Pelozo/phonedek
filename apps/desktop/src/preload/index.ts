@@ -60,6 +60,8 @@ const api: PhoneDeckApi = {
     ipcRenderer.invoke(IPC.setScreenshotDirectory, path),
   pickScreenshotDirectory: (): Promise<string | null> =>
     ipcRenderer.invoke(IPC.pickScreenshotDirectory),
+  setLastSeenVersion: (version: string): Promise<OperationResult> =>
+    ipcRenderer.invoke(IPC.setLastSeenVersion, version),
   getObsStatus: (): Promise<ObsStatusView> => ipcRenderer.invoke(IPC.getObsStatus),
   setObsSettings: (input: ObsSettingsInput): Promise<OperationResult> =>
     ipcRenderer.invoke(IPC.setObsSettings, input),

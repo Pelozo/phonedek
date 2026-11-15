@@ -62,6 +62,8 @@ export interface AppSettings {
   pairHost: string
   /** macOS full-screen capture folder. Empty = OS Desktop. */
   screenshotDirectory: string
+  /** Version whose What's New dialog was dismissed, or recorded on first run. */
+  lastSeenVersion: string
   /** Control OBS through its WebSocket server. */
   obsEnabled: boolean
   /** OBS WebSocket host. Defaults to 127.0.0.1. */
@@ -216,6 +218,18 @@ export function sanitizeObsPassword(value: unknown): string {
 }
 
 /**
+ * Normalize a stored app version: trim, drop an optional `v` prefix, and keep
+ * only the characters used by semver/pre-release labels. Anything else (or an
+ * empty value) becomes `''`, which the renderer treats as a first run.
+ */
+export function sanitizeLastSeenVersion(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  const clean = value.trim().replace(/^[vV]/, '')
+  if (!clean || clean.length > 32) return ''
+  return /^[0-9A-Za-z][0-9A-Za-z.+-]*$/.test(clean) ? clean : ''
+}
+
+/**
  * Streamer.bot shares OBS's host rules: localhost, IPv4, hostnames and a
  * bracketed IPv6 literal; never a scheme, path or whitespace.
  */
@@ -320,6 +334,7 @@ export function defaultSettings(): AppSettings {
     allowKeyboardControl: true,
     pairHost: '',
     screenshotDirectory: '',
+    lastSeenVersion: '',
     obsEnabled: false,
     obsHost: DEFAULT_OBS_HOST,
     obsPort: DEFAULT_OBS_PORT,
@@ -379,6 +394,7 @@ function sanitize(input: Partial<AppSettings> | null | undefined): AppSettings {
         : defaults.allowKeyboardControl,
     pairHost,
     screenshotDirectory,
+    lastSeenVersion: sanitizeLastSeenVersion(input.lastSeenVersion),
     obsEnabled:
       typeof input.obsEnabled === 'boolean' ? input.obsEnabled : defaults.obsEnabled,
     obsHost: sanitizeObsHost(input.obsHost),
@@ -465,7 +481,12 @@ export class SettingsStore {
     }
     try {
       const parsed = JSON.parse(readFileSync(this.file, 'utf8')) as Partial<AppSettings>
+      // A settings file from a build before the What's New feature has no
+      // usable version field. Treat it as an upgrade so those users see the
+      // dialog once; a genuinely fresh install has no settings file at all.
+      const storedSeenVersion = sanitizeLastSeenVersion(parsed.lastSeenVersion)
       const settings = sanitize(parsed)
+      if (!storedSeenVersion) settings.lastSeenVersion = '0.0.0'
       this.writeValue(settings)
       return settings
     } catch (error) {

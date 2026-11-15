@@ -51,6 +51,8 @@ export interface SettingsView {
   pairHost: string
   /** macOS capture folder; empty = OS Desktop. */
   screenshotDirectory: string
+  /** Version whose What's New dialog was dismissed; empty on a fresh install. */
+  lastSeenVersion: string
   obsEnabled: boolean
   obsHost: string
   obsPort: number
@@ -418,6 +420,8 @@ export interface PhoneDeckApi {
   setPhoneBrightness(clientId: string, level: number | null): Promise<OperationResult>
   setScreenshotDirectory(path: string): Promise<OperationResult>
   pickScreenshotDirectory(): Promise<string | null>
+  /** Record that the current version's What's New dialog was seen. */
+  setLastSeenVersion(version: string): Promise<OperationResult>
   getObsStatus(): Promise<ObsStatusView>
   setObsSettings(input: ObsSettingsInput): Promise<OperationResult>
   listObsInputs(): Promise<ObsInputsResult>
@@ -488,6 +492,7 @@ export const IPC = {
   setPhoneBrightness: 'phonedek:set-phone-brightness',
   setScreenshotDirectory: 'phonedek:set-screenshot-directory',
   pickScreenshotDirectory: 'phonedek:pick-screenshot-directory',
+  setLastSeenVersion: 'phonedek:set-last-seen-version',
   getObsStatus: 'phonedek:obs-get-status',
   setObsSettings: 'phonedek:obs-set-settings',
   listObsInputs: 'phonedek:obs-list-inputs',
