@@ -7,6 +7,16 @@ import {
   RIG_MAX_SERIALIZED_BYTES,
   RIG_MAX_STEPS,
   RIG_MAX_STEP_DELAY_MS,
+  RULE_COOLDOWN_MAX_MS,
+  RULE_DEBOUNCE_MAX_MS,
+  RULE_MAX_ACTIONS,
+  RULE_MAX_CONDITIONS,
+  RULE_MAX_NAME,
+  RULE_MAX_NOTICE,
+  RULE_MAX_PROCESS,
+  RULE_MAX_SCENE,
+  RULE_MAX_SERIALIZED_BYTES,
+  RULES_MAX_RULES,
   STREAMERBOT_MAX_ACTION_NAME,
   STREAMERBOT_MAX_ARGS,
   STREAMERBOT_MAX_ARG_KEY,
@@ -487,6 +497,97 @@ export const rigStateBindingSchema = z.object({
   presetId: id,
 })
 
+/* ------------------------------------------------------------------ */
+/* Event rules                                                          */
+/* ------------------------------------------------------------------ */
+
+const ruleNameText = z.string().trim().min(1, 'Rule name cannot be empty').max(RULE_MAX_NAME)
+
+const ruleSceneText = z
+  .string()
+  .trim()
+  .min(1, 'Scene cannot be empty')
+  .max(RULE_MAX_SCENE, `Scene names are limited to ${RULE_MAX_SCENE} characters`)
+
+const ruleProcessText = z
+  .string()
+  .trim()
+  .min(1, 'Process name cannot be empty')
+  .max(RULE_MAX_PROCESS, `Process names are limited to ${RULE_MAX_PROCESS} characters`)
+  .refine(
+    (name) => !/[\\/\u0000-\u001F\u007F]/.test(name),
+    'Process names cannot contain slashes or control characters',
+  )
+
+const ruleNoticeText = z
+  .string()
+  .trim()
+  .min(1, 'Notice text cannot be empty')
+  .max(RULE_MAX_NOTICE, `Notices are limited to ${RULE_MAX_NOTICE} characters`)
+
+/**
+ * A state transition that may fire a rule.
+ *
+ * Strict arms on purpose: a field from the wrong arm is a path-specific schema
+ * error instead of being silently stripped.
+ */
+export const eventTriggerSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.enum(['obs.streaming', 'obs.recording', 'obs.replay', 'twitch.live']),
+      active: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('obs.scene'),
+      scene: ruleSceneText,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.enum(['process.started', 'process.stopped']),
+      process: ruleProcessText,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.enum(['phone.connected', 'phone.disconnected']),
+    })
+    .strict(),
+])
+
+/**
+ * Reference-only rule action. No inline host action, no nested rule/rig.
+ *
+ * References are checked against the surrounding config in
+ * `DeckConfigSchema`; this schema only validates shapes.
+ */
+export const ruleActionSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('runRig'), presetId: id }).strict(),
+  z.object({ kind: z.literal('showProfile'), profileId: id }).strict(),
+  z.object({ kind: z.literal('showPage'), profileId: id, pageId: id }).strict(),
+  z.object({ kind: z.literal('notice'), text: ruleNoticeText }).strict(),
+])
+
+export const eventRuleSchema = z.object({
+  id,
+  name: ruleNameText,
+  enabled: z.boolean().optional(),
+  trigger: eventTriggerSchema,
+  conditions: z
+    .array(rigGuardSchema)
+    .max(RULE_MAX_CONDITIONS, `A rule accepts at most ${RULE_MAX_CONDITIONS} conditions`)
+    .optional(),
+  actions: z
+    .array(ruleActionSchema)
+    .min(1, 'A rule needs at least one action')
+    .max(RULE_MAX_ACTIONS, `A rule accepts at most ${RULE_MAX_ACTIONS} actions`),
+  debounceMs: z.number().int().min(0).max(RULE_DEBOUNCE_MAX_MS).optional(),
+  cooldownMs: z.number().int().min(0).max(RULE_COOLDOWN_MAX_MS).optional(),
+  onBusy: z.enum(['skip', 'continue']).optional(),
+})
+
 export const GridSchema = z.object({
   columns: z.number().int().min(1).max(10),
   rows: z.number().int().min(1).max(10),
@@ -896,6 +997,10 @@ export const DeckConfigSchema = z
       .array(rigPresetSchema)
       .max(RIG_MAX_PRESETS, `A config accepts at most ${RIG_MAX_PRESETS} rigs`)
       .optional(),
+    rules: z
+      .array(eventRuleSchema)
+      .max(RULES_MAX_RULES, `A config accepts at most ${RULES_MAX_RULES} rules`)
+      .optional(),
   })
   .superRefine((config, ctx) => {
     // Rig ids are config-scoped; buttons reference them by id only.
@@ -1041,6 +1146,83 @@ export const DeckConfigSchema = z
     }
     if (!profileIds.has(config.defaultProfileId)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Unknown default profile' })
+    }
+
+    // Rule actions are reference-only, so every target must exist in the same
+    // config. `showPage` additionally requires the page to belong to the chosen
+    // profile. A rejected config never reaches the runtime, which keeps
+    // automation from pointing at a deleted or typo'd target.
+    const profilePages = new Map<string, Set<string>>()
+    for (const profile of config.profiles) {
+      profilePages.set(profile.id, new Set(profile.pages.map((page) => page.id)))
+    }
+
+    const ruleIds = new Set<string>()
+    for (const [ruleIndex, rule] of (config.rules ?? []).entries()) {
+      if (ruleIds.has(rule.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['rules', ruleIndex, 'id'],
+          message: `Duplicate rule id: ${rule.id}`,
+        })
+      }
+      ruleIds.add(rule.id)
+
+      for (const [actionIndex, action] of rule.actions.entries()) {
+        const actionPath = ['rules', ruleIndex, 'actions', actionIndex]
+        switch (action.kind) {
+          case 'runRig':
+            if (!rigIds.has(action.presetId)) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: [...actionPath, 'presetId'],
+                message: `Rule "${rule.name}" references an unknown rig: ${action.presetId}`,
+              })
+            }
+            break
+          case 'showProfile':
+            if (!profilePages.has(action.profileId)) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: [...actionPath, 'profileId'],
+                message: `Rule "${rule.name}" references an unknown profile: ${action.profileId}`,
+              })
+            }
+            break
+          case 'showPage': {
+            const pages = profilePages.get(action.profileId)
+            if (!pages) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: [...actionPath, 'profileId'],
+                message: `Rule "${rule.name}" references an unknown profile: ${action.profileId}`,
+              })
+            } else if (!pages.has(action.pageId)) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: [...actionPath, 'pageId'],
+                message: `Rule "${rule.name}" references an unknown page in profile ${action.profileId}: ${action.pageId}`,
+              })
+            }
+            break
+          }
+          case 'notice':
+            break
+        }
+      }
+    }
+
+    if (config.rules) {
+      const serialized = JSON.stringify(config.rules)
+      const bytes =
+        typeof TextEncoder === 'undefined' ? serialized.length : new TextEncoder().encode(serialized).length
+      if (bytes > RULE_MAX_SERIALIZED_BYTES) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['rules'],
+          message: `Rules are too large to sync (max ${RULE_MAX_SERIALIZED_BYTES / 1024} KB)`,
+        })
+      }
     }
   })
 

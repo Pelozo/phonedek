@@ -50,6 +50,17 @@ export const STREAMERBOT_CAPABILITY = 'streamerbot-v1' as const
  */
 export const RIG_CAPABILITY = 'rig-v1' as const
 
+/**
+ * Desktop capability for config-owned event rules.
+ *
+ * Advertised unconditionally (like `rig-v1`); the MVP phone neither sends nor
+ * reads any rule message.
+ */
+export const RULES_CAPABILITY = 'rules-v1' as const
+
+/** Phase 2: the `notice` rule action rendered as a phone snackbar. */
+export const NOTICE_CAPABILITY = 'notice-v1' as const
+
 /** Hard limits for rig presets, enforced by the config schema. */
 export const RIG_MAX_PRESETS = 16
 export const RIG_MAX_STEPS = 32
@@ -59,6 +70,34 @@ export const RIG_MAX_DEADLINE_MS = 600_000
 export const RIG_DEFAULT_DEADLINE_MS = 120_000
 /** Serialized `config.rigs` must stay below this to keep the hello frame small. */
 export const RIG_MAX_SERIALIZED_BYTES = 128 * 1024
+
+/** Hard limits for event rules, enforced by the config schema. */
+export const RULES_MAX_RULES = 32
+export const RULE_MAX_ACTIONS = 4
+export const RULE_MAX_CONDITIONS = 4
+export const RULE_MAX_NAME = 60
+export const RULE_MAX_NOTICE = 80
+export const RULE_MAX_SCENE = 120
+export const RULE_MAX_PROCESS = 160
+/** Serialized `config.rules` must stay below this to keep the hello frame small. */
+export const RULE_MAX_SERIALIZED_BYTES = 64 * 1024
+
+/** Stability window before a rule executes; default 1500 ms. */
+export const RULE_DEBOUNCE_DEFAULT_MS = 1_500
+export const RULE_DEBOUNCE_MAX_MS = 30_000
+/** Minimum gap between two fires of the same rule; default 10 s. */
+export const RULE_COOLDOWN_DEFAULT_MS = 10_000
+export const RULE_COOLDOWN_MAX_MS = 3_600_000
+/** Baselines keep updating for this long after a run before rules may fire. */
+export const RULE_SETTLE_MS = 4_000
+/** Global storm brake: drops (never queues) excess fires in a rolling minute. */
+export const RULE_MAX_FIRES_PER_MINUTE = 12
+/** In-memory run history shown in the dialog. */
+export const RULE_HISTORY_MAX = 50
+/** Twitch live polling while at least one Twitch rule is enabled. */
+export const RULE_TWITCH_POLL_MS = 60_000
+/** A process must be missing twice (≈6 s) before `process.stopped` fires. */
+export const RULE_PROCESS_EXIT_TICKS = 2
 
 /** Streamer.bot WebSocket API default port (`ws://127.0.0.1:8080/`). */
 export const STREAMERBOT_DEFAULT_PORT = 8080
@@ -648,6 +687,110 @@ export interface RigStateBinding {
   presetId: string
 }
 
+/* ------------------------------------------------------------------ */
+/* Event rules                                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A state transition that may fire a rule.
+ *
+ * Edges, not levels: a boolean trigger carries the *desired* state and fires
+ * only when the observed state changes to it. `obs.scene` and `process.*` are
+ * discrete edges produced by their adapters. This is deliberately a closed
+ * union: a wrong field is a schema error, not a runtime surprise.
+ */
+export type EventTrigger =
+  | {
+      kind: 'obs.streaming' | 'obs.recording' | 'obs.replay' | 'twitch.live'
+      /** Desired state. `false` = the "stopped/offline" edge. */
+      active: boolean
+    }
+  | { kind: 'obs.scene'; scene: string }
+  | { kind: 'process.started' | 'process.stopped'; process: string }
+  | { kind: 'phone.connected' | 'phone.disconnected' }
+
+export type EventTriggerKind = EventTrigger['kind']
+
+/**
+ * One ordered, reference-only action inside a rule.
+ *
+ * A rule never executes a host action directly: `runRig` calls the same
+ * `RigRunner` as a button, `showProfile`/`showPage` reuse the existing server
+ * broadcasts, and `notice` is phase 2. `kind` (not `type`) keeps these visually
+ * distinct from button `Action` members. There is no inline `Action[]`.
+ */
+export type RuleAction =
+  | { kind: 'runRig'; presetId: string }
+  | { kind: 'showProfile'; profileId: string }
+  /** Switch profile first when needed, then `navigate {direction:'goto'}`. */
+  | { kind: 'showPage'; profileId: string; pageId: string }
+  /** Phase 2, requires `notice-v1`. */
+  | { kind: 'notice'; text: string }
+
+/**
+ * A config-owned automation: trigger → conditions → reference-only actions.
+ *
+ * Additive in schema version 1. Rules are disarmed on every PC through
+ * `settings.automationEnabled`, never through a config field.
+ */
+export interface EventRule {
+  /** Stable id, unique in the config; `rule-1` style. */
+  id: string
+  /** 1..60 chars. */
+  name: string
+  /** Manual per-rule switch, default true. */
+  enabled?: boolean
+  trigger: EventTrigger
+  /** Reuse the rig guard vocabulary; ALL must pass, fail closed. 0..4. */
+  conditions?: RigGuard[]
+  /** 1..4, executed in order. */
+  actions: RuleAction[]
+  /** Stability window before executing; default 1500. 0..30000. */
+  debounceMs?: number
+  /** Minimum gap between two fires of this rule; default 10000. 0..3600000. */
+  cooldownMs?: number
+  /** `runRig` hit an active run: `skip` (default) or run the rest. */
+  onBusy?: 'skip' | 'continue'
+}
+
+export type RuleRunStatus =
+  | 'ok'
+  | 'partial'
+  | 'failed'
+  | 'blocked'
+  | 'busy'
+  | 'missing'
+  | 'skipped'
+  | 'throttled'
+
+export interface RuleActionOutcome {
+  kind: RuleAction['kind']
+  ok: boolean
+  /** Human target, e.g. `Go live`, `Streaming / Gameplay`, `3 phones`. */
+  target?: string
+  message?: string
+}
+
+/**
+ * One in-memory run-history row. Newest first, capped at `RULE_HISTORY_MAX`.
+ * Never persisted; contains no secrets.
+ */
+export interface RuleHistoryEntry {
+  seq: number
+  ruleId: string
+  ruleName: string
+  /** End time in ms; the renderer formats `NOW`/`12m`/`3h`. */
+  at: number
+  /** One-line trigger summary. */
+  trigger: string
+  status: RuleRunStatus
+  /** Why it was skipped/blocked, first error, or success summary. */
+  detail?: string
+  durationMs: number
+  source: 'event' | 'manual'
+  actions: RuleActionOutcome[]
+}
+
 /**
  * One mixer channel. `id` is desktop-defined and opaque (stable while the
  * session lives); `process` is the normalized match name and `name` is the
@@ -902,6 +1045,12 @@ export interface DeckConfig {
    * without rigs stay byte-identical after round-trip.
    */
   rigs?: RigPreset[]
+  /**
+   * Optional event → rig/profile/page automations. Additive in schema version
+   * 1: configs without rules stay byte-identical after round-trip. Armed per
+   * installation through `settings.automationEnabled`, never through config.
+   */
+  rules?: EventRule[]
 }
 
 /* ------------------------------------------------------------------ */
