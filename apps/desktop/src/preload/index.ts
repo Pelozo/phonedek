@@ -19,6 +19,9 @@ import type {
   PhoneDeckApi,
   SaveConfigResult,
   ServerInfoView,
+  StreamerBotActionsResult,
+  StreamerBotSettingsInput,
+  StreamerBotStatus,
   TwitchAuthStartResult,
   TwitchSettingsInput,
   TwitchStatusView,
@@ -76,6 +79,14 @@ const api: PhoneDeckApi = {
   startTwitchAuth: (): Promise<TwitchAuthStartResult> => ipcRenderer.invoke(IPC.startTwitchAuth),
   cancelTwitchAuth: (): Promise<OperationResult> => ipcRenderer.invoke(IPC.cancelTwitchAuth),
   disconnectTwitch: (): Promise<OperationResult> => ipcRenderer.invoke(IPC.disconnectTwitch),
+  getStreamerbotStatus: (): Promise<StreamerBotStatus> =>
+    ipcRenderer.invoke(IPC.getStreamerbotStatus),
+  setStreamerbotSettings: (input: StreamerBotSettingsInput): Promise<OperationResult> =>
+    ipcRenderer.invoke(IPC.setStreamerbotSettings, input),
+  listStreamerbotActions: (): Promise<StreamerBotActionsResult> =>
+    ipcRenderer.invoke(IPC.listStreamerbotActions),
+  testStreamerbotAction: (actionName: string, args?: Record<string, string>): Promise<PressResult> =>
+    ipcRenderer.invoke(IPC.testStreamerbotAction, actionName, args),
   setLightSettings: (input: LightSettingsInput): Promise<OperationResult> =>
     ipcRenderer.invoke(IPC.setLightSettings, input),
   getLightStatuses: (): Promise<LightStatusView[]> => ipcRenderer.invoke(IPC.getLightStatuses),

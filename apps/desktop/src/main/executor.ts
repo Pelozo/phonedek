@@ -1,6 +1,12 @@
 import { basename } from 'node:path'
 import { actionsToPlan, isScreenshotShortcut } from '@phonedek/shared'
-import type { AppVolumeAction, ConfigAction, KeyboardPlanStep, PressResult } from '@phonedek/shared'
+import type {
+  AppVolumeAction,
+  ConfigAction,
+  KeyboardPlanStep,
+  PressResult,
+  StreamerBotAction,
+} from '@phonedek/shared'
 import type { HostActions } from './host-actions'
 import type { KeySender } from './key-sender'
 import type { Logger } from './logger'
@@ -34,7 +40,10 @@ export class ActionExecutor {
     this.onScreenshot = options.onScreenshot
   }
 
-  execute(actions: readonly (ConfigAction | AppVolumeAction)[], label = 'button'): Promise<PressResult> {
+  execute(
+    actions: readonly (ConfigAction | AppVolumeAction | StreamerBotAction)[],
+    label = 'button',
+  ): Promise<PressResult> {
     const task = this.queue.then(() => this.run(actions, label))
     this.queue = task.then(
       () => undefined,
@@ -116,7 +125,7 @@ export class ActionExecutor {
   }
 
   private async run(
-    actions: readonly (ConfigAction | AppVolumeAction)[],
+    actions: readonly (ConfigAction | AppVolumeAction | StreamerBotAction)[],
     label: string,
   ): Promise<PressResult> {
     const plan = actionsToPlan(actions)
@@ -175,6 +184,12 @@ export class ActionExecutor {
               throw new Error('Per-app audio is not available on this desktop.')
             }
             await this.host.runAppVolumeAction(step)
+            break
+          case 'streamerbot':
+            if (!this.host.runStreamerBotAction) {
+              throw new Error('Streamer.bot is not available on this desktop.')
+            }
+            await this.host.runStreamerBotAction(step)
             break
           default:
             if (KEYBOARD_KINDS.has(step.kind)) {

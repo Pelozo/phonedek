@@ -14,6 +14,8 @@ import type {
   PagePlanStep,
   PlannableAction,
   PlanStep,
+  StreamerBotAction,
+  StreamerBotPlanStep,
   TwitchAction,
   TwitchPlanStep,
 } from './types'
@@ -192,13 +194,23 @@ function appVolumeActionToPlan(action: AppVolumeAction): AppVolumePlanStep {
   }
 }
 
+/** Copy a Streamer.bot action into its plan step (args are cloned). */
+function streamerBotActionToPlan(action: StreamerBotAction): StreamerBotPlanStep {
+  return {
+    kind: 'streamerbot',
+    action: 'doAction',
+    actionName: action.actionName,
+    ...(action.args ? { args: { ...action.args } } : {}),
+  }
+}
+
 /**
  * Flatten a button's actions into an ordered execution plan.
  * Page actions are returned as units; the phone normally handles them locally,
  * while the desktop executor ignores them.
  */
 export function actionsToPlan(
-  actions: readonly (ConfigAction | AppVolumeAction)[],
+  actions: readonly (ConfigAction | AppVolumeAction | StreamerBotAction)[],
   options: PlanOptions = {},
 ): PlanStep[] {
   const plan: PlanStep[] = []
@@ -254,6 +266,9 @@ export function actionsToPlan(
         break
       case 'appVolume':
         plan.push(appVolumeActionToPlan(action))
+        break
+      case 'streamerbot':
+        plan.push(streamerBotActionToPlan(action))
         break
       case 'keyboard':
         // Phone-local launcher: the phone opens its keyboard panel without a
@@ -709,6 +724,14 @@ export function describeAction(action: PlannableAction | AppVolumeAction, platfo
       const target = action.match.process ? `"${action.match.process}"` : 'app audio'
       if (action.action === 'toggleMute') return `Toggle mute for ${target}`
       return `${action.muted ? 'Mute' : 'Unmute'} ${target}`
+    }
+    case 'streamerbot': {
+      const oneLine = action.actionName.replace(/\s+/g, ' ').trim()
+      const label = oneLine.length > 40 ? `${oneLine.slice(0, 37)}…` : oneLine
+      const argCount = action.args ? Object.keys(action.args).length : 0
+      return argCount > 0
+        ? `Streamer.bot "${label}" (${argCount} arg${argCount === 1 ? '' : 's'})`
+        : `Streamer.bot "${label}"`
     }
   }
 }

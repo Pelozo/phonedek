@@ -35,6 +35,8 @@ export interface ServerInfoView {
   obsStatus: ObsStatusView
   /** Live Twitch auth status; never includes tokens. */
   twitchStatus: TwitchStatusView
+  /** Live Streamer.bot WebSocket status; never includes the password. */
+  streamerbotStatus: StreamerBotStatus
 }
 
 export interface SettingsView {
@@ -59,6 +61,14 @@ export interface SettingsView {
   twitchClientId: string
   /** True when a Twitch token bundle is stored. */
   twitchHasToken: boolean
+  /** Trigger actions in a local Streamer.bot instance. */
+  streamerbotEnabled: boolean
+  /** Streamer.bot WebSocket host. Defaults to 127.0.0.1. */
+  streamerbotHost: string
+  /** Streamer.bot WebSocket port. Defaults to 8080. */
+  streamerbotPort: number
+  /** True when a WebSocket password is stored; the secret is never exposed. */
+  streamerbotHasPassword: boolean
   /** Local-light control is on and at least one device is configured. */
   lightsEnabled: boolean
   /** Configured local lights; never contains credentials. */
@@ -275,6 +285,57 @@ export interface TwitchSettingsInput {
   clientId?: string
 }
 
+export type StreamerBotState =
+  | 'disabled'
+  | 'connecting'
+  | 'connected'
+  | 'auth-failed'
+  | 'disconnected'
+  | 'reconnecting'
+  | 'error'
+
+/** Live Streamer.bot connection state for the future Settings card. */
+export interface StreamerBotStatus {
+  state: StreamerBotState
+  host: string
+  port: number
+  /** Streamer.bot instance name from its Hello message. */
+  instanceName?: string
+  /** Streamer.bot version from its Hello message. */
+  version?: string
+  /** Actions learned through the last successful GetActions. */
+  actionCount?: number
+  lastError?: string
+  nextRetryMs?: number
+}
+
+/** One Streamer.bot action as exposed to the action picker. */
+export interface StreamerBotActionView {
+  id: string
+  name: string
+  /** Streamer.bot group; `"None"` is flattened to undefined. */
+  group?: string
+  enabled: boolean
+  subactionCount: number
+  triggerCount: number
+}
+
+export interface StreamerBotActionsResult {
+  ok: boolean
+  actions: StreamerBotActionView[]
+  error?: string
+}
+
+export interface StreamerBotSettingsInput {
+  enabled?: boolean
+  host?: string
+  port?: number
+  /** Write-only WebSocket password; empty/omitted keeps the stored value. */
+  password?: string
+  /** Remove the stored password. */
+  clearPassword?: boolean
+}
+
 export type UpdateState =
   | 'disabled'
   | 'idle'
@@ -369,6 +430,12 @@ export interface PhoneDeckApi {
   startTwitchAuth(): Promise<TwitchAuthStartResult>
   cancelTwitchAuth(): Promise<OperationResult>
   disconnectTwitch(): Promise<OperationResult>
+  getStreamerbotStatus(): Promise<StreamerBotStatus>
+  setStreamerbotSettings(input: StreamerBotSettingsInput): Promise<OperationResult>
+  /** Refresh and return the Streamer.bot action list for the action picker. */
+  listStreamerbotActions(): Promise<StreamerBotActionsResult>
+  /** Fire one Streamer.bot action as a connection test. */
+  testStreamerbotAction(actionName: string, args?: Record<string, string>): Promise<PressResult>
   setLightSettings(input: LightSettingsInput): Promise<OperationResult>
   getLightStatuses(): Promise<LightStatusView[]>
   /** Pair a Hue bridge after the user presses its physical link button. */
@@ -432,6 +499,10 @@ export const IPC = {
   startTwitchAuth: 'phonedek:twitch-start-auth',
   cancelTwitchAuth: 'phonedek:twitch-cancel-auth',
   disconnectTwitch: 'phonedek:twitch-disconnect',
+  getStreamerbotStatus: 'phonedek:streamerbot-get-status',
+  setStreamerbotSettings: 'phonedek:streamerbot-set-settings',
+  listStreamerbotActions: 'phonedek:streamerbot-list-actions',
+  testStreamerbotAction: 'phonedek:streamerbot-test-action',
   setLightSettings: 'phonedek:lights-set-settings',
   getLightStatuses: 'phonedek:lights-get-statuses',
   pairHueLight: 'phonedek:lights-pair-hue',

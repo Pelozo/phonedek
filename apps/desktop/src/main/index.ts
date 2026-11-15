@@ -66,6 +66,8 @@ import {
   sanitizeLightTarget,
   sanitizeObsHost,
   sanitizeObsPort,
+  sanitizeStreamerBotHost,
+  sanitizeStreamerBotPort,
   type AppSettings,
   type LightDeviceSettings,
 } from './settings-store'
@@ -89,6 +91,11 @@ import { SecretStore } from './secret-store'
 import { TwitchAuth, sanitizeTwitchClientId } from './twitch-auth'
 import { TwitchClient } from './twitch-client'
 import { TwitchStateSource } from './twitch-source'
+import {
+  StreamerBotClient,
+  normalizeDoAction,
+  type StreamerBotStatus,
+} from './streamerbot-client'
 import { LightStateSource, type LightDeviceStatus } from './light-source'
 import { LightCredentialStore, isValidLightCredential } from './light-credentials'
 import { HueClient, discoverHueBridges, pairHueBridge, type HueLightInfo } from './hue-client'
@@ -113,6 +120,8 @@ import type {
   PermissionStatus,
   SaveConfigResult,
   ServerInfoView,
+  StreamerBotActionsResult,
+  StreamerBotSettingsInput,
   TwitchAuthStartResult,
   TwitchSettingsInput,
   TwitchStatusView,
@@ -145,6 +154,8 @@ let obsSource: ObsStateSource | null = null
 let twitchAuth: TwitchAuth | null = null
 let twitchClient: TwitchClient | null = null
 let twitchSource: TwitchStateSource | null = null
+let streamerbotClient: StreamerBotClient | null = null
+let secretStore: SecretStore | null = null
 let lightSource: LightStateSource | null = null
 let lightCredentials: LightCredentialStore | null = null
 let pointerSender: PointerSender | null = null
@@ -286,6 +297,10 @@ async function buildServerInfo(): Promise<ServerInfoView> {
       twitchEnabled: currentSettings.twitchEnabled,
       twitchClientId: currentSettings.twitchClientId,
       twitchHasToken: twitchAuth?.hasToken === true,
+      streamerbotEnabled: currentSettings.streamerbotEnabled,
+      streamerbotHost: currentSettings.streamerbotHost,
+      streamerbotPort: currentSettings.streamerbotPort,
+      streamerbotHasPassword: secretStore?.has('streamerbot.password') === true,
       lightsEnabled: lightsActive(currentSettings),
       lights: lightDeviceViews(currentSettings.lights),
       autoProfileEnabled: currentSettings.autoProfileEnabled,
@@ -306,6 +321,7 @@ async function buildServerInfo(): Promise<ServerInfoView> {
         port: currentSettings.obsPort,
       },
     twitchStatus: buildTwitchStatus(),
+    streamerbotStatus: buildStreamerbotStatus(),
   }
 }
 
@@ -378,6 +394,17 @@ function lightRawValue(binding: LightBinding, value: number, min?: number, max?:
   return floor + Math.max(0, Math.min(1, value)) * (ceiling - floor)
 }
 
+function buildStreamerbotStatus(): StreamerBotStatus {
+  const current = settings.get()
+  return (
+    streamerbotClient?.status ?? {
+      state: 'disabled',
+      host: current.streamerbotHost,
+      port: current.streamerbotPort,
+    }
+  )
+}
+
 function buildTwitchStatus(): TwitchStatusView {
   const status = twitchAuth?.status
   if (!status) {
@@ -417,6 +444,10 @@ async function buildState(): Promise<AppState> {
       twitchEnabled: settings.get().twitchEnabled,
       twitchClientId: settings.get().twitchClientId,
       twitchHasToken: twitchAuth?.hasToken === true,
+      streamerbotEnabled: settings.get().streamerbotEnabled,
+      streamerbotHost: settings.get().streamerbotHost,
+      streamerbotPort: settings.get().streamerbotPort,
+      streamerbotHasPassword: secretStore?.has('streamerbot.password') === true,
       lightsEnabled: lightsActive(settings.get()),
       lights: lightDeviceViews(settings.get().lights),
       autoProfileEnabled: settings.get().autoProfileEnabled,
@@ -982,6 +1013,131 @@ function registerIpc(): void {
     await pushServerInfo()
     return { ok: true, state: await buildState() }
   })
+
+  ipcMain.handle(
+    IPC.getStreamerbotStatus,
+    async (): Promise<StreamerBotStatus> => buildStreamerbotStatus(),
+  )
+
+  ipcMain.handle(
+    IPC.setStreamerbotSettings,
+    async (_event, input: unknown): Promise<OperationResult> => {
+      if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+        return {
+          ok: false,
+          error: 'Invalid Streamer.bot settings',
+          state: await buildState(),
+        }
+      }
+      const value = input as StreamerBotSettingsInput
+      const patch: Partial<AppSettings> = {}
+
+      if (value.enabled !== undefined) {
+        if (typeof value.enabled !== 'boolean') {
+          return {
+            ok: false,
+            error: 'Streamer.bot enable must be true or false',
+            state: await buildState(),
+          }
+        }
+        patch.streamerbotEnabled = value.enabled
+      }
+      if (value.host !== undefined) {
+        if (typeof value.host !== 'string') {
+          return { ok: false, error: 'Streamer.bot host must be text', state: await buildState() }
+        }
+        const clean = sanitizeStreamerBotHost(value.host)
+        if (clean !== value.host.trim()) {
+          return {
+            ok: false,
+            error: 'Enter localhost, an IP address or a hostname (no scheme or path).',
+            state: await buildState(),
+          }
+        }
+        patch.streamerbotHost = clean
+      }
+      if (value.port !== undefined) {
+        const port = sanitizeStreamerBotPort(value.port)
+        if (port !== value.port) {
+          return {
+            ok: false,
+            error: 'Streamer.bot port must be between 1 and 65535',
+            state: await buildState(),
+          }
+        }
+        patch.streamerbotPort = port
+      }
+      if (value.password !== undefined && typeof value.password !== 'string') {
+        return { ok: false, error: 'Streamer.bot password must be text', state: await buildState() }
+      }
+      if (typeof value.password === 'string' && value.password.length > 256) {
+        return { ok: false, error: 'Streamer.bot password is too long', state: await buildState() }
+      }
+      if (!secretStore) {
+        return {
+          ok: false,
+          error: 'Secret storage is not available on this desktop.',
+          state: await buildState(),
+        }
+      }
+
+      if (value.clearPassword === true) {
+        secretStore.delete('streamerbot.password')
+      } else if (typeof value.password === 'string' && value.password.length > 0) {
+        secretStore.set('streamerbot.password', value.password)
+      }
+
+      const updated = settings.update(patch)
+      const password = secretStore.get('streamerbot.password') ?? ''
+      streamerbotClient?.configure({
+        host: updated.streamerbotHost,
+        port: updated.streamerbotPort,
+        password,
+        enabled: updated.streamerbotEnabled,
+      })
+      if (updated.streamerbotEnabled) streamerbotClient?.start()
+      await pushServerInfo()
+      return { ok: true, state: await buildState() }
+    },
+  )
+
+  ipcMain.handle(
+    IPC.listStreamerbotActions,
+    async (): Promise<StreamerBotActionsResult> => {
+      if (!streamerbotClient) {
+        return {
+          ok: false,
+          actions: [],
+          error: 'Streamer.bot is not available on this desktop.',
+        }
+      }
+      try {
+        return { ok: true, actions: await streamerbotClient.getActions() }
+      } catch (error) {
+        return {
+          ok: false,
+          actions: [],
+          error: error instanceof Error ? error.message : String(error),
+        }
+      }
+    },
+  )
+
+  ipcMain.handle(
+    IPC.testStreamerbotAction,
+    async (_event, actionName: unknown, args: unknown): Promise<PressResult> => {
+      if (!streamerbotClient?.connected) {
+        return { ok: false, error: 'Streamer.bot is not connected.' }
+      }
+      try {
+        const normalized = normalizeDoAction(actionName, args)
+        await streamerbotClient.doAction(normalized.name, normalized.args)
+        return { ok: true }
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    },
+  )
 
   ipcMain.handle(
     IPC.setLightSettings,
@@ -1737,6 +1893,7 @@ async function bootstrap(): Promise<void> {
     logger.warn(`OS secret encryption is unavailable: ${(error as Error).message}`)
   }
   const secrets = new SecretStore({ dir: userData, safeStorage: secretStorage, logger })
+  secretStore = secrets
   lightCredentials = new LightCredentialStore(secrets)
   twitchAuth = new TwitchAuth({
     clientId: settings.get().twitchClientId,
@@ -1756,6 +1913,26 @@ async function bootstrap(): Promise<void> {
     void pushServerInfo()
   })
   if (settings.get().twitchEnabled) void twitchAuth.start()
+
+  streamerbotClient = new StreamerBotClient({
+    host: settings.get().streamerbotHost,
+    port: settings.get().streamerbotPort,
+    password: secrets.get('streamerbot.password') ?? '',
+    enabled: settings.get().streamerbotEnabled,
+    logger,
+  })
+  streamerbotClient.onStatus((status) => {
+    if (status.state === 'connected') {
+      logger.info(
+        `Streamer.bot connected at ${status.host}:${status.port}` +
+          `${status.version ? ` (v${status.version})` : ''}`,
+      )
+    } else if (status.lastError && status.state !== 'reconnecting') {
+      logger.warn(`Streamer.bot ${status.state}: ${status.lastError}`)
+    }
+    void pushServerInfo()
+  })
+  if (settings.get().streamerbotEnabled) streamerbotClient.start()
 
   lightSource = new LightStateSource({
     logger,
@@ -1820,6 +1997,10 @@ async function bootstrap(): Promise<void> {
         await appVolumeSource.toggleMute(step.match)
       }
       await controlState?.noteAppVolumeChanged(step.match)
+    },
+    runStreamerBotAction: async (step) => {
+      if (!streamerbotClient) throw new Error('Streamer.bot is not available on this desktop.')
+      await streamerbotClient.doAction(step.actionName, step.args)
     },
   })
   executor = new ActionExecutor(keySender, host, logger, {
@@ -2017,6 +2198,7 @@ async function bootstrap(): Promise<void> {
     obsSupported: () => obsClient?.connected === true,
     twitchSupported: () => twitchSource?.connected === true,
     lightSupported: () => lightsActive(settings.get()),
+    streamerbotSupported: () => streamerbotClient?.connected === true,
     onPointer: async (client, message, context) => {
       if (!pointerRouter) {
         return {
@@ -2269,6 +2451,7 @@ if (!gotLock) {
         controlState?.dispose()
         mixer?.dispose()
         twitchAuth?.dispose()
+        streamerbotClient?.dispose()
         obsSource?.dispose()
         obsClient?.dispose()
         lightSource?.dispose()

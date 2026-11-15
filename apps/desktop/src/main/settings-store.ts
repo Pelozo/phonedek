@@ -4,6 +4,8 @@ import { randomInt } from 'node:crypto'
 import {
   DEFAULT_HTTP_PORT,
   LIGHT_DEFAULT_PORT,
+  STREAMERBOT_DEFAULT_HOST,
+  STREAMERBOT_DEFAULT_PORT,
   lightDefaultPort,
   normalizeProfileId,
   type LightDeviceType,
@@ -72,6 +74,12 @@ export interface AppSettings {
   twitchEnabled: boolean
   /** Public Twitch client ID. Defaults to a bundled/env value when present. */
   twitchClientId: string
+  /** Trigger actions in a local Streamer.bot instance. */
+  streamerbotEnabled: boolean
+  /** Streamer.bot WebSocket host. Defaults to 127.0.0.1. */
+  streamerbotHost: string
+  /** Streamer.bot WebSocket port. Defaults to 8080. */
+  streamerbotPort: number
   /** Turn local-light control on. Defaults to true when devices are configured. */
   lightsEnabled: boolean
   /** Local devices (Elgato Key Light family). No credentials. Max 8. */
@@ -93,6 +101,8 @@ export function createToken(): string {
 
 export const DEFAULT_OBS_HOST = '127.0.0.1'
 export const DEFAULT_OBS_PORT = 4455
+export const DEFAULT_STREAMERBOT_SETTINGS_HOST = STREAMERBOT_DEFAULT_HOST
+export const DEFAULT_STREAMERBOT_SETTINGS_PORT = STREAMERBOT_DEFAULT_PORT
 export const DEFAULT_LIGHT_PORT = LIGHT_DEFAULT_PORT
 export const MAX_LIGHT_DEVICES = 8
 export const MAX_AUTO_PROFILE_RULES = 16
@@ -205,6 +215,20 @@ export function sanitizeObsPassword(value: unknown): string {
   return value.slice(0, 256)
 }
 
+/**
+ * Streamer.bot shares OBS's host rules: localhost, IPv4, hostnames and a
+ * bracketed IPv6 literal; never a scheme, path or whitespace.
+ */
+export function sanitizeStreamerBotHost(value: unknown): string {
+  return sanitizeObsHost(value)
+}
+
+export function sanitizeStreamerBotPort(value: unknown): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 65535
+    ? value
+    : DEFAULT_STREAMERBOT_SETTINGS_PORT
+}
+
 /** A valid device host, or null when the value cannot be a bare hostname/IP. */
 export function sanitizeLightHost(value: unknown): string | null {
   if (typeof value !== 'string') return null
@@ -302,6 +326,9 @@ export function defaultSettings(): AppSettings {
     obsPassword: '',
     twitchEnabled: false,
     twitchClientId: builtinTwitchClientId(),
+    streamerbotEnabled: false,
+    streamerbotHost: DEFAULT_STREAMERBOT_SETTINGS_HOST,
+    streamerbotPort: DEFAULT_STREAMERBOT_SETTINGS_PORT,
     lightsEnabled: false,
     lights: [],
     autoProfileEnabled: false,
@@ -364,6 +391,12 @@ function sanitize(input: Partial<AppSettings> | null | undefined): AppSettings {
       input.twitchClientId === undefined
         ? defaults.twitchClientId
         : sanitizeTwitchClientId(input.twitchClientId),
+    streamerbotEnabled:
+      typeof input.streamerbotEnabled === 'boolean'
+        ? input.streamerbotEnabled
+        : defaults.streamerbotEnabled,
+    streamerbotHost: sanitizeStreamerBotHost(input.streamerbotHost),
+    streamerbotPort: sanitizeStreamerBotPort(input.streamerbotPort),
     // A configured device list means the user wants lights on; an explicit
     // boolean still wins so the user can temporarily disable them.
     lightsEnabled:

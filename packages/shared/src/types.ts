@@ -34,6 +34,20 @@ export const LIGHT_CAPABILITY = 'light-v1' as const
 /** Desktop capability for per-application audio volume/mute control. */
 export const MIXER_CAPABILITY = 'mixer-v1' as const
 
+/** Desktop capability for triggering Streamer.bot actions over its local API. */
+export const STREAMERBOT_CAPABILITY = 'streamerbot-v1' as const
+
+/** Streamer.bot WebSocket API default port (`ws://127.0.0.1:8080/`). */
+export const STREAMERBOT_DEFAULT_PORT = 8080
+/** Streamer.bot WebSocket API default host. */
+export const STREAMERBOT_DEFAULT_HOST = '127.0.0.1'
+
+/** Hard limits for a `streamerbot` action, enforced by the config schema. */
+export const STREAMERBOT_MAX_ACTION_NAME = 128
+export const STREAMERBOT_MAX_ARGS = 16
+export const STREAMERBOT_MAX_ARG_KEY = 64
+export const STREAMERBOT_MAX_ARG_VALUE = 512
+
 /** Local-light providers supported by the desktop adapters. */
 export type LightDeviceType = 'elgato' | 'hue' | 'nanoleaf'
 
@@ -344,6 +358,23 @@ export interface MixerAction {
 }
 
 /**
+ * Trigger one Streamer.bot action by name over its local WebSocket API.
+ *
+ * The action name and arguments are desktop-configured; the phone never
+ * supplies them. Streamer.bot runs arbitrary subactions (chat, alerts, OBS,
+ * sounds, programs), so this carries the same trust level as `command`.
+ * Args are a small string map (Streamer.bot exposes them as `%key%`).
+ */
+export interface StreamerBotAction {
+  type: 'streamerbot'
+  action: 'doAction'
+  /** Existing Streamer.bot action name, 1..128 chars. */
+  actionName: string
+  /** Up to 16 string arguments. */
+  args?: Record<string, string>
+}
+
+/**
  * Everything the host can execute. `MicAction` and `TwitchAction` are accepted
  * by ActionSchema and the plan builder but deliberately stay out of `Action`
  * so older renderers do not have to handle them.
@@ -351,18 +382,22 @@ export interface MixerAction {
 export type ExecutableAction = Action | MicAction | TwitchAction
 
 /**
- * Everything the host can execute plus the newer local-light family. Kept
+ * Everything the host can execute plus the newer local-light cluster. Kept
  * separate from `ExecutableAction` so a renderer that keys maps by
  * `ExecutableAction['type']` compiles unchanged until it adds that UI.
+ *
+ * `StreamerBotAction` follows the same rule: the desktop plans and executes it,
+ * while the renderer adds its editor entry in a follow-up.
  */
-export type PlannableAction = ExecutableAction | LightAction
+export type PlannableAction = ExecutableAction | LightAction | StreamerBotAction
 
 /**
- * Every action a config button may carry, including phone-local launchers that
- * never reach the desktop plan. Renderers can keep consuming
- * `PlannableAction` until they add keyboard UI.
+ * Action union currently consumed by the editor UI. `StreamerBotAction` is
+ * deliberately not listed yet: shared schema, planning and the desktop executor
+ * already support it, while the renderer adds its editor entry in a follow-up
+ * (the same staged pattern used for mic/Twitch/lights originally).
  */
-export type ConfigAction = PlannableAction | KeyboardAction | MixerAction
+export type ConfigAction = ExecutableAction | LightAction | KeyboardAction | MixerAction
 
 /** Footprint of a button measured in grid cells. */
 export interface CellSpan {
@@ -838,6 +873,13 @@ export type AppVolumePlanStep =
   | { kind: 'appVolume'; action: 'setMute'; match: AppVolumeMatch; muted: boolean }
   | { kind: 'appVolume'; action: 'toggleMute'; match: AppVolumeMatch }
 
+export interface StreamerBotPlanStep {
+  kind: 'streamerbot'
+  action: 'doAction'
+  actionName: string
+  args?: Record<string, string>
+}
+
 export type PlanStep =
   | KeyPlanStep
   | TextPlanStep
@@ -853,6 +895,7 @@ export type PlanStep =
   | TwitchPlanStep
   | LightPlanStep
   | AppVolumePlanStep
+  | StreamerBotPlanStep
 
 export type KeyboardPlanStep = KeyPlanStep | TextPlanStep | DelayPlanStep | MediaPlanStep | MousePlanStep
 

@@ -1,5 +1,13 @@
 import { z } from 'zod'
-import { CONFIG_SCHEMA_VERSION, type DeckConfig, type ScrollModifier } from './types'
+import {
+  CONFIG_SCHEMA_VERSION,
+  STREAMERBOT_MAX_ACTION_NAME,
+  STREAMERBOT_MAX_ARGS,
+  STREAMERBOT_MAX_ARG_KEY,
+  STREAMERBOT_MAX_ARG_VALUE,
+  type DeckConfig,
+  type ScrollModifier,
+} from './types'
 import { MODIFIER_KEYS, isModifier, isValidKeyName, normalizeCombo, normalizeKey } from './keys'
 import { isImageAssetName, isVideoAssetName } from './media'
 
@@ -245,6 +253,45 @@ const mixerLauncherSchema = z.object({
   action: z.literal('open'),
 })
 
+/**
+ * Streamer.bot action invocation. The action itself is user-configured:
+ * `actionName` must match an existing Streamer.bot action, and `args` is a small
+ * string map exposed there as `%key%`. Only the desktop config supplies them.
+ */
+const streamerBotArgValue = z.string().max(STREAMERBOT_MAX_ARG_VALUE)
+const streamerBotArgs = z
+  .record(z.string().min(1).max(STREAMERBOT_MAX_ARG_KEY), streamerBotArgValue)
+  .superRefine((value, ctx) => {
+    const keys = Object.keys(value)
+    if (keys.length > STREAMERBOT_MAX_ARGS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Streamer.bot actions accept at most ${STREAMERBOT_MAX_ARGS} arguments`,
+      })
+    }
+    for (const key of keys) {
+      if (key.trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [key],
+          message: 'Streamer.bot argument names cannot be blank',
+        })
+      }
+    }
+  })
+const streamerBotSchema = z.object({
+  type: z.literal('streamerbot'),
+  action: z.literal('doAction'),
+  actionName: z
+    .string()
+    .max(
+      STREAMERBOT_MAX_ACTION_NAME,
+      `Streamer.bot action names are limited to ${STREAMERBOT_MAX_ACTION_NAME} characters`,
+    )
+    .refine((value) => value.trim().length > 0, 'Streamer.bot action name cannot be empty'),
+  args: streamerBotArgs.optional(),
+})
+
 /** Per-app audio session selector; `.exe`, case and path are normalized. */
 const appVolumeMatch = z
   .object({
@@ -298,6 +345,7 @@ export const ActionSchema = z.union([
   appVolumeSchema,
   keyboardSchema,
   mixerLauncherSchema,
+  streamerBotSchema,
 ])
 
 export const GridSchema = z.object({

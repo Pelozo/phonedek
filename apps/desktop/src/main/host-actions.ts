@@ -6,6 +6,7 @@ import type {
   AppVolumePlanStep,
   LightPlanStep,
   ObsPlanStep,
+  StreamerBotPlanStep,
   TwitchPlanStep,
 } from '@phonedek/shared'
 import type { Logger } from './logger'
@@ -43,6 +44,8 @@ export interface HostActions {
   runLightAction?(step: LightPlanStep): Promise<void>
   /** Run any per-app mute plan step (optional; absent without a mixer). */
   runAppVolumeAction?(step: AppVolumePlanStep): Promise<void>
+  /** Run any Streamer.bot plan step (optional; absent when not wired). */
+  runStreamerBotAction?(step: StreamerBotPlanStep): Promise<void>
 }
 
 export interface HostActionOptions {
@@ -71,6 +74,8 @@ export interface HostActionOptions {
   runLightAction?: (step: LightPlanStep) => Promise<void>
   /** Test seam / shared controller for per-app mute actions. */
   runAppVolumeAction?: (step: AppVolumePlanStep) => Promise<void>
+  /** Test seam / shared controller for Streamer.bot actions. */
+  runStreamerBotAction?: (step: StreamerBotPlanStep) => Promise<void>
   /** Overrides the user's home directory (used by tests to avoid touching ~/Desktop). */
   homeDir?: string
   logger?: Logger
@@ -469,6 +474,15 @@ export function createHostActions(options: HostActionOptions = {}): HostActions 
           async runAppVolumeAction(step: AppVolumePlanStep) {
             await options.runAppVolumeAction!(step)
             logger?.info(`Ran app audio action: ${step.action}`)
+          },
+        }
+      : {}),
+
+    ...(options.runStreamerBotAction
+      ? {
+          async runStreamerBotAction(step: StreamerBotPlanStep) {
+            await options.runStreamerBotAction!(step)
+            logger?.info(`Ran Streamer.bot action: ${step.actionName}`)
           },
         }
       : {}),

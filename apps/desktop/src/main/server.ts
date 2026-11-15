@@ -13,6 +13,7 @@ import {
   MIXER_CAPABILITY,
   OBS_CAPABILITY,
   POINTER_CAPABILITY,
+  STREAMERBOT_CAPABILITY,
   TWITCH_CAPABILITY,
   PROTOCOL_VERSION,
   normalizeProfileId,
@@ -65,6 +66,7 @@ export const SERVER_CAPABILITIES = [
   TWITCH_CAPABILITY,
   LIGHT_CAPABILITY,
   MIXER_CAPABILITY,
+  STREAMERBOT_CAPABILITY,
 ] as const
 
 /**
@@ -82,6 +84,7 @@ export function serverCapabilities(
   lightSupported = false,
   keyboardSupported = false,
   mixerSupported = false,
+  streamerbotSupported = false,
 ): string[] {
   return SERVER_CAPABILITIES.filter((capability) => {
     if (capability === POINTER_CAPABILITY) return pointerSupported
@@ -91,6 +94,7 @@ export function serverCapabilities(
     if (capability === TWITCH_CAPABILITY) return twitchSupported
     if (capability === LIGHT_CAPABILITY) return lightSupported
     if (capability === MIXER_CAPABILITY) return mixerSupported
+    if (capability === STREAMERBOT_CAPABILITY) return streamerbotSupported
     return true
   })
 }
@@ -220,6 +224,8 @@ export interface DeckServerOptions {
   lightSupported?: () => boolean
   /** Dynamic: advertise `mixer-v1` while per-app audio is available. */
   mixerSupported?: () => boolean
+  /** Dynamic: advertise `streamerbot-v1` while Streamer.bot is connected. */
+  streamerbotSupported?: () => boolean
   /** Called when a phone disconnects, so held pointer buttons can be released. */
   onClientClosed?: (client: ConnectedClient) => void
   /** Called only after an uploaded backup validates; show native approval here. */
@@ -476,6 +482,7 @@ export class DeckServer {
       this.options.lightSupported?.() === true,
       this.options.keyboardSupported?.() === true,
       this.options.mixerSupported?.() === true,
+      this.options.streamerbotSupported?.() === true,
     )
   }
 

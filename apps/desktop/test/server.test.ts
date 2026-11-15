@@ -62,6 +62,7 @@ interface HarnessOptions {
   controlStateSupported?: boolean
   obsSupported?: () => boolean
   twitchSupported?: () => boolean
+  streamerbotSupported?: () => boolean
 }
 
 async function harness(
@@ -102,6 +103,7 @@ async function harness(
     controlStateSupported: options.controlStateSupported,
     obsSupported: options.obsSupported,
     twitchSupported: options.twitchSupported,
+    streamerbotSupported: options.streamerbotSupported,
     importBackup: options.importBackup,
   })
   const port = await server.start()
@@ -1148,6 +1150,28 @@ describe('DeckServer control state', () => {
     const second = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
     const secondHello = await waitFor(() => second.messages.find((message) => message.type === 'hello'))
     expect(secondHello.capabilities).toContain('twitch-v1')
+    second.ws.close()
+
+    await waitFor(() => h.server.getClients().length === 0)
+  })
+
+  it('advertises streamerbot-v1 only while Streamer.bot is connected', async () => {
+    let connected = false
+    const h = await harness({ ok: true }, { streamerbotSupported: () => connected })
+
+    const info = await fetch(`http://127.0.0.1:${h.port}/api/info`)
+    const body = (await info.json()) as { capabilities?: string[] }
+    expect(body.capabilities).not.toContain('streamerbot-v1')
+
+    const first = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    const firstHello = await waitFor(() => first.messages.find((message) => message.type === 'hello'))
+    expect(firstHello.capabilities).not.toContain('streamerbot-v1')
+    first.ws.close()
+
+    connected = true
+    const second = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    const secondHello = await waitFor(() => second.messages.find((message) => message.type === 'hello'))
+    expect(secondHello.capabilities).toContain('streamerbot-v1')
     second.ws.close()
 
     await waitFor(() => h.server.getClients().length === 0)
