@@ -15,6 +15,7 @@ import {
   OBS_CAPABILITY,
   POINTER_CAPABILITY,
   RIG_CAPABILITY,
+  RULES_CAPABILITY,
   STREAMERBOT_CAPABILITY,
   TWITCH_CAPABILITY,
   PROTOCOL_VERSION,
@@ -71,6 +72,7 @@ export const SERVER_CAPABILITIES = [
   MIXER_CAPABILITY,
   STREAMERBOT_CAPABILITY,
   RIG_CAPABILITY,
+  RULES_CAPABILITY,
 ] as const
 
 /**
@@ -79,8 +81,8 @@ export const SERVER_CAPABILITIES = [
  * state reader must not advertise `control-state-v1`, `mixer-v1` is omitted on
  * macOS (no public per-app volume API), and `obs-v1`/`twitch-v1` are dynamic:
  * they are advertised only while that integration is identified/authorized.
- * `rig-v1` is unconditional: every desktop can run config-owned rigs, and old
- * phones simply ignore the extra marker.
+ * `rig-v1` and `rules-v1` are unconditional: every desktop can run config-owned
+ * rigs/rules, and old phones simply ignore the extra markers.
  */
 export function serverCapabilities(
   pointerSupported: boolean,
@@ -628,6 +630,22 @@ export class DeckServer {
     this.broadcast({ type: 'profile', profileId: id })
     this.options.logger?.info(`Asked ${this.clients.size} connected phone(s) to switch to profile "${id}"`)
     return true
+  }
+
+  /** Send a `navigate` frame to every connected phone (rules `showPage`). */
+  broadcastNavigate(direction: 'next' | 'prev' | 'goto', pageId?: string): void {
+    const id = pageId === undefined ? undefined : normalizeProfileId(pageId)
+    if (direction === 'goto' && !id) return
+    this.broadcast({
+      type: 'navigate',
+      direction,
+      ...(direction === 'goto' && id ? { pageId: id } : {}),
+    })
+  }
+
+  /** Connected phone count for phone-presence rules. */
+  clientCount(): number {
+    return this.clients.size
   }
 
   getClients(): ConnectedClient[] {

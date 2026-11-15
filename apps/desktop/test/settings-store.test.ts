@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import {
   autoProfileRevertTargetId,
   defaultSettings,
+  disarmAutomationAfterImport,
   normalizeProcessName,
   sanitizeAutoProfileRevertProfileId,
   sanitizeAutoProfileRules,
@@ -410,5 +411,47 @@ describe('SettingsStore What’s New version', () => {
     const settings = new SettingsStore(dir)
     expect(settings.get().port).toBe(49010)
     expect(settings.get().lastSeenVersion).toBe('0.0.0')
+  })
+})
+
+describe('SettingsStore automation arm switch', () => {
+  it('defaults automation off on a fresh install', () => {
+    const settings = new SettingsStore(tempDir())
+    expect(settings.get().automationEnabled).toBe(false)
+  })
+
+  it('keeps old settings files valid and ignores non-boolean values', () => {
+    const dir = tempDir()
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ port: 49020, discovery: false }))
+    expect(new SettingsStore(dir).get().automationEnabled).toBe(false)
+
+    writeFileSync(
+      join(dir, 'settings.json'),
+      JSON.stringify({ port: 49020, automationEnabled: 'yes' }),
+    )
+    expect(new SettingsStore(dir).get().automationEnabled).toBe(false)
+  })
+
+  it('persists arming and disarming without touching unrelated settings', () => {
+    const dir = tempDir()
+    const settings = new SettingsStore(dir)
+    settings.update({ port: 49030, automationEnabled: true })
+    expect(settings.get().automationEnabled).toBe(true)
+    expect(new SettingsStore(dir).get()).toMatchObject({ port: 49030, automationEnabled: true })
+
+    settings.update({ automationEnabled: false })
+    expect(new SettingsStore(dir).get().automationEnabled).toBe(false)
+    expect(settings.get().port).toBe(49030)
+  })
+
+  it('forces automation off after an import, even when this PC was armed', () => {
+    const dir = tempDir()
+    const settings = new SettingsStore(dir)
+    settings.update({ automationEnabled: true })
+    expect(settings.get().automationEnabled).toBe(true)
+
+    const disarmed = disarmAutomationAfterImport(settings)
+    expect(disarmed.automationEnabled).toBe(false)
+    expect(new SettingsStore(dir).get().automationEnabled).toBe(false)
   })
 })

@@ -8,6 +8,9 @@ import type {
   PressResult,
   RigGuardProbe,
   RigRunStatus,
+  RuleActionOutcome,
+  RuleHistoryEntry,
+  RuleRunStatus,
 } from '@phonedek/shared'
 
 export interface PairView {
@@ -85,6 +88,11 @@ export interface SettingsView {
   autoProfileRevertEnabled: boolean
   /** Profile to return to; empty when no target is selected. */
   autoProfileRevertProfileId: string
+  /**
+   * Automation is armed on THIS desktop. Rules never fire while false; the
+   * value is deliberately not part of the deck config or a backup.
+   */
+  automationEnabled: boolean
 }
 
 /** One configured local light as exposed to the renderer. */
@@ -418,6 +426,59 @@ export interface RigStatusView {
   message?: string
 }
 
+/* Event rules (P2 wiring; the renderer UI lands in P3) */
+
+/** Per-rule live status row for the Automation dialog. */
+export interface RuleStatusView {
+  ruleId: string
+  enabled: boolean
+  /** `ARMED | PAUSED | RUNNING | COOLDOWN | ERROR | DISARMED` */
+  detail: string
+  lastAt?: number
+  lastStatus?: RuleRunStatus
+  lastDetail?: string
+}
+
+/** One source row (`OBS CONNECTED · TWITCH OFFLINE · PROCESS 3s · 1 PHONE`). */
+export interface RuleSourceView {
+  name: 'obs' | 'twitch' | 'process' | 'phone'
+  label: string
+  available: boolean
+  detail: string
+}
+
+/** Dry-run result. Never executes an action. */
+export interface RulePreviewView {
+  ruleId: string
+  ok: boolean
+  wouldRun: boolean
+  /** Dry run ignores arming and cooldown; reports what the world allows. */
+  reason?: 'disabled' | 'suppressed' | 'stale' | 'throttled' | 'cooldown'
+  blocked: RigGuardView[]
+  missing: string[]
+  error?: string
+}
+
+/** Manual FIRE NOW result. */
+export interface RuleFireView {
+  ruleId: string
+  ruleName: string
+  status: RuleRunStatus
+  ok: boolean
+  detail?: string
+  durationMs: number
+  actions: RuleActionOutcome[]
+  source: 'event' | 'manual'
+}
+
+/** Full live surface for the Automation dialog. */
+export interface EventRulesView {
+  armed: boolean
+  statuses: RuleStatusView[]
+  sources: RuleSourceView[]
+  history: RuleHistoryEntry[]
+}
+
 export type UpdateState =
   | 'disabled'
   | 'idle'
@@ -543,6 +604,16 @@ export interface PhoneDeckApi {
   abortRig(): Promise<OperationResult>
   /** Last-run/active readings for every configured rig. */
   getRigStatuses(): Promise<RigStatusView[]>
+  /** Live rule status, sources, history and the local arm switch. */
+  getEventRules(): Promise<EventRulesView>
+  /** Arm or disarm automation on this PC (persisted in settings). */
+  setAutomationEnabled(armed: boolean): Promise<OperationResult>
+  /** Evaluate a rule's conditions/references without executing it. */
+  previewRule(ruleId: string): Promise<RulePreviewView>
+  /** Manual FIRE NOW; skips cooldown but still runs conditions. */
+  fireRule(ruleId: string): Promise<RuleFireView>
+  /** Clear the in-memory run history. */
+  clearRuleHistory(): Promise<{ ok: true }>
   exportConfig(): Promise<OperationResult>
   importConfig(): Promise<SaveConfigResult>
   openLogs(): Promise<void>
@@ -610,6 +681,11 @@ export const IPC = {
   runRig: 'phonedek:rig-run',
   abortRig: 'phonedek:rig-abort',
   getRigStatuses: 'phonedek:rig-get-statuses',
+  getEventRules: 'phonedek:rules-state',
+  setAutomationEnabled: 'phonedek:rules-arm',
+  previewRule: 'phonedek:rule-preview',
+  fireRule: 'phonedek:rule-fire',
+  clearRuleHistory: 'phonedek:rules-clear',
   exportConfig: 'phonedek:export-config',
   importConfig: 'phonedek:import-config',
   openLogs: 'phonedek:open-logs',

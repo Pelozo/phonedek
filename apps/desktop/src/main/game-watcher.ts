@@ -53,13 +53,23 @@ export interface GameWatcherOptions {
   platform?: NodeJS.Platform
   /** Extra process names to ignore, in addition to the built-in list. */
   ignoredProcesses?: string[]
+  /**
+   * Keep the shared poller running for another consumer (event rules) even
+   * when auto-profile itself is disabled or has no rules.
+   */
+  keepPolling?: () => boolean
+  /**
+   * Called after every successful process snapshot, even when auto-profile is
+   * off. `running` is normalized and already filtered of PhoneDeck/shells.
+   */
+  onSnapshot?: (running: ReadonlySet<string>) => void
 }
 
 /**
  * Process names that are part of PhoneDeck, the shell or this scan itself.
  * Matching a rule against these would fire on app start or every poll.
  */
-const IGNORED_PROCESSES = [
+export const IGNORED_PROCESSES = [
   'phonedek',
   'electron',
   'node',
@@ -174,6 +184,7 @@ export class GameWatcher {
   private generation = 0
   private polling = false
   private warned = false
+  private snapshotWarned = false
   /** Most recent rule announced, so repeated polls stay quiet. */
   private lastMatch: { profileId: string; process: string } | null = null
 
@@ -195,15 +206,24 @@ export class GameWatcher {
     return this.timer !== null
   }
 
-  /** Start or stop the timer after a settings change. */
+  /** Start or stop the timer after a settings or rule change. */
   refresh(): void {
     const current = this.options.getSettings()
-    if (!current.enabled || current.rules.length === 0) {
+    if (!this.shouldPoll(current)) {
       this.stop()
       return
     }
-    if (!current.revertEnabled || !current.revertProfileId) this.cancelRevert()
+    if (!current.enabled || !current.revertEnabled || !current.revertProfileId) this.cancelRevert()
+    // Event rules keep the poller alive; turning auto-profile off must still
+    // forget the last announced game so re-enabling switches again.
+    if (!current.enabled || current.rules.length === 0) this.lastMatch = null
     if (!this.timer) this.start()
+  }
+
+  /** Auto-profile rules and/or another consumer (event rules) need snapshots. */
+  private shouldPoll(current: AutoProfileSettings): boolean {
+    if (current.enabled && current.rules.length > 0) return true
+    return this.options.keepPolling?.() === true
   }
 
   start(): void {
@@ -266,7 +286,8 @@ export class GameWatcher {
   private async poll(generation: number): Promise<void> {
     if (generation !== this.generation || this.polling) return
     const current = this.options.getSettings()
-    if (!current.enabled || current.rules.length === 0) return
+    if (!this.shouldPoll(current)) return
+    const autoProfile = current.enabled && current.rules.length > 0
 
     this.polling = true
     try {
@@ -275,6 +296,20 @@ export class GameWatcher {
       this.warned = false
 
       const running = this.runningProcesses(names)
+      // Event rules consume the same snapshot; a listener error must never
+      // break auto-profile or stop the poller.
+      try {
+        this.options.onSnapshot?.(running)
+        this.snapshotWarned = false
+      } catch (error) {
+        if (!this.snapshotWarned) {
+          this.snapshotWarned = true
+          const message = error instanceof Error ? error.message : String(error)
+          this.logger?.warn(`Process snapshot listener failed: ${message}`)
+        }
+      }
+
+      if (!autoProfile) return
       const rule = this.matchingRule(current, running)
 
       if (!rule) {

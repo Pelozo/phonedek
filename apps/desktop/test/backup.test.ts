@@ -210,6 +210,32 @@ describe('backup archives', () => {
     expect(preview.dangerousActions).toBe(baseline + 3)
   })
 
+  it('counts automation rules and warns that they stay disarmed', () => {
+    const config = createDefaultConfig()
+    expect(previewBackup({ config, assets: new Map(), warnings: [] }).automationRules).toBe(0)
+    expect(previewBackup({ config, assets: new Map(), warnings: [] }).warnings).toEqual([])
+
+    config.rules = [
+      {
+        id: 'rule-1',
+        name: 'Stream started',
+        trigger: { kind: 'obs.streaming', active: true },
+        actions: [{ kind: 'showProfile', profileId: config.profiles[0]!.id }],
+      },
+      {
+        id: 'rule-2',
+        name: 'Stream ended',
+        trigger: { kind: 'obs.streaming', active: false },
+        actions: [{ kind: 'showProfile', profileId: config.profiles[0]!.id }],
+      },
+    ]
+    const preview = previewBackup({ config, assets: new Map(), warnings: [] })
+    expect(preview.automationRules).toBe(2)
+    expect(preview.warnings).toHaveLength(1)
+    expect(preview.warnings[0]).toContain('2 automation rules')
+    expect(preview.warnings[0]).toContain('disarmed')
+  })
+
   it('aborts before importing assets when the pre-import backup fails', () => {
     const dir = tempDir()
     const assetsDir = join(dir, 'assets')

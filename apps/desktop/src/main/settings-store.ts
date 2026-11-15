@@ -94,6 +94,11 @@ export interface AppSettings {
   autoProfileRevertEnabled: boolean
   /** Profile to return to; ignored when it no longer exists in the config. */
   autoProfileRevertProfileId?: string
+  /**
+   * Rules in the deck config may only fire when this is true on THIS desktop.
+   * Never part of the config or a backup, so an imported deck cannot auto-fire.
+   */
+  automationEnabled: boolean
 }
 
 /** Four-digit pairing PIN (the QR/link is the low-friction path). */
@@ -349,6 +354,7 @@ export function defaultSettings(): AppSettings {
     autoProfileEnabled: false,
     autoProfileRules: [],
     autoProfileRevertEnabled: false,
+    automationEnabled: false,
   }
 }
 
@@ -430,6 +436,10 @@ function sanitize(input: Partial<AppSettings> | null | undefined): AppSettings {
     autoProfileRevertProfileId: sanitizeAutoProfileRevertProfileId(
       input.autoProfileRevertProfileId,
     ),
+    automationEnabled:
+      typeof input.automationEnabled === 'boolean'
+        ? input.automationEnabled
+        : defaults.automationEnabled,
   }
 }
 
@@ -506,4 +516,15 @@ export class SettingsStore {
     writeFileSync(temp, `${JSON.stringify(settings, null, 2)}\n`, 'utf8')
     renameSync(temp, this.file)
   }
+}
+
+/**
+ * Force automation off after any deck import.
+ *
+ * Rules travel inside the config, but the arm switch deliberately does not.
+ * Both import paths (Settings → Import and the phone upload) call this so an
+ * imported deck can never auto-fire, even when this PC was armed.
+ */
+export function disarmAutomationAfterImport(settings: SettingsStore): AppSettings {
+  return settings.update({ automationEnabled: false })
 }

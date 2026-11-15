@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AdmZip from 'adm-zip'
 import { WebSocket } from 'ws'
-import { createDefaultConfig, RIG_CAPABILITY } from '@phonedek/shared'
+import { createDefaultConfig, RIG_CAPABILITY, RULES_CAPABILITY } from '@phonedek/shared'
 import { ProfileMessageSchema } from '@phonedek/shared'
 import type {
   ClientMessage,
@@ -497,6 +497,30 @@ describe('DeckServer WebSocket', () => {
     a.ws.close()
     b.ws.close()
     await waitFor(() => h.server.getClients().length === 0)
+  })
+
+  it('broadcasts navigate frames for rule showPage actions and ignores invalid pages', async () => {
+    const h = await harness()
+    const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    await waitFor(() => messages.find((message) => message.type === 'hello'))
+    expect(h.server.clientCount()).toBe(1)
+
+    h.server.broadcastNavigate('goto', '  page-2  ')
+    const first = await waitFor(() => messages.find((message) => message.type === 'navigate'))
+    expect(first).toEqual({ type: 'navigate', direction: 'goto', pageId: 'page-2' })
+
+    h.server.broadcastNavigate('next')
+    await waitFor(
+      () => messages.filter((message) => message.type === 'navigate').length === 2,
+    )
+
+    h.server.broadcastNavigate('goto', '../escape')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(messages.filter((message) => message.type === 'navigate')).toHaveLength(2)
+
+    ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
+    expect(h.server.clientCount()).toBe(0)
   })
 
   it('forwards a press result message to the phone', async () => {    const h = await harness({ ok: true, message: 'Screenshot saved to Desktop: shot.png' })
@@ -1601,5 +1625,20 @@ describe('DeckServer rig capability', () => {
     old.ws.close()
     await waitFor(() => h.server.getClients().length === 0)
     expect(h.server.sendToClientsWithCapability(RIG_CAPABILITY, progress)).toBe(0)
+  })
+})
+
+describe('DeckServer rules capability', () => {
+  it('advertises rules-v1 in /api/info and hello without extra configuration', async () => {
+    const h = await harness()
+    const info = await fetch(`http://127.0.0.1:${h.port}/api/info`)
+    const body = (await info.json()) as { capabilities: string[] }
+    expect(body.capabilities).toContain(RULES_CAPABILITY)
+
+    const { ws, messages } = await openSocket(`ws://127.0.0.1:${h.port}/ws?token=${h.token}`)
+    const hello = await waitFor(() => messages.find((message) => message.type === 'hello'))
+    expect(hello.type === 'hello' && hello.capabilities).toContain(RULES_CAPABILITY)
+    ws.close()
+    await waitFor(() => h.server.getClients().length === 0)
   })
 })

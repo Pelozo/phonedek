@@ -55,6 +55,8 @@ import { keyboardHelperPath } from './platform'
 import { PointerRouter, pointerInputAllowed } from './pointer-input'
 import { RigRunner } from './rig-runner'
 import type { RigPreview, RigRunResult } from './rig-runner'
+import { RuleService } from './rule-service'
+import type { EventRulesView, RuleFireView, RulePreviewView } from '../shared/api'
 import type { RigGuardProbes } from './rig-guards'
 import {
   createPointerSender,
@@ -67,6 +69,7 @@ import {
   MAX_AUTO_PROFILE_RULES,
   MAX_LIGHT_DEVICES,
   SettingsStore,
+  disarmAutomationAfterImport,
   sanitizeAutoProfileRevertProfileId,
   sanitizeAutoProfileRules,
   sanitizeLastSeenVersion,
@@ -181,6 +184,7 @@ let pointerRouter: PointerRouter | null = null
 let keyboardSender: KeyboardSender | null = null
 let keyboardRouter: KeyboardRouter | null = null
 let gameWatcher: GameWatcher | null = null
+let ruleService: RuleService | null = null
 /** A native import/destructive dialog is waiting for a decision. */
 let dialogOpen = false
 let updater: UpdateService
@@ -326,6 +330,7 @@ async function buildServerInfo(): Promise<ServerInfoView> {
       autoProfileRules: currentSettings.autoProfileRules.map((rule) => ({ ...rule })),
       autoProfileRevertEnabled: currentSettings.autoProfileRevertEnabled,
       autoProfileRevertProfileId: currentSettings.autoProfileRevertProfileId ?? '',
+      automationEnabled: currentSettings.automationEnabled,
     },
     clients: server?.getClients() ?? [],
     error: serverError,
@@ -474,6 +479,7 @@ async function buildState(): Promise<AppState> {
       autoProfileRules: settings.get().autoProfileRules.map((rule) => ({ ...rule })),
       autoProfileRevertEnabled: settings.get().autoProfileRevertEnabled,
       autoProfileRevertProfileId: settings.get().autoProfileRevertProfileId ?? '',
+      automationEnabled: settings.get().automationEnabled,
     },
   }
 }
@@ -1547,6 +1553,90 @@ function registerIpc(): void {
     return statuses.map(lightStatusView)
   })
 
+  ipcMain.handle(IPC.getEventRules, async (): Promise<EventRulesView> => {
+    if (!ruleService) return { armed: false, statuses: [], sources: [], history: [] }
+    return ruleService.getEventRules()
+  })
+
+  ipcMain.handle(
+    IPC.setAutomationEnabled,
+    async (_event, armed: unknown): Promise<OperationResult> => {
+      if (typeof armed !== 'boolean') {
+        return {
+          ok: false,
+          error: 'Armed must be true or false',
+          state: await buildState(),
+        }
+      }
+      settings.update({ automationEnabled: armed })
+      ruleService?.setArmed(armed)
+      // Process rules share the GameWatcher poller, so arming changes whether
+      // it needs to run even when auto-profile itself is disabled.
+      gameWatcher?.refresh()
+      await pushServerInfo()
+      return { ok: true, state: await buildState() }
+    },
+  )
+
+  ipcMain.handle(IPC.previewRule, async (_event, ruleId: unknown): Promise<RulePreviewView> => {
+    const id = typeof ruleId === 'string' ? normalizeProfileId(ruleId) : null
+    if (!id) {
+      return {
+        ruleId: '',
+        ok: false,
+        wouldRun: false,
+        blocked: [],
+        missing: [],
+        error: 'Choose a valid rule.',
+      }
+    }
+    if (!ruleService) {
+      return {
+        ruleId: id,
+        ok: false,
+        wouldRun: false,
+        blocked: [],
+        missing: [],
+        error: 'Automation is not available on this desktop.',
+      }
+    }
+    return ruleService.preview(id)
+  })
+
+  ipcMain.handle(IPC.fireRule, async (_event, ruleId: unknown): Promise<RuleFireView> => {
+    const id = typeof ruleId === 'string' ? normalizeProfileId(ruleId) : null
+    if (!id) {
+      return {
+        ruleId: '',
+        ruleName: '',
+        status: 'missing',
+        ok: false,
+        detail: 'Choose a valid rule.',
+        durationMs: 0,
+        actions: [],
+        source: 'manual',
+      }
+    }
+    if (!ruleService) {
+      return {
+        ruleId: id,
+        ruleName: id,
+        status: 'missing',
+        ok: false,
+        detail: 'Automation is not available on this desktop.',
+        durationMs: 0,
+        actions: [],
+        source: 'manual',
+      }
+    }
+    return ruleService.fire(id)
+  })
+
+  ipcMain.handle(IPC.clearRuleHistory, async (): Promise<{ ok: true }> => {
+    ruleService?.clearHistory()
+    return { ok: true }
+  })
+
   ipcMain.handle(
     IPC.pairHueLight,
     async (_event, input: unknown): Promise<HuePairResult> => {
@@ -1884,7 +1974,11 @@ function registerIpc(): void {
       }
       for (const warning of backup.warnings) logger.warn(warning)
       const config = store.replace(backup.config)
-      logger.info(`Imported backup ${file} (${importedAssets} assets)`)
+      // An imported deck is never armed, even if this PC had automation on.
+      disarmAutomationAfterImport(settings)
+      ruleService?.setArmed(false)
+      gameWatcher?.refresh()
+      logger.info(`Imported backup ${file} (${importedAssets} assets); automation disarmed`)
       mainWindow?.webContents.send(IPC.configChangedEvent, config)
       return { ok: true, config }
     } catch (error) {
@@ -2581,6 +2675,11 @@ async function bootstrap(): Promise<void> {
           importAsset: (name, data) => assets.importBuffer(name, data),
         })
         const config = store.replace(applied.config)
+        // Defence in depth: an imported deck must never auto-fire, even when
+        // this PC had automation armed. Rules come back disarmed.
+        disarmAutomationAfterImport(settings)
+        ruleService?.setArmed(false)
+        gameWatcher?.refresh()
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send(IPC.configChangedEvent, config)
         }
@@ -2598,7 +2697,10 @@ async function bootstrap(): Promise<void> {
         }
       }
     },
-    onClientsChanged: () => {
+    onClientsChanged: (clients) => {
+      // Rules see presence through one level; a replay to a reconnecting phone
+      // is sent here as well (profile only, never a page).
+      ruleService?.clientsChanged(clients)
       void pushServerInfo()
     },
   })
@@ -2629,8 +2731,48 @@ async function bootstrap(): Promise<void> {
     onRevert: (profileId) => {
       server.broadcastProfile(profileId)
     },
+    // Event rules share this one poller; a disabled auto-profile does not stop
+    // process rules from seeing snapshots, and vice versa.
+    keepPolling: () => ruleService?.needsProcessPolling() === true,
+    onSnapshot: (running) => {
+      ruleService?.processSnapshot(running)
+    },
     logger,
   })
+
+  // One rule engine for the desktop. Constructed after the server and runner so
+  // every action reference resolves against the live config.
+  ruleService = new RuleService({
+    getConfig: () => store.get(),
+    isArmed: () => settings.get().automationEnabled,
+    probes: createRigGuardProbes(),
+    runRig: async (presetId) => {
+      const runner = rigRunner
+      if (!runner) throw new Error('Rigs are not available on this desktop.')
+      const rig = rigById(store.get().rigs, presetId)
+      if (!rig) throw new Error(`Rig "${presetId}" is not configured.`)
+      return runner.run(rig, { presetId: rig.id })
+    },
+    showProfile: (profileId) =>
+      store.get().profiles.some((profile) => profile.id === profileId) &&
+      server.broadcastProfile(profileId),
+    showPage: (profileId, pageId) => {
+      // The phone applies a profile synchronously, so an immediate navigate
+      // lands on the right page in the new profile.
+      const profile = store.get().profiles.find((candidate) => candidate.id === profileId)
+      if (!profile || !profile.pages.some((page) => page.id === pageId)) return false
+      if (!server.broadcastProfile(profileId)) return false
+      server.broadcastNavigate('goto', pageId)
+      return true
+    },
+    sendToClient: (clientId, message) => server.sendToClient(clientId, message),
+    ...(obsClient && obsSource ? { obs: { client: obsClient, source: obsSource } } : {}),
+    ...(twitchSource ? { twitch: twitchSource } : {}),
+    logger,
+  })
+  ruleService.configure(store.get().rules)
+  ruleService.setArmed(settings.get().automationEnabled)
+  ruleService.clientsChanged(server.getClients())
 
   discovery = new DiscoveryService({
     getPort: () => server.port || settings.get().port,
@@ -2648,6 +2790,8 @@ async function bootstrap(): Promise<void> {
       logger.warn(`Rig "${activeRig.presetId}" was deleted from the config; stopping it.`)
     }
     pruneAutoProfileRevertProfile()
+    ruleService?.configure(store.get().rules)
+    gameWatcher?.refresh()
     server.broadcastConfig()
     void controlState?.noteRigChanged()
     pairCache = null
@@ -2753,6 +2897,7 @@ if (!gotLock) {
         pointerSender?.dispose()
         keyboardRouter?.dispose()
         keyboardSender?.dispose()
+        ruleService?.dispose()
         gameWatcher?.dispose()
         keySender?.dispose?.()
         discovery?.stop()

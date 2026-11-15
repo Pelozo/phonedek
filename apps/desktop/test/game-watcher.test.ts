@@ -437,3 +437,61 @@ describe('GameWatcher transitions', () => {
     expect(h.switches).toEqual([])
   })
 })
+
+describe('GameWatcher shared snapshot poller', () => {
+  it('keeps polling for event rules while auto-profile is off', async () => {
+    let keep = true
+    const snapshots: string[][] = []
+    const h = harness({
+      keepPolling: () => keep,
+      onSnapshot: (running) => snapshots.push([...running].sort()),
+    })
+    h.settings.enabled = false
+    h.settings.rules = []
+    h.setProcesses(['game', 'electron', 'Game.exe'])
+
+    h.watcher.refresh()
+    expect(h.watcher.running).toBe(true)
+    await tick()
+    expect(snapshots.at(-1)).toEqual(['game'])
+    expect(h.switches).toEqual([])
+
+    keep = false
+    h.watcher.refresh()
+    expect(h.watcher.running).toBe(false)
+  })
+
+  it('publishes snapshots alongside normal auto-profile switching', async () => {
+    const snapshots: string[][] = []
+    const h = harness({ onSnapshot: (running) => snapshots.push([...running].sort()) })
+    h.setProcesses(['chrome'])
+
+    h.watcher.refresh()
+    await tick()
+    expect(h.switches.map((item) => item.profileId)).toEqual(['browser'])
+    expect(snapshots.at(-1)).toEqual(['chrome'])
+  })
+
+  it('keeps polling after a listener error and warns once', async () => {
+    let shouldThrow = true
+    const h = harness({
+      keepPolling: () => true,
+      onSnapshot: () => {
+        if (shouldThrow) throw new Error('bad snapshot listener')
+      },
+    })
+    h.settings.enabled = false
+    h.settings.rules = []
+    h.setProcesses(['game'])
+
+    h.watcher.refresh()
+    await tick(2)
+    expect(h.watcher.running).toBe(true)
+    expect(h.logger.warn).toHaveBeenCalledTimes(1)
+    expect(String(h.logger.warn.mock.calls[0]?.[0])).toContain('bad snapshot listener')
+
+    shouldThrow = false
+    await tick()
+    expect(h.watcher.running).toBe(true)
+  })
+})

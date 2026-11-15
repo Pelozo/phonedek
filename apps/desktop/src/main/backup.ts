@@ -45,6 +45,8 @@ export interface BackupPreview {
   warnings: string[]
   /** launch + command actions (including macro and rig steps). */
   dangerousActions: number
+  /** Event rules in the deck; always disarmed on import. */
+  automationRules: number
 }
 
 function countRigActions(rigs: DeckConfig['rigs']): number {
@@ -94,6 +96,15 @@ export function previewBackup(backup: BackupReadResult): BackupPreview {
   }
   let bytes = 0
   for (const data of backup.assets.values()) bytes += data.length
+  const automationRules = backup.config.rules?.length ?? 0
+  const warnings = [...backup.warnings]
+  if (automationRules > 0) {
+    warnings.push(
+      `This deck contains ${automationRules} automation ${
+        automationRules === 1 ? 'rule' : 'rules'
+      }. They stay disarmed until automation is enabled on this PC.`,
+    )
+  }
   return {
     serverName: backup.config.serverName,
     profiles: backup.config.profiles.length,
@@ -101,8 +112,9 @@ export function previewBackup(backup: BackupReadResult): BackupPreview {
     buttons,
     assets: backup.assets.size,
     bytes,
-    warnings: [...backup.warnings],
+    warnings,
     dangerousActions: countDangerousActions(backup),
+    automationRules,
   }
 }
 
