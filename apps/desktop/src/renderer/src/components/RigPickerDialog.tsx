@@ -13,17 +13,21 @@ export function RigPickerDialog({
   onPick,
   onClose,
   onOpenLibrary,
+  title = 'Run a rig',
+  subtitle = 'A rig button is tap-only and runs its guarded step list on this PC.',
 }: {
   config: DeckConfig
   onPick: (rig: RigPreset) => void
   onClose: () => void
   onOpenLibrary: () => void
+  title?: string
+  subtitle?: string
 }) {
   const rigs = rigsOf(config)
   return (
     <Modal
-      title="Run a rig"
-      subtitle="A rig button is tap-only and runs its guarded step list on this PC."
+      title={title}
+      subtitle={subtitle}
       onClose={onClose}
       className="rig-picker-modal"
       footer={

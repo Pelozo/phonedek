@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import type {
   DeckConfig,
+  EventRule,
   RigGuard,
-  RigGuardProbe,
   RigPreset,
   RigStep,
   RigStepAction,
@@ -10,11 +10,11 @@ import type {
 import {
   estimateRigMs,
   RIG_DEFAULT_DEADLINE_MS,
-  RIG_GUARD_LABELS,
   RIG_MAX_DEADLINE_MS,
   RIG_MAX_GUARDS,
   RIG_MAX_PRESETS,
   RIG_MAX_STEPS,
+  rulesUsingRig,
 } from '@phonedek/shared'
 import type {
   RigPreviewView,
@@ -26,7 +26,6 @@ import {
   formatRigDuration,
   nextRigId,
   rigDraftErrors,
-  rigGuardLabel,
   rigHasDestructiveSteps,
   removeRigFromConfig,
   rigReferences,
@@ -42,6 +41,7 @@ import {
 } from '../lib/rigs'
 import { useHostPlatform } from '../lib/platform'
 import { ActionEditor } from './ActionEditor'
+import { GuardRows } from './GuardRows'
 import { Icon } from './Icons'
 import { IconPicker } from './IconPicker'
 import { PopMenu, type MenuItem } from './Menu'
@@ -103,15 +103,6 @@ function CommitInput({
   )
 }
 
-function guardWithProbe(guard: RigGuard, probe: RigGuardProbe): RigGuard {
-  const next: RigGuard = { probe }
-  if (guard.expect !== undefined) next.expect = guard.expect
-  if (guard.label) next.label = guard.label
-  if (probe === 'appRunning') next.arg = guard.arg ?? ''
-  if (probe === 'lightOn' && guard.arg) next.arg = guard.arg
-  return next
-}
-
 function actionLabel(action: RigStepAction): string {
   return rigStepSummary({ action }).label
 }
@@ -147,6 +138,7 @@ export function RigLibraryDialog({
   const [deleteRequest, setDeleteRequest] = useState<{
     rig: RigPreset
     references: RigReference[]
+    rules: EventRule[]
   } | null>(null)
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
 
@@ -234,11 +226,16 @@ export function RigLibraryDialog({
   const requestDelete = async (): Promise<void> => {
     if (!rig) return
     const references = rigReferences(config, rig.id)
+    const ruleReferences = rulesUsingRig(config.rules, rig.id)
     if (references.length === 0) {
       const ok = await confirm({
         title: 'Delete rig',
         message: `Delete “${rig.name}”?`,
-        warning: 'Its guards and steps are removed. This cannot be undone.',
+        details: ruleReferences.slice(0, 6).map((rule) => `Automation rule: ${rule.name}`),
+        warning:
+          ruleReferences.length > 0
+            ? `${ruleReferences.length} automation rule${ruleReferences.length === 1 ? '' : 's'} use this rig. They stay saved but become inert until you pick another rig. Its guards and steps are removed. This cannot be undone.`
+            : 'Its guards and steps are removed. This cannot be undone.',
         confirmLabel: 'Delete rig',
         danger: true,
       })
@@ -250,7 +247,7 @@ export function RigLibraryDialog({
       onToast(`Rig “${rig.name}” deleted`, 'success')
       return
     }
-    setDeleteRequest({ rig, references })
+    setDeleteRequest({ rig, references, rules: ruleReferences })
   }
 
   const finishDelete = (mode: 'buttons' | 'unlink'): void => {
@@ -277,20 +274,6 @@ export function RigLibraryDialog({
       return
     }
     changeRig({ ...rig, guards: [...(rig.guards ?? []), { probe: 'obsStreaming' }] })
-  }
-
-  const updateGuard = (index: number, patch: Partial<RigGuard>): void => {
-    if (!rig) return
-    const guards = [...(rig.guards ?? [])]
-    const current = guards[index]
-    if (!current) return
-    guards[index] = { ...current, ...patch }
-    changeRig({ ...rig, guards })
-  }
-
-  const removeGuard = (index: number): void => {
-    if (!rig) return
-    changeRig({ ...rig, guards: (rig.guards ?? []).filter((_, current) => current !== index) })
   }
 
   const addStep = (action: RigStepAction): void => {
@@ -749,88 +732,11 @@ export function RigLibraryDialog({
                   {(rig.guards?.length ?? 0) === 0 ? (
                     <div className="rig-section-empty">No guards — this rig runs unconditionally.</div>
                   ) : (
-                    <div className="rig-guard-list">
-                      {(rig.guards ?? []).map((guard, index) => (
-                        <div className="rig-guard-row" key={`${guard.probe}-${index}`}>
-                          <span className="rig-row-index mono">{pad(index + 1)}</span>
-                          <div className="rig-guard-main">
-                            <div className="rig-guard-controls">
-                              <label className="field">
-                                <span>Probe</span>
-                                <select
-                                  value={guard.probe}
-                                  onChange={(event) =>
-                                    updateGuard(index, guardWithProbe(guard, event.target.value as RigGuardProbe))
-                                  }
-                                >
-                                  {(Object.keys(RIG_GUARD_LABELS) as RigGuardProbe[]).map((probe) => (
-                                    <option key={probe} value={probe}>
-                                      {RIG_GUARD_LABELS[probe]}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                              {guard.probe === 'appRunning' && (
-                                <label className="field">
-                                  <span>Application</span>
-                                  <input
-                                    value={guard.arg ?? ''}
-                                    placeholder="discord.exe"
-                                    onChange={(event) =>
-                                      updateGuard(index, { arg: event.target.value })
-                                    }
-                                  />
-                                </label>
-                              )}
-                              {guard.probe === 'lightOn' && (
-                                <label className="field">
-                                  <span>Light</span>
-                                  <select
-                                    value={guard.arg ?? ''}
-                                    onChange={(event) =>
-                                      updateGuard(index, { arg: event.target.value || undefined })
-                                    }
-                                  >
-                                    <option value="">First configured light</option>
-                                    {lights.map((light) => (
-                                      <option key={light.id} value={light.id}>
-                                        {light.name}
-                                      </option>
-                                    ))}
-                                    {guard.arg && !lights.some((light) => light.id === guard.arg) && (
-                                      <option value={guard.arg}>{guard.arg} (missing)</option>
-                                    )}
-                                  </select>
-                                </label>
-                              )}
-                              <label className="field">
-                                <span>Expect</span>
-                                <select
-                                  value={guard.expect === false ? 'is-not' : 'is'}
-                                  onChange={(event) =>
-                                    updateGuard(index, { expect: event.target.value === 'is' })
-                                  }
-                                >
-                                  <option value="is">is</option>
-                                  <option value="is-not">is not</option>
-                                </select>
-                              </label>
-                            </div>
-                            <span className="rig-guard-generated mono">
-                              {rigGuardLabel(guard)}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            className="icon-button tiny danger"
-                            onClick={() => removeGuard(index)}
-                            aria-label={`Remove guard ${index + 1}`}
-                          >
-                            <Icon name="trash" size={14} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
+                    <GuardRows
+                      guards={rig.guards ?? []}
+                      lights={lights}
+                      onChange={(guards) => changeRig({ ...rig, guards })}
+                    />
                   )}
                 </section>
 
@@ -1119,7 +1025,7 @@ export function RigLibraryDialog({
           title="Rig is in use"
           subtitle={`${deleteRequest.rig.name} is referenced by ${deleteGroups.length} button${
             deleteGroups.length === 1 ? '' : 's'
-          }.`}
+          }${deleteRequest.rules.length > 0 ? ` and ${deleteRequest.rules.length} automation rule${deleteRequest.rules.length === 1 ? '' : 's'}` : ''}.`}
           onClose={() => setDeleteRequest(null)}
           compact
           footer={
@@ -1152,9 +1058,20 @@ export function RigLibraryDialog({
               ))}
               {deleteGroups.length > 6 && <li>+{deleteGroups.length - 6} more buttons</li>}
             </ul>
+            {deleteRequest.rules.length > 0 && (
+              <ul className="confirm-details">
+                {deleteRequest.rules.slice(0, 6).map((rule) => (
+                  <li key={rule.id}>Automation rule: {rule.name}</li>
+                ))}
+                {deleteRequest.rules.length > 6 && (
+                  <li>+{deleteRequest.rules.length - 6} more automation rules</li>
+                )}
+              </ul>
+            )}
             <p className="confirm-warning">
               “Keep buttons” leaves each button in place and removes its rig action/status, so the
-              deck stays valid. “Delete buttons too” removes those buttons entirely.
+              deck stays valid. “Delete buttons too” removes those buttons entirely. Automation
+              rules stay saved either way and become inert until they pick another rig.
             </p>
           </div>
         </Modal>

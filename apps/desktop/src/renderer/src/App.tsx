@@ -24,6 +24,7 @@ import { PairDialog } from './components/PairDialog'
 import { PermissionBanner } from './components/PermissionBanner'
 import { ConfirmProvider } from './components/Primitives'
 import { RigLibraryDialog } from './components/RigLibraryDialog'
+import { RuleLibraryDialog } from './components/RuleLibraryDialog'
 import { SettingsDialog } from './components/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
 import { WhatsNewDialog } from './components/WhatsNewDialog'
@@ -110,6 +111,7 @@ function AppContent() {
   const [whatsNew, setWhatsNew] = useState<WhatsNewRequest | null>(null)
   const [obsPickerOpen, setObsPickerOpen] = useState(false)
   const [rigLibrary, setRigLibrary] = useState<{ rigId?: string } | null>(null)
+  const [ruleLibrary, setRuleLibrary] = useState<{ ruleId?: string } | null>(null)
   const [lightPicker, setLightPicker] = useState<LightPickerRequest | null>(null)
   const [appVolumePicker, setAppVolumePicker] = useState<AppVolumePickerRequest | null>(null)
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
@@ -1083,6 +1085,7 @@ function AppContent() {
           onOpenPair={() => setPairOpen(true)}
           onOpenSettings={() => openSettings('general')}
           onOpenRigs={() => setRigLibrary({})}
+          onOpenRules={() => setRuleLibrary({})}
           onToast={showToast}
         />
 
@@ -1402,6 +1405,20 @@ function AppContent() {
           onChangeConfig={setConfig}
           onClose={() => setRigLibrary(null)}
           onToast={showToast}
+        />
+      )}
+      {ruleLibrary && (
+        <RuleLibraryDialog
+          config={config}
+          server={server}
+          initialRuleId={ruleLibrary.ruleId}
+          onChangeConfig={setConfig}
+          onClose={() => setRuleLibrary(null)}
+          onToast={showToast}
+          onOpenRigs={() => {
+            setRuleLibrary(null)
+            setRigLibrary({})
+          }}
         />
       )}
       {toast && <div className={`toast ${toast.kind}`}>{toast.message}</div>}

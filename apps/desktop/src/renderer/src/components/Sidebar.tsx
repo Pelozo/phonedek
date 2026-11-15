@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { DeckButton, DeckConfig, DeckPage, DeckProfile, GridSettings } from '@phonedek/shared'
 import { rigsOf } from '../lib/rigs'
+import { enabledRuleCount, ruleSidebarSummary, rulesOf } from '../lib/rules'
 import {
   addPage,
   addProfile,
@@ -15,11 +16,13 @@ import {
   pageGrid,
   resizeGrid,
   resizePageGrid,
+  rulesUsingPage,
+  rulesUsingProfile,
   updateGrid,
   updatePageMeta,
   updateProfileMeta,
 } from '@phonedek/shared'
-import type { ServerInfoView, SettingsView } from '../../../shared/api'
+import type { EventRulesView, ServerInfoView, SettingsView } from '../../../shared/api'
 import { DeckMark, Icon } from './Icons'
 import { NumberField, useConfirm } from './Primitives'
 
@@ -175,6 +178,7 @@ export function Sidebar({
   onOpenPair,
   onOpenSettings,
   onOpenRigs,
+  onOpenRules,
   onToast,
 }: {
   config: DeckConfig
@@ -188,10 +192,32 @@ export function Sidebar({
   onOpenPair: () => void
   onOpenSettings: () => void
   onOpenRigs: () => void
+  onOpenRules: () => void
   onToast: (message: string, kind?: 'info' | 'success' | 'error') => void
 }) {
   const [profileGridOpen, setProfileGridOpen] = useState(false)
+  const [rulesView, setRulesView] = useState<EventRulesView | null>(null)
   const confirm = useConfirm()
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async (): Promise<void> => {
+      try {
+        const next = await window.phonedek.getEventRules()
+        if (!cancelled) setRulesView(next)
+      } catch {
+        // The row falls back to settings; the next tick retries.
+      }
+    }
+    void load()
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void load()
+    }, 5_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [])
 
   const addNewProfile = (): void => {
     const result = addProfile(config, `Profile ${config.profiles.length + 1}`)
@@ -216,10 +242,15 @@ export function Sidebar({
       onToast('At least one profile is required', 'error')
       return
     }
+    const ruleReferences = rulesUsingProfile(config.rules, profileId)
     const confirmed = await confirm({
       title: 'Delete profile',
       message: 'Delete this profile and all of its pages?',
-      warning: 'Every page, button and action in the profile is removed. This cannot be undone.',
+      details: ruleReferences.slice(0, 5).map((rule) => `Automation rule: ${rule.name}`),
+      warning:
+        ruleReferences.length > 0
+          ? `Every page, button and action in the profile is removed. ${ruleReferences.length} automation rule${ruleReferences.length === 1 ? '' : 's'} reference it and will stay saved but inert. This cannot be undone.`
+          : 'Every page, button and action in the profile is removed. This cannot be undone.',
       confirmLabel: 'Delete profile',
       danger: true,
     })
@@ -251,10 +282,15 @@ export function Sidebar({
       onToast('A profile needs at least one page', 'error')
       return
     }
+    const ruleReferences = rulesUsingPage(config.rules, profile.id, pageId)
     const confirmed = await confirm({
       title: 'Delete page',
       message: 'Delete this page and its buttons?',
-      warning: 'The page and its buttons are removed. This cannot be undone.',
+      details: ruleReferences.slice(0, 5).map((rule) => `Automation rule: ${rule.name}`),
+      warning:
+        ruleReferences.length > 0
+          ? `The page and its buttons are removed. ${ruleReferences.length} automation rule${ruleReferences.length === 1 ? '' : 's'} reference this page and will stay saved but inert. This cannot be undone.`
+          : 'The page and its buttons are removed. This cannot be undone.',
       confirmLabel: 'Delete page',
       danger: true,
     })
@@ -375,6 +411,9 @@ export function Sidebar({
   const status = server.error ? 'error' : server.running ? 'online' : 'offline'
   const rigs = rigsOf(config)
   const rigSteps = rigs.reduce((count, rig) => count + rig.steps.length, 0)
+  const rules = rulesOf(config)
+  const enabledRules = enabledRuleCount(rules)
+  const rulesArmed = rulesView?.armed ?? settings.automationEnabled
 
   return (
     <aside className="sidebar">
@@ -585,6 +624,30 @@ export function Sidebar({
                 {rigs.length === 0
                   ? 'No rigs · guarded sequences'
                   : `${rigs.length} rig${rigs.length === 1 ? '' : 's'} · ${rigSteps} step${rigSteps === 1 ? '' : 's'}`}
+              </small>
+            </span>
+            <Icon name="chevron-right" size={14} />
+          </button>
+        </section>
+
+        <section className="sidebar-section">
+          <header className="section-header">
+            <span>
+              <em>05</em> Automation
+            </span>
+            <span className="section-count mono">{enabledRules}</span>
+          </header>
+          <button type="button" className="rig-open-row" onClick={onOpenRules}>
+            <Icon name="bolt" size={16} />
+            <span>
+              <span className="rule-open-title">
+                <strong>Rule engine</strong>
+                {!rulesArmed && <em className="rule-paused-tag mono">PAUSED</em>}
+              </span>
+              <small>
+                {rules.length === 0
+                  ? 'No rules · trigger → actions'
+                  : ruleSidebarSummary(rules, rulesView?.sources)}
               </small>
             </span>
             <Icon name="chevron-right" size={14} />
