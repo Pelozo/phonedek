@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { Action, KeyboardPlanStep, ObsPlanStep } from '@phonedek/shared'
-import { ActionExecutor } from '../src/main/executor'
+import type { Action, KeyboardPlanStep, ObsPlanStep, PlanGroup } from '@phonedek/shared'
+import { ActionExecutor, type PlanProgress } from '../src/main/executor'
 import type { HostActions } from '../src/main/host-actions'
 import type { KeySender } from '../src/main/key-sender'
 
@@ -467,5 +467,283 @@ describe('ActionExecutor OBS plan steps', () => {
       ),
     ).resolves.toEqual({ ok: true })
     expect(log).toEqual(['obs:startStream', 'keys:WIN+D'])
+  })
+})
+
+describe('ActionExecutor executePlan', () => {
+  const stepText = (text: string) => ({ kind: 'text', text, perCharMs: 0 }) as const
+  const stepKeys = (keys: string[]) => ({ kind: 'keys', keys, holdMs: 0, action: 'press' }) as const
+
+  it('runs groups in order and emits 1-based progress', async () => {
+    const log: string[] = []
+    const executor = new ActionExecutor(fakeKeys(log), fakeHost(log))
+    const progress: PlanProgress[] = []
+    const groups: PlanGroup[] = [
+      { label: 'first', steps: [stepText('one')], delayMs: 2 },
+      { label: 'second', steps: [stepKeys(['A'])] },
+    ]
+    const result = await executor.executePlan(groups, 'rig', {
+      onProgress: (entry) => progress.push(entry),
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      completed: 2,
+      total: 2,
+      failures: [],
+      cancelled: false,
+      timedOut: false,
+      stoppedOnFailure: false,
+    })
+    expect(log).toEqual(['text:one', 'keys:A'])
+    expect(progress).toEqual([
+      { index: 1, total: 2, label: 'first', ok: true },
+      { index: 2, total: 2, label: 'second', ok: true },
+    ])
+  })
+
+  it('holds one queue slot for the whole rig', async () => {
+    const log: string[] = []
+    let release: (() => void) | null = null
+    const keys: KeySender = {
+      async send(step) {
+        if (step.kind !== 'keys') return
+        log.push(`start:${step.keys.join('+')}`)
+        if (step.keys[0] === 'A') {
+          await new Promise<void>((resolve) => {
+            release = resolve
+          })
+        }
+        log.push(`end:${step.keys.join('+')}`)
+      },
+    }
+    const executor = new ActionExecutor(keys, fakeHost(log))
+    const rig = executor.executePlan(
+      [
+        { label: 'a', steps: [stepKeys(['A'])] },
+        { label: 'b', steps: [stepKeys(['B'])] },
+      ],
+      'rig',
+    )
+    const press = executor.execute([{ type: 'hotkey', keys: ['C'] }], 'press')
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(log).toEqual(['start:A'])
+    if (release) (release as () => void)()
+    await rig
+    await press
+    expect(log).toEqual(['start:A', 'end:A', 'start:B', 'end:B', 'start:C', 'end:C'])
+  })
+
+  it('stops on the first failed group by default', async () => {
+    const log: string[] = []
+    const executor = new ActionExecutor(fakeKeys(log), fakeHost(log))
+    const progress: PlanProgress[] = []
+    const result = await executor.executePlan(
+      [
+        { label: 'ok', steps: [stepText('one')] },
+        { label: 'bad', steps: [stepText('boom')] },
+        { label: 'after', steps: [stepText('three')] },
+      ],
+      'rig',
+      { onProgress: (entry) => progress.push(entry) },
+    )
+
+    expect(result.ok).toBe(false)
+    expect(result.completed).toBe(1)
+    expect(result.total).toBe(3)
+    expect(result.failures).toEqual([{ index: 2, label: 'bad', error: 'key sender exploded' }])
+    expect(result.error).toBe('key sender exploded')
+    expect(log).toEqual(['text:one', 'text:boom'])
+    expect(progress[1]).toEqual({
+      index: 2,
+      total: 3,
+      label: 'bad',
+      ok: false,
+      error: 'key sender exploded',
+    })
+  })
+
+  it('continues in continue mode and honours a per-group override', async () => {
+    const groups: PlanGroup[] = [
+      { label: 'ok', steps: [stepText('one')] },
+      { label: 'bad', steps: [stepText('boom')] },
+      { label: 'after', steps: [stepText('three')] },
+    ]
+
+    const continueLog: string[] = []
+    const continuing = await new ActionExecutor(fakeKeys(continueLog), fakeHost(continueLog)).executePlan(
+      groups,
+      'rig',
+      { mode: 'continue' },
+    )
+    expect(continuing.ok).toBe(false)
+    expect(continuing.completed).toBe(2)
+    expect(continuing.failures).toHaveLength(1)
+    expect(continueLog).toEqual(['text:one', 'text:boom', 'text:three'])
+
+    const overrideLog: string[] = []
+    const stopped = await new ActionExecutor(fakeKeys(overrideLog), fakeHost(overrideLog)).executePlan(
+      [
+        { label: 'ok', steps: [stepText('one')] },
+        { label: 'bad', steps: [stepText('boom')], continueOnError: false },
+        { label: 'after', steps: [stepText('three')] },
+      ],
+      'rig',
+      { mode: 'continue' },
+    )
+    expect(stopped.completed).toBe(1)
+    expect(overrideLog).toEqual(['text:one', 'text:boom'])
+
+    const perStepLog: string[] = []
+    const perStep = await new ActionExecutor(fakeKeys(perStepLog), fakeHost(perStepLog)).executePlan(
+      [
+        { label: 'bad', steps: [stepText('boom')], continueOnError: true },
+        { label: 'after', steps: [stepText('three')] },
+      ],
+      'rig',
+    )
+    expect(perStep.ok).toBe(false)
+    expect(perStep.completed).toBe(1)
+    expect(perStepLog).toEqual(['text:boom', 'text:three'])
+  })
+
+  it('checks the deadline before each group without cancelling an in-flight call', async () => {
+    const log: string[] = []
+    const host: HostActions = {
+      ...fakeHost(log),
+      async runCommand(command) {
+        await new Promise((resolve) => setTimeout(resolve, 40))
+        log.push(`command:${command}`)
+      },
+    }
+    const executor = new ActionExecutor(fakeKeys(log), host)
+    const result = await executor.executePlan(
+      [
+        { label: 'slow', steps: [{ kind: 'command', command: 'slow', hidden: true }] },
+        { label: 'never', steps: [stepText('never')] },
+      ],
+      'rig',
+      { deadlineMs: 20 },
+    )
+
+    expect(result.timedOut).toBe(true)
+    expect(result.cancelled).toBe(false)
+    expect(result.ok).toBe(false)
+    expect(result.completed).toBe(1)
+    expect(result.error).toBe('Timed out')
+    expect(log).toEqual(['command:slow'])
+  })
+
+  it('times out inside a group delay', async () => {
+    const log: string[] = []
+    const executor = new ActionExecutor(fakeKeys(log), fakeHost(log))
+    const started = Date.now()
+    const result = await executor.executePlan(
+      [
+        { label: 'first', steps: [], delayMs: 80 },
+        { label: 'second', steps: [stepText('second')] },
+      ],
+      'rig',
+      { deadlineMs: 20 },
+    )
+
+    expect(result.timedOut).toBe(true)
+    expect(result.completed).toBe(1)
+    expect(Date.now() - started).toBeLessThan(70)
+    expect(log).toEqual([])
+  })
+
+  it('aborts during a group delay and skips the remaining groups', async () => {
+    const log: string[] = []
+    const executor = new ActionExecutor(fakeKeys(log), fakeHost(log))
+    const controller = new AbortController()
+    const pending = executor.executePlan(
+      [
+        { label: 'first', steps: [stepText('one')], delayMs: 200 },
+        { label: 'second', steps: [stepText('two')] },
+      ],
+      'rig',
+      { signal: controller.signal },
+    )
+    setTimeout(() => controller.abort(), 10)
+
+    const result = await pending
+    expect(result.cancelled).toBe(true)
+    expect(result.timedOut).toBe(false)
+    expect(result.completed).toBe(1)
+    expect(result.error).toBe('Cancelled')
+    expect(log).toEqual(['text:one'])
+  })
+
+  it('does not start when the signal is already aborted', async () => {
+    const log: string[] = []
+    const executor = new ActionExecutor(fakeKeys(log), fakeHost(log))
+    const controller = new AbortController()
+    controller.abort()
+    const result = await executor.executePlan(
+      [{ label: 'first', steps: [stepText('one')] }],
+      'rig',
+      { signal: controller.signal },
+    )
+    expect(result).toEqual({
+      ok: false,
+      error: 'Cancelled',
+      completed: 0,
+      total: 1,
+      failures: [],
+      cancelled: true,
+      timedOut: false,
+      stoppedOnFailure: false,
+    })
+    expect(log).toEqual([])
+  })
+
+  it('releases only the failing group’s held keys', async () => {
+    const log: string[] = []
+    const keys: KeySender = {
+      async send(step) {
+        if (step.kind === 'keys') {
+          log.push(`keys:${step.action}:${step.keys.join('+')}`)
+          return
+        }
+        if (step.kind === 'text') throw new Error('text failed')
+      },
+    }
+    const executor = new ActionExecutor(keys, fakeHost(log))
+    const result = await executor.executePlan(
+      [
+        { label: 'hold', steps: [{ kind: 'keys', keys: ['CTRL'], holdMs: 0, action: 'down' }] },
+        {
+          label: 'bad',
+          steps: [
+            { kind: 'keys', keys: ['SHIFT'], holdMs: 0, action: 'down' },
+            { kind: 'text', text: 'boom', perCharMs: 0 },
+          ],
+        },
+      ],
+      'rig',
+    )
+
+    expect(result.completed).toBe(1)
+    expect(result.failures).toHaveLength(1)
+    // SHIFT (pressed by the failed group) is released; CTRL stays held.
+    expect(log).toEqual(['keys:down:CTRL', 'keys:down:SHIFT', 'keys:up:SHIFT'])
+  })
+
+  it('keeps the screenshot message through executePlan', async () => {
+    const log: string[] = []
+    const screenshots: string[] = []
+    const executor = new ActionExecutor(fakeKeys(log), fakeHost(log), undefined, {
+      platform: 'darwin',
+      onScreenshot: (path) => screenshots.push(path),
+    })
+    const result = await executor.executePlan(
+      [{ label: 'shot', steps: [stepKeys(['WIN', 'SHIFT', 'S'])] }],
+      'shot',
+    )
+    expect(result.ok).toBe(true)
+    expect(result.message).toBe(`Screenshot saved to Desktop: ${SCREENSHOT_BASENAME}`)
+    expect(screenshots).toEqual([SCREENSHOT_PATH])
   })
 })
