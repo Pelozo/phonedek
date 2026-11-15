@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { DeckButton, DeckConfig, DeckPage, DeckProfile, GridSettings } from '@phonedek/shared'
+import { rigsOf } from '../lib/rigs'
 import {
   addPage,
   addProfile,
@@ -173,6 +174,7 @@ export function Sidebar({
   onSelectPage,
   onOpenPair,
   onOpenSettings,
+  onOpenRigs,
   onToast,
 }: {
   config: DeckConfig
@@ -185,6 +187,7 @@ export function Sidebar({
   onSelectPage: (id: string) => void
   onOpenPair: () => void
   onOpenSettings: () => void
+  onOpenRigs: () => void
   onToast: (message: string, kind?: 'info' | 'success' | 'error') => void
 }) {
   const [profileGridOpen, setProfileGridOpen] = useState(false)
@@ -370,6 +373,8 @@ export function Sidebar({
   }
 
   const status = server.error ? 'error' : server.running ? 'online' : 'offline'
+  const rigs = rigsOf(config)
+  const rigSteps = rigs.reduce((count, rig) => count + rig.steps.length, 0)
 
   return (
     <aside className="sidebar">
@@ -563,6 +568,27 @@ export function Sidebar({
               onCommit={(name) => onChangeConfig(updatePageMeta(config, profile.id, page.id, { name }))}
             />
           </label>
+        </section>
+
+        <section className="sidebar-section">
+          <header className="section-header">
+            <span>
+              <em>04</em> Rigs
+            </span>
+            <span className="section-count mono">{rigs.length}</span>
+          </header>
+          <button type="button" className="rig-open-row" onClick={onOpenRigs}>
+            <Icon name="bolt" size={16} />
+            <span>
+              <strong>Rig library</strong>
+              <small>
+                {rigs.length === 0
+                  ? 'No rigs · guarded sequences'
+                  : `${rigs.length} rig${rigs.length === 1 ? '' : 's'} · ${rigSteps} step${rigSteps === 1 ? '' : 's'}`}
+              </small>
+            </span>
+            <Icon name="chevron-right" size={14} />
+          </button>
         </section>
       </div>
 

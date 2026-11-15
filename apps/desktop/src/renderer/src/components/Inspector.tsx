@@ -8,6 +8,7 @@ import type {
   DeckButton,
   MicAction,
   PointerBinding,
+  RigPreset,
   ShortcutBinding,
   SliderOrDialControlSpec,
   ScrollModifier,
@@ -33,7 +34,9 @@ import {
   canPlaceButton,
   compactPage,
   describeAction,
+  estimateRigMs,
   hasHostActions,
+  isRigRunAction,
   occupiedCells,
   pageCapacity,
   pageGrid,
@@ -45,7 +48,7 @@ import {
   updateProfileMeta,
   updateTheme,
 } from '@phonedek/shared'
-import type { ServerInfoView } from '../../../shared/api'
+import type { RigStatusView, ServerInfoView } from '../../../shared/api'
 import {
   obsInputAvailability,
   obsStateBadge,
@@ -90,6 +93,17 @@ import { backgroundStyle, buttonBackground, textColorFor } from '../lib/ui'
 import { KEYBOARD_ACTION_TITLE, keyboardAction } from '../lib/keyboard'
 import { MIXER_ACTION_TITLE, mixerAction } from '../lib/mixer'
 import { streamerbotActionSummary } from '../lib/streamerbot'
+import {
+  findRig,
+  formatRigDuration,
+  rigActionOf,
+  rigHasDestructiveSteps,
+  rigRunTone,
+  rigsOf,
+  rigStateOf,
+  rigStatusText,
+  rigStepSummary,
+} from '../lib/rigs'
 import { ActionEditor } from './ActionEditor'
 import { BackgroundEditor } from './BackgroundEditor'
 import { ControlPreview } from './ControlPreview'
@@ -102,6 +116,8 @@ import { MoveToDialog } from './MoveToDialog'
 import { ObsStatusEditor } from './ObsStatusEditor'
 import { TwitchStatusEditor } from './TwitchStatusEditor'
 import { PresetPicker } from './PresetPicker'
+import { RigPickerDialog } from './RigPickerDialog'
+import { RigStatusEditor } from './RigStatusEditor'
 import { ColorField, NumberField, Toggle, useConfirm } from './Primitives'
 import { ShortcutDialog } from './ShortcutDialog'
 import { useHostPlatform } from '../lib/platform'
@@ -126,6 +142,9 @@ const asLegacyAction = (action: EditorAction): Action => action as unknown as Ac
 
 /** Static status labels for the binding families the editor can hold. */
 function stateBadge(state: StateBinding): string {
+  // The staged rig binding is already accepted by the schema but not yet part
+  // of `StateBinding`; inspect it structurally so the editor never crashes.
+  if (rigStateOf(state)) return 'RIG'
   if (state.type === 'obs') return obsStateBadge(state.target)
   if (state.type === 'twitch') return twitchStateBadge(state.target)
   if (state.type === 'appVolume') return appVolumeStateBadge(state.target)
@@ -135,7 +154,13 @@ function stateBadge(state: StateBinding): string {
 function stateSummary(
   state: StateBinding,
   lights: ServerInfoView['settings']['lights'] = [],
+  rigs: readonly RigPreset[] = [],
 ): string {
+  const rigState = rigStateOf(state)
+  if (rigState) {
+    const rig = findRig(rigs, rigState.presetId)
+    return rig ? `${rig.name} · last run` : `Missing rig · ${rigState.presetId}`
+  }
   if (state.type === 'obs') return obsStateBindingSummary(state) ?? 'OBS status'
   if (state.type === 'twitch') return twitchStateBindingSummary(state) ?? 'Twitch status'
   if (state.type === 'appVolume') return appVolumeStateBindingSummary(state) ?? 'App status'
@@ -186,6 +211,7 @@ export function Inspector({
   onCutButton,
   onPasteButton,
   onMoveButton,
+  onOpenRig,
 }: {
   config: DeckConfig
   profile: DeckProfile
@@ -201,6 +227,7 @@ export function Inspector({
   onCutButton: () => void
   onPasteButton: () => void
   onMoveButton: (profileId: string, pageId: string) => void
+  onOpenRig: (rigId?: string) => void
 }) {
   const [customBackground, setCustomBackground] = useState(button?.background !== undefined)
   const [customText, setCustomText] = useState(button?.textColor !== undefined)
@@ -210,12 +237,20 @@ export function Inspector({
   const [iconBusy, setIconBusy] = useState<'image' | 'video' | null>(null)
   const [shortcutTarget, setShortcutTarget] = useState<'keys' | 'reverse' | 'hold' | null>(null)
   const [appActionPicker, setAppActionPicker] = useState(false)
+  const [rigPickerOpen, setRigPickerOpen] = useState(false)
+  const [rigBusy, setRigBusy] = useState<'check' | 'run' | null>(null)
+  const [rigStatus, setRigStatus] = useState<RigStatusView | null>(null)
+  const [rigReport, setRigReport] = useState<string | null>(null)
   const platform = useHostPlatform()
   const confirm = useConfirm()
+  const rigs = rigsOf(config)
+  const rigAction = rigActionOf(button?.actions)
+  const activeRig = findRig(rigs, rigAction?.presetId)
   const initialObsBinding =
     button?.control && button.control.kind !== 'trackpad' && button.control.binding.type === 'obs'
       ? button.control.binding
       : null
+  const rigState = rigStateOf(button?.state)
   const statusBinding = button?.state ?? null
   const appControlBinding =
     button?.control && button.control.kind !== 'trackpad' && button.control.binding.type === 'appVolume'
@@ -251,7 +286,34 @@ export function Inspector({
   useEffect(() => {
     setShortcutTarget(null)
     setAppActionPicker(false)
+    setRigPickerOpen(false)
   }, [button?.id])
+
+  useEffect(() => {
+    if (!rigAction) {
+      setRigStatus(null)
+      setRigReport(null)
+      return
+    }
+    let active = true
+    const refresh = async (): Promise<void> => {
+      try {
+        const list = await window.phonedek.getRigStatuses()
+        if (!active) return
+        setRigStatus(list.find((item) => item.presetId === rigAction.presetId) ?? null)
+      } catch {
+        // Status is informational; the original rig card still works.
+      }
+    }
+    void refresh()
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refresh()
+    }, 2000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [rigAction?.presetId])
 
   const buttonDefaultBackground = profile.theme.buttonBackground
   const primaryKey = platform === 'darwin' ? '⌘' : 'Ctrl'
@@ -468,6 +530,134 @@ export function Inspector({
 
   const update = (patch: Partial<Omit<DeckButton, 'id' | 'slot'>>): void => {
     onChangeConfig(updateButton(config, profile.id, page.id, button.id, patch))
+  }
+
+  const buttonUntitled = (() => {
+    const label = button.label.trim().toLowerCase()
+    return (
+      label === '' ||
+      label === 'untitled' ||
+      label === 'untitled button' ||
+      label === 'new button'
+    )
+  })()
+
+  const refreshRigStatus = async (): Promise<void> => {
+    if (!rigAction) return
+    try {
+      const list = await window.phonedek.getRigStatuses()
+      setRigStatus(list.find((item) => item.presetId === rigAction.presetId) ?? null)
+    } catch {
+      // Keep the last reading; status is informational.
+    }
+  }
+
+  const pickRig = async (selected: RigPreset): Promise<void> => {
+    const replacingActions = button.actions.length > 0
+    const removingControl = button.control !== undefined
+    if (replacingActions || removingControl) {
+      const details: string[] = []
+      if (replacingActions) {
+        details.push(
+          `This replaces ${button.actions.length} existing action${button.actions.length === 1 ? '' : 's'}.`,
+        )
+      }
+      if (removingControl) details.push('Its continuous control is removed; a rig button is tap-only.')
+      const ok = await confirm({
+        title: 'Use a rig on this button',
+        message: `Make “${button.label || 'Untitled'}” run “${selected.name}”?`,
+        details,
+        warning: 'The previous actions are not recoverable from this button after you save.',
+        confirmLabel: 'Use rig',
+      })
+      if (!ok) return
+    }
+    const action = { type: 'rig', action: 'run', presetId: selected.id } as unknown as Action
+    update({
+      actions: [action],
+      control: undefined,
+      ...(buttonUntitled
+        ? { label: selected.name, icon: selected.icon ?? '⚡' }
+        : {}),
+    })
+    setRigPickerOpen(false)
+    onToast(`Button now runs “${selected.name}”`, 'success')
+  }
+
+  const checkRigAction = async (): Promise<void> => {
+    if (!rigAction) return
+    setRigBusy('check')
+    try {
+      const preview = await window.phonedek.previewRig(rigAction.presetId)
+      const summary = preview.ok
+        ? `Pre-flight OK · ${preview.guards.length} guard${preview.guards.length === 1 ? '' : 's'} passed · ~${formatRigDuration(preview.estimatedMs)}`
+        : preview.error?.trim() ||
+          `Blocked: ${preview.blocked.map((guard) => guard.label).join(', ') || 'guard check failed'}`
+      setRigReport(summary)
+      onToast(summary, preview.ok ? 'success' : 'error')
+      await refreshRigStatus()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setRigReport(message)
+      onToast(message, 'error')
+    } finally {
+      setRigBusy(null)
+    }
+  }
+
+  const runRigAction = async (): Promise<void> => {
+    if (!rigAction) return
+    if (!activeRig) {
+      onToast('This button points at a rig that no longer exists.', 'error')
+      return
+    }
+    if (rigHasDestructiveSteps(activeRig)) {
+      const ok = await confirm({
+        title: 'Run rig',
+        message: `Run “${activeRig.name}” on this PC?`,
+        details: activeRig.steps
+          .filter((step) => {
+            const action = step.action
+            return (
+              action.type === 'command' ||
+              action.type === 'launch' ||
+              (action.type === 'obs' &&
+                (action.action === 'stopStream' || action.action === 'stopRecord'))
+            )
+          })
+          .slice(0, 5)
+          .map((step) => rigStepSummary(step).label),
+        warning: 'Stops streaming/recording, launches an app or runs a command. This cannot be rolled back.',
+        confirmLabel: 'Run rig',
+        danger: true,
+      })
+      if (!ok) return
+    }
+    setRigBusy('run')
+    try {
+      const result = await window.phonedek.runRig(activeRig.id)
+      const message =
+        result.message?.trim() ||
+        result.error?.trim() ||
+        `${result.status.toUpperCase()} · ${result.completed}/${result.total} steps · ${formatRigDuration(result.durationMs)}`
+      setRigReport(message)
+      onToast(
+        message,
+        result.ok ? 'success' : result.status === 'blocked' || result.status === 'busy' ? 'info' : 'error',
+      )
+      await refreshRigStatus()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setRigReport(message)
+      onToast(message, 'error')
+    } finally {
+      setRigBusy(null)
+    }
+  }
+
+  const removeRigAction = (): void => {
+    update({ actions: button.actions.filter((action) => !isRigRunAction(action)) })
+    onToast('Rig action removed from this button', 'info')
   }
 
   const activeGrid = pageGrid(profile, page)
@@ -1159,8 +1349,16 @@ export function Inspector({
           </div>
         </div>
         <div className="row gap">
-          {hasHostActions(button.actions) && (
-            <button type="button" className="button secondary small" onClick={() => void testActions(button.actions, button.label)}>
+          {(rigAction !== undefined || hasHostActions(button.actions)) && (
+            <button
+              type="button"
+              className="button secondary small"
+              onClick={() =>
+                rigAction !== undefined
+                  ? void runRigAction()
+                  : void testActions(button.actions, button.label)
+              }
+            >
               <Icon name="play" size={14} /> Test
             </button>
           )}
@@ -1199,7 +1397,7 @@ export function Inspector({
           {button.state && (
             <div className="obs-state-summary">
               <span className="obs-state-pill">{stateBadge(button.state)}</span>
-              <span>{stateSummary(button.state, lights)}</span>
+              <span>{stateSummary(button.state, lights, rigs)}</span>
             </div>
           )}
           <p className="hint">
@@ -1401,19 +1599,19 @@ export function Inspector({
             <div className="section-heading">
               <h3>Status</h3>
               <span className="inspector-badge mono">
-                {statusBinding ? stateBadge(statusBinding) : 'OFF'}
+                {rigState ? 'RIG' : statusBinding ? stateBadge(statusBinding) : 'OFF'}
               </span>
             </div>
             <p className="hint">
               Add a live readout to this button without replacing its tap actions. OBS uses its
               WebSocket connection, Twitch uses the Helix account, lights use the local device
-              APIs from Settings → Lights, and app audio uses the desktop mixer. All feed the
-              phone through control-state-v1.
+              APIs from Settings → Lights, app audio uses the desktop mixer, and Rig shows the
+              last run. All feed the phone through control-state-v1.
             </p>
             <label className="field">
               <span>Status source</span>
               <select
-                value={statusBinding?.type ?? 'off'}
+                value={rigState ? 'rig' : (statusBinding?.type ?? 'off')}
                 onChange={(event) => {
                   const value = event.target.value
                   if (value === 'off') update({ state: undefined })
@@ -1425,6 +1623,14 @@ export function Inspector({
                     update({ state: { type: 'light', target: 'power' } })
                   } else if (value === 'appVolume') {
                     update({ state: { type: 'appVolume', target: 'volume', match: {} } })
+                  } else if (value === 'rig') {
+                    if (rigs.length === 0) {
+                      onToast('Create a rig in the rig library first.', 'info')
+                      return
+                    }
+                    update({
+                      state: { type: 'rig', presetId: rigs[0]!.id } as unknown as StateBinding,
+                    })
                   }
                 }}
               >
@@ -1433,8 +1639,30 @@ export function Inspector({
                 <option value="twitch">Twitch</option>
                 <option value="light">Local light</option>
                 <option value="appVolume">App audio</option>
+                <option value="rig" disabled={rigs.length === 0}>
+                  {rigs.length === 0 ? 'Rig last run (no rigs)' : 'Rig last run'}
+                </option>
               </select>
             </label>
+            {rigState && (
+              <>
+                <RigStatusEditor
+                  key={`rig-${button.id}`}
+                  rigs={rigs}
+                  binding={rigState}
+                  onUpdate={(state) => update({ state: state as unknown as StateBinding })}
+                  onOpenRig={onOpenRig}
+                  onOpenLibrary={() => onOpenRig()}
+                />
+                <button
+                  type="button"
+                  className="button danger ghost full"
+                  onClick={() => update({ state: undefined })}
+                >
+                  <Icon name="trash" size={15} /> Remove status
+                </button>
+              </>
+            )}
             {statusBinding?.type === 'obs' && (
               <>
                 <ObsStatusEditor
@@ -2357,12 +2585,104 @@ export function Inspector({
                   { label: 'Toggle light power', icon: 'light', description: 'Switch a configured light on or off', onClick: () => addLightAction('toggle') },
                   { label: 'Delay', icon: 'clock', description: 'Wait before the next action', onClick: () => update({ actions: [...button.actions, makeAction('delay')] }) },
                   { label: 'Change page', icon: 'layers', description: 'Navigate to another deck page', onClick: () => update({ actions: [...button.actions, makeAction('page')] }) },
+                  { label: 'Run rig', section: 'Automation', icon: 'bolt', description: 'Replace this button with one guarded rig', onClick: () => setRigPickerOpen(true) },
                 ]}
               />
             </div>
           </div>
 
-          {button.actions.length === 0 ? (
+          {rigAction ? (
+            (() => {
+              const reading = rigStatusText(rigStatus)
+              const estimate = activeRig ? estimateRigMs(activeRig) : 0
+              return (
+                <div className="rig-card">
+                  <header className="rig-card-head">
+                    <span className="rig-card-icon" aria-hidden="true">
+                      {activeRig?.icon || '⚡'}
+                    </span>
+                    <div className="rig-card-title">
+                      <span className="rig-kicker">RIG ACTION</span>
+                      <strong>{activeRig?.name ?? 'Missing rig'}</strong>
+                      <small className="mono">
+                        {activeRig
+                          ? `${activeRig.steps.length} STEP${activeRig.steps.length === 1 ? '' : 'S'} · ${
+                              activeRig.guards?.length ?? 0
+                            } GUARD${(activeRig.guards?.length ?? 0) === 1 ? '' : 'S'} · ~${formatRigDuration(estimate)}`
+                          : `PRESET ${rigAction.presetId} NOT FOUND`}
+                      </small>
+                    </div>
+                    <span
+                      className={`rig-status-pill ${reading.tone}`}
+                      title={reading.detail}
+                    >
+                      <span className={`rig-dot ${reading.tone}`} />
+                      {reading.label}
+                      <span className="rig-status-age mono">{reading.age}</span>
+                    </span>
+                  </header>
+                  <p className="hint rig-card-detail">{reading.detail}</p>
+                  {!activeRig && (
+                    <div className="warning">
+                      <Icon name="bolt" size={16} />
+                      This button points at a rig that no longer exists. Pick another rig or remove
+                      the action.
+                    </div>
+                  )}
+                  <div className="rig-card-actions">
+                    <button
+                      type="button"
+                      className="button secondary small"
+                      onClick={() => onOpenRig(activeRig?.id)}
+                      disabled={!activeRig}
+                    >
+                      <Icon name="bolt" size={14} /> Edit rig
+                    </button>
+                    <button
+                      type="button"
+                      className="button secondary small"
+                      onClick={() => void checkRigAction()}
+                      disabled={!activeRig || rigBusy !== null}
+                    >
+                      <Icon name={rigBusy === 'check' ? 'refresh' : 'check'} size={14} /> Check
+                    </button>
+                    <button
+                      type="button"
+                      className="button primary small"
+                      onClick={() => void runRigAction()}
+                      disabled={!activeRig || rigBusy !== null || rigStatus?.active === true}
+                    >
+                      <Icon name="play" size={14} /> Run
+                    </button>
+                    <button
+                      type="button"
+                      className="button danger ghost small"
+                      onClick={removeRigAction}
+                    >
+                      <Icon name="trash" size={14} /> Remove
+                    </button>
+                  </div>
+                  {rigReport && <p className="rig-card-report">{rigReport}</p>}
+                  {button.actions.length > 1 && (
+                    <div className="warning rig-card-warning">
+                      <Icon name="bolt" size={16} />
+                      This button has {button.actions.length - 1} extra action
+                      {button.actions.length === 2 ? '' : 's'}. A rig button must be tap-only.
+                      <button
+                        type="button"
+                        className="button secondary small"
+                        onClick={() =>
+                          update({ actions: button.actions.filter((action) => isRigRunAction(action)) })
+                        }
+                      >
+                        Keep only the rig
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )
+            })()
+          ) : button.actions.length === 0 ? (
             <div className="empty-state small">
               <Icon name="bolt" size={22} />
               <p>
@@ -2429,6 +2749,17 @@ export function Inspector({
       </div>
 
       {presetsOpen && <PresetPicker onClose={() => setPresetsOpen(false)} onPick={addPreset} />}
+      {rigPickerOpen && (
+        <RigPickerDialog
+          config={config}
+          onPick={(rig) => void pickRig(rig)}
+          onClose={() => setRigPickerOpen(false)}
+          onOpenLibrary={() => {
+            setRigPickerOpen(false)
+            onOpenRig()
+          }}
+        />
+      )}
       {appActionPicker && (
         <MixerSessionDialog
           title="Add app audio mute"

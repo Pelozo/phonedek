@@ -224,6 +224,9 @@ export function ActionEditor({
   onDelete,
   onMove,
   onTest,
+  collapsible = false,
+  collapsed = false,
+  onToggleCollapse,
 }: {
   action: EditorAction
   index: number
@@ -234,6 +237,10 @@ export function ActionEditor({
   onDelete: () => void
   onMove: (direction: -1 | 1) => void
   onTest: (action: EditorAction) => void
+  /** Optional compact host (rig steps): the card can stay collapsed by default. */
+  collapsible?: boolean
+  collapsed?: boolean
+  onToggleCollapse?: () => void
 }) {
   const [shortcutOpen, setShortcutOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -243,6 +250,8 @@ export function ActionEditor({
   const platform = useHostPlatform()
   /** Phone-local launchers have no host test and show a PHONE chip instead. */
   const phoneLocal = isKeyboardAction(action) || isMixerAction(action)
+  const collapsibleCard = collapsible
+  const expanded = collapsibleCard ? !collapsed : action.type === 'macro' ? macroOpen : true
 
   useEffect(() => {
     if (macroRecording && !macroOpen) setMacroOpen(true)
@@ -273,21 +282,42 @@ export function ActionEditor({
         <span className="action-icon">
           <Icon name={actionIconName(action)} size={16} />
         </span>
-        {action.type === 'macro' ? (
+        {action.type === 'macro' || collapsibleCard ? (
           <button
             type="button"
             className="action-toggle"
-            aria-expanded={macroOpen}
-            aria-controls={macroOpen ? macroBodyId : undefined}
-            disabled={macroRecording}
-            title={macroRecording ? 'Recording in progress' : macroOpen ? 'Collapse macro' : 'Expand macro'}
-            onClick={() => setMacroOpen((value) => !value)}
+            aria-expanded={expanded}
+            aria-controls={expanded && action.type === 'macro' ? macroBodyId : undefined}
+            disabled={action.type === 'macro' && macroRecording}
+            title={
+              action.type === 'macro'
+                ? macroRecording
+                  ? 'Recording in progress'
+                  : expanded
+                    ? 'Collapse macro'
+                    : 'Expand macro'
+                : expanded
+                  ? 'Collapse action fields'
+                  : 'Expand action fields'
+            }
+            onClick={() => {
+              if (collapsibleCard) onToggleCollapse?.()
+              else if (action.type === 'macro') setMacroOpen((value) => !value)
+            }}
           >
             <span className="action-title">
-              <strong>{ACTION_TITLES[action.type]}</strong>
-              <small>{macroRecording ? 'Recording in progress…' : macroSummary(action)}</small>
+              <strong>
+                {action.type === 'macro' ? ACTION_TITLES[action.type] : actionTitle(action)}
+              </strong>
+              <small>
+                {action.type === 'macro'
+                  ? macroRecording
+                    ? 'Recording in progress…'
+                    : macroSummary(action)
+                  : actionSummary(action, platform)}
+              </small>
             </span>
-            <Icon name={macroOpen ? 'chevron-down' : 'chevron-right'} size={15} />
+            <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={15} />
           </button>
         ) : (
           <div className="action-title">
@@ -322,7 +352,7 @@ export function ActionEditor({
         </div>
       </header>
 
-      {(action.type !== 'macro' || macroOpen) && (
+      {expanded && (
         <div className="action-body" id={action.type === 'macro' ? macroBodyId : undefined}>
           {isKeyboardAction(action) && (
             <p className="hint keyboard-action-body">

@@ -15,7 +15,8 @@ import { obsStateBadge, obsStateBindingSummary } from '../lib/obs'
 import { twitchStateBadge, twitchStateBindingSummary } from '../lib/twitch'
 import { lightStateBadge, lightStateBindingSummary } from '../lib/lights'
 import { appVolumeStateBadge, appVolumeStateBindingSummary } from '../lib/appVolume'
-import type { StateBinding } from '@phonedek/shared'
+import { findRig, rigActionOf, rigsOf, rigStateOf } from '../lib/rigs'
+import type { RigPreset, StateBinding } from '@phonedek/shared'
 import { backgroundStyle, buttonBackground, isVideoBackground, textColorFor } from '../lib/ui'
 import { KEYBOARD_BADGE, hasKeyboardAction, hasKeyboardLauncher } from '../lib/keyboard'
 import { MIXER_BADGE, hasMixerAction, hasMixerLauncher } from '../lib/mixer'
@@ -24,6 +25,7 @@ import { DeckMedia } from './DeckMedia'
 import { Icon } from './Icons'
 
 function statusBadge(state: StateBinding): string {
+  if (rigStateOf(state)) return 'RIG'
   if (state.type === 'obs') return obsStateBadge(state.target)
   if (state.type === 'twitch') return twitchStateBadge(state.target)
   if (state.type === 'appVolume') return appVolumeStateBadge(state.target)
@@ -33,7 +35,13 @@ function statusBadge(state: StateBinding): string {
 function statusSummary(
   state: StateBinding,
   lights: ServerInfoView['settings']['lights'],
+  rigs: readonly RigPreset[],
 ): string | null {
+  const rigState = rigStateOf(state)
+  if (rigState) {
+    const rig = findRig(rigs, rigState.presetId)
+    return rig ? `${rig.name} · last run` : `Missing rig · ${rigState.presetId}`
+  }
   if (state.type === 'obs') return obsStateBindingSummary(state)
   if (state.type === 'twitch') return twitchStateBindingSummary(state)
   if (state.type === 'appVolume') return appVolumeStateBindingSummary(state)
@@ -65,6 +73,7 @@ export function DeckCanvas({
   const slots = pageCapacity(profile, page)
   const bySlot = new Map(page.buttons.map((button) => [button.slot, button]))
   const occupied = occupiedCells(page.buttons, grid)
+  const rigs = rigsOf(config)
   const deckNumber = String(Math.max(1, config.profiles.findIndex((item) => item.id === profile.id) + 1)).padStart(2, '0')
 
   const addAt = (slot: number): void => {
@@ -164,6 +173,8 @@ export function DeckCanvas({
               const spanning = spanColumns > 1 || spanRows > 1
               const isSelected = button.id === selectedButtonId
               const background = buttonBackground(button, page, profile, server)
+              const rigAction = rigActionOf(button.actions)
+              const buttonRig = findRig(rigs, rigAction?.presetId)
               const resolvedBackground = button.background ?? profile.theme.buttonBackground
               const buttonVideo = isVideoBackground(resolvedBackground) ? resolvedBackground : null
               return (
@@ -224,9 +235,21 @@ export function DeckCanvas({
                   {button.state && (
                     <span
                       className="deck-status-badge"
-                      title={statusSummary(button.state, server?.settings.lights ?? []) ?? undefined}
+                      title={statusSummary(button.state, server?.settings.lights ?? [], rigs) ?? undefined}
                     >
                       {statusBadge(button.state)}
+                    </span>
+                  )}
+                  {rigAction && !rigStateOf(button.state) && (
+                    <span
+                      className="deck-status-badge rig"
+                      title={
+                        buttonRig
+                          ? `Runs rig “${buttonRig.name}” · ${buttonRig.steps.length} steps`
+                          : `Missing rig · ${rigAction.presetId}`
+                      }
+                    >
+                      RIG
                     </span>
                   )}
                   {hasKeyboardLauncher(button) && (

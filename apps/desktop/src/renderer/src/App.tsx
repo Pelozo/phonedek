@@ -23,6 +23,7 @@ import { ObsInputDialog } from './components/ObsInputDialog'
 import { PairDialog } from './components/PairDialog'
 import { PermissionBanner } from './components/PermissionBanner'
 import { ConfirmProvider } from './components/Primitives'
+import { RigLibraryDialog } from './components/RigLibraryDialog'
 import { SettingsDialog } from './components/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
 import { WhatsNewDialog } from './components/WhatsNewDialog'
@@ -108,6 +109,7 @@ function AppContent() {
   const [settingsCategory, setSettingsCategory] = useState<SettingsCategoryId>('general')
   const [whatsNew, setWhatsNew] = useState<WhatsNewRequest | null>(null)
   const [obsPickerOpen, setObsPickerOpen] = useState(false)
+  const [rigLibrary, setRigLibrary] = useState<{ rigId?: string } | null>(null)
   const [lightPicker, setLightPicker] = useState<LightPickerRequest | null>(null)
   const [appVolumePicker, setAppVolumePicker] = useState<AppVolumePickerRequest | null>(null)
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
@@ -1080,6 +1082,7 @@ function AppContent() {
           onSelectPage={selectPage}
           onOpenPair={() => setPairOpen(true)}
           onOpenSettings={() => openSettings('general')}
+          onOpenRigs={() => setRigLibrary({})}
           onToast={showToast}
         />
 
@@ -1296,6 +1299,7 @@ function AppContent() {
             onCutButton={cutSelectedButton}
             onPasteButton={pasteOnActivePage}
             onMoveButton={moveSelectedButton}
+            onOpenRig={(rigId) => setRigLibrary({ rigId })}
           />
         </div>
 
@@ -1389,6 +1393,16 @@ function AppContent() {
       )}
       {whatsNew && (
         <WhatsNewDialog version={whatsNew.version} onClose={() => void closeWhatsNew()} />
+      )}
+      {rigLibrary && (
+        <RigLibraryDialog
+          config={config}
+          server={server}
+          initialRigId={rigLibrary.rigId}
+          onChangeConfig={setConfig}
+          onClose={() => setRigLibrary(null)}
+          onToast={showToast}
+        />
       )}
       {toast && <div className={`toast ${toast.kind}`}>{toast.message}</div>}
       </div>
