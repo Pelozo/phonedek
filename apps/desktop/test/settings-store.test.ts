@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { defaultSettings, normalizeProcessName, sanitizeAutoProfileRules, SettingsStore } from '../src/main/settings-store'
+import {
+  autoProfileRevertTargetId,
+  defaultSettings,
+  normalizeProcessName,
+  sanitizeAutoProfileRevertProfileId,
+  sanitizeAutoProfileRules,
+  SettingsStore,
+} from '../src/main/settings-store'
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), 'phonedek-test-'))
@@ -229,12 +236,15 @@ describe('SettingsStore Twitch settings', () => {  it('defaults Twitch to disabl
 })
 
 describe('SettingsStore auto-profile settings', () => {
-  it('defaults auto-profile off with no rules', () => {
+  it('defaults auto-profile off with no rules or return profile', () => {
     const settings = new SettingsStore(tempDir())
     expect(settings.get().autoProfileEnabled).toBe(false)
     expect(settings.get().autoProfileRules).toEqual([])
+    expect(settings.get().autoProfileRevertEnabled).toBe(false)
+    expect(settings.get().autoProfileRevertProfileId).toBeUndefined()
     expect(defaultSettings().autoProfileEnabled).toBe(false)
     expect(defaultSettings().autoProfileRules).toEqual([])
+    expect(defaultSettings().autoProfileRevertEnabled).toBe(false)
   })
 
   it('keeps old settings files valid and defaults missing fields', () => {
@@ -244,14 +254,59 @@ describe('SettingsStore auto-profile settings', () => {
     expect(settings.get().port).toBe(49020)
     expect(settings.get().autoProfileEnabled).toBe(false)
     expect(settings.get().autoProfileRules).toEqual([])
+    expect(settings.get().autoProfileRevertEnabled).toBe(false)
+    expect(settings.get().autoProfileRevertProfileId).toBeUndefined()
 
     writeFileSync(
       join(dir, 'settings.json'),
-      JSON.stringify({ port: 49021, autoProfileEnabled: 'yes', autoProfileRules: 'game' }),
+      JSON.stringify({
+        port: 49021,
+        autoProfileEnabled: 'yes',
+        autoProfileRules: 'game',
+        autoProfileRevertEnabled: 'yes',
+        autoProfileRevertProfileId: 42,
+      }),
     )
     const repaired = new SettingsStore(dir)
     expect(repaired.get().autoProfileEnabled).toBe(false)
     expect(repaired.get().autoProfileRules).toEqual([])
+    expect(repaired.get().autoProfileRevertEnabled).toBe(false)
+    expect(repaired.get().autoProfileRevertProfileId).toBeUndefined()
+  })
+
+  it('sanitizes and persists the return profile id', () => {
+    const dir = tempDir()
+    const settings = new SettingsStore(dir)
+    settings.update({
+      autoProfileRevertEnabled: true,
+      autoProfileRevertProfileId: '  desktop  ',
+    })
+    expect(settings.get().autoProfileRevertEnabled).toBe(true)
+    expect(settings.get().autoProfileRevertProfileId).toBe('desktop')
+
+    const reloaded = new SettingsStore(dir)
+    expect(reloaded.get().autoProfileRevertProfileId).toBe('desktop')
+
+    settings.update({ autoProfileRevertProfileId: 'bad id!' })
+    expect(settings.get().autoProfileRevertProfileId).toBeUndefined()
+    expect(sanitizeAutoProfileRevertProfileId('game_2')).toBe('game_2')
+    expect(sanitizeAutoProfileRevertProfileId('')).toBeUndefined()
+    expect(sanitizeAutoProfileRevertProfileId(null)).toBeUndefined()
+  })
+
+  it('ignores a return profile that was deleted from the deck', () => {
+    const settings = {
+      autoProfileRevertEnabled: true,
+      autoProfileRevertProfileId: 'deleted',
+    }
+    expect(autoProfileRevertTargetId(settings, new Set(['desktop', 'game']))).toBeNull()
+    expect(autoProfileRevertTargetId(settings, new Set(['deleted']))).toBe('deleted')
+    expect(
+      autoProfileRevertTargetId({ ...settings, autoProfileRevertEnabled: false }, new Set(['deleted'])),
+    ).toBeNull()
+    expect(
+      autoProfileRevertTargetId({ autoProfileRevertEnabled: true }, new Set(['deleted'])),
+    ).toBeNull()
   })
 
   it('persists rules and normalizes executable paths, case and .exe', () => {

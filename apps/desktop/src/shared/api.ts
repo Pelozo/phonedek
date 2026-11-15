@@ -67,6 +67,10 @@ export interface SettingsView {
   autoProfileEnabled: boolean
   /** Process → profile rules, evaluated in top-to-bottom priority order. */
   autoProfileRules: AutoProfileRuleView[]
+  /** Return phones to a profile after a matched game closes. */
+  autoProfileRevertEnabled: boolean
+  /** Profile to return to; empty when no target is selected. */
+  autoProfileRevertProfileId: string
 }
 
 /** One configured local light as exposed to the renderer. */
@@ -183,6 +187,10 @@ export interface AutoProfileSettingsInput {
   enabled?: boolean
   /** Full replacement list (max 16). Omit to change only `enabled`. */
   rules?: AutoProfileRuleView[]
+  /** Return phones to `revertProfileId` when a matched game closes. */
+  revertEnabled?: boolean
+  /** Existing deck profile id, or null to clear the return target. */
+  revertProfileId?: string | null
 }
 
 export type ObsStateView =

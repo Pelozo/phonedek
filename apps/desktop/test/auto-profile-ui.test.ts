@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { AutoProfileRuleView } from '../src/shared/api'
 import {
+  AUTO_PROFILE_REVERT_DELAY_SECONDS,
   MAX_AUTO_PROFILE_RULES,
   autoProfileDraftsDirty,
   autoProfileProcessError,
   autoProfileProfileError,
   autoProfileProfileName,
+  autoProfileRevertHint,
+  autoProfileRevertProfileError,
   autoProfileRuleErrors,
   autoProfileRulesFromDrafts,
   nextAutoProfileRuleId,
@@ -118,5 +121,23 @@ describe('auto-profile rule drafts', () => {
     expect(autoProfileProfileName('profile-a', profiles)).toBe('Gaming')
     expect(autoProfileProfileName('profile-gone', profiles)).toBe('profile-gone')
     expect(autoProfileProfileName('', profiles)).toBe('No profile selected')
+  })
+})
+
+describe('auto-profile return profile', () => {
+  it('validates the return target against the current deck', () => {
+    expect(autoProfileRevertProfileError('', profiles)).toContain('Choose a profile')
+    expect(autoProfileRevertProfileError('profile-gone', profiles)).toContain('no longer exists')
+    expect(autoProfileRevertProfileError('profile-a', profiles)).toBeNull()
+  })
+
+  it('summarizes the off, unset and configured states', () => {
+    expect(autoProfileRevertHint(false, 'profile-a', profiles)).toContain('Off.')
+    expect(autoProfileRevertHint(true, '', profiles)).toContain('Choose the profile')
+    const hint = autoProfileRevertHint(true, 'profile-a', profiles)
+    expect(hint).toContain('Gaming')
+    expect(hint).toContain(`${AUTO_PROFILE_REVERT_DELAY_SECONDS} seconds`)
+    expect(hint).toContain('another mapped game')
+    expect(AUTO_PROFILE_REVERT_DELAY_SECONDS).toBe(5)
   })
 })

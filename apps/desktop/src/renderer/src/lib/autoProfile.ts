@@ -3,6 +3,9 @@ import type { AutoProfileRuleView } from '../../../shared/api'
 /** Mirrors the main-process limit; the Settings list shows the same counter. */
 export const MAX_AUTO_PROFILE_RULES = 16
 
+/** Keep in sync with `DEFAULT_REVERT_DEBOUNCE_MS` in the game watcher. */
+export const AUTO_PROFILE_REVERT_DELAY_SECONDS = 5
+
 /** One editable rule; the process field keeps the user's raw text. */
 export interface AutoProfileDraft {
   id: string
@@ -51,6 +54,33 @@ export function autoProfileProfileError(
     return 'This profile no longer exists. Choose another.'
   }
   return null
+}
+
+/** Inline validation for the optional return profile. */
+export function autoProfileRevertProfileError(
+  profileId: string,
+  profiles: ReadonlyArray<{ id: string }>,
+): string | null {
+  if (!profileId) return 'Choose a profile to return to.'
+  if (!profiles.some((profile) => profile.id === profileId)) {
+    return 'This profile no longer exists. Choose another.'
+  }
+  return null
+}
+
+/** Plain-language summary shown under the return toggle. */
+export function autoProfileRevertHint(
+  enabled: boolean,
+  profileId: string,
+  profiles: ReadonlyArray<{ id: string; name: string }>,
+): string {
+  if (!enabled) return 'Off. Phones stay on the game profile after it closes.'
+  if (!profileId) return 'Choose the profile phones should return to when the game closes.'
+  const name = autoProfileProfileName(profileId, profiles)
+  return (
+    `About ${AUTO_PROFILE_REVERT_DELAY_SECONDS} seconds after the game closes, phones ` +
+    `return to ${name}. Starting another mapped game cancels the return.`
+  )
 }
 
 export interface AutoProfileRuleErrors {

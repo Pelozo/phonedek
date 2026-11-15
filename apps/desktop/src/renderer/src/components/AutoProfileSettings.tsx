@@ -4,6 +4,8 @@ import {
   MAX_AUTO_PROFILE_RULES,
   autoProfileDraftsDirty,
   autoProfileProfileName,
+  autoProfileRevertHint,
+  autoProfileRevertProfileError,
   autoProfileRuleErrors,
   autoProfileRulesFromDrafts,
   nextAutoProfileRuleId,
@@ -48,6 +50,51 @@ export function AutoProfileSettings({
   const errors = drafts.map((draft) => autoProfileRuleErrors(draft, profiles))
   const hasErrors = errors.some((error) => error.process || error.profile)
   const noProfiles = profiles.length === 0
+  const revertProfileId = settings.autoProfileRevertProfileId
+  const revertError = revertProfileId
+    ? autoProfileRevertProfileError(revertProfileId, profiles)
+    : null
+
+  const updateRevert = async (patch: {
+    revertEnabled?: boolean
+    revertProfileId?: string | null
+  }): Promise<void> => {
+    if (patch.revertProfileId) {
+      const error = autoProfileRevertProfileError(patch.revertProfileId, profiles)
+      if (error) {
+        onToast(error, 'error')
+        return
+      }
+    }
+    setBusy(true)
+    try {
+      const result = await window.phonedek.setAutoProfileSettings(patch)
+      if (result.state) onServerUpdate(result.state.server)
+      if (!result.ok) {
+        onToast(result.error ?? 'Could not update the return profile', 'error')
+        return
+      }
+      if (patch.revertEnabled !== undefined) {
+        onToast(
+          patch.revertEnabled
+            ? 'Return profile after game close enabled'
+            : 'Return profile after game close disabled',
+          'success',
+        )
+      } else if (patch.revertProfileId) {
+        onToast(
+          `Phones return to ${autoProfileProfileName(patch.revertProfileId, profiles)} when the game closes`,
+          'success',
+        )
+      } else {
+        onToast('Return profile cleared', 'success')
+      }
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : String(error), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const toggleEnabled = async (enabled: boolean): Promise<void> => {
     setBusy(true)
@@ -133,6 +180,53 @@ export function AutoProfileSettings({
         onChange={(enabled) => void toggleEnabled(enabled)}
         disabled={busy}
       />
+
+      <div className="auto-profile-revert">
+        <Toggle
+          label="Return to profile when the game closes"
+          description="After the matched game exits and no other mapped game is running, phones return to this profile. A quick restart or launcher handoff cancels the return."
+          checked={settings.autoProfileRevertEnabled}
+          onChange={(enabled) => void updateRevert({ revertEnabled: enabled })}
+          disabled={busy || noProfiles}
+        />
+        <label className="field auto-profile-revert-target">
+          <span>Return profile</span>
+          <select
+            value={revertProfileId}
+            aria-invalid={revertError ? true : undefined}
+            disabled={busy || noProfiles}
+            onChange={(event) => {
+              const profileId = event.target.value
+              void updateRevert({ revertProfileId: profileId || null })
+            }}
+          >
+            <option value="">No return profile</option>
+            {revertProfileId !== '' &&
+              !profiles.some((profile) => profile.id === revertProfileId) && (
+                <option value={revertProfileId}>Missing profile</option>
+              )}
+            {profiles.map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {profile.name || profile.id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className={`hint${revertError ? ' error-text' : ''}`}>
+          {revertError ??
+            autoProfileRevertHint(
+              settings.autoProfileRevertEnabled,
+              revertProfileId,
+              profiles,
+            )}
+        </p>
+        {!settings.autoProfileEnabled && settings.autoProfileRevertEnabled && (
+          <p className="hint">
+            Turn on Switch profiles when a game launches above; the return only follows an
+            automatic switch.
+          </p>
+        )}
+      </div>
 
       <div className="auto-profile-toolbar">
         <span className="mono auto-profile-count">

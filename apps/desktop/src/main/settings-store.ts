@@ -80,6 +80,10 @@ export interface AppSettings {
   autoProfileEnabled: boolean
   /** Process → profile rules, evaluated in order. Max 16. */
   autoProfileRules: AutoProfileRule[]
+  /** Return phones to a profile after a matched game exits. */
+  autoProfileRevertEnabled: boolean
+  /** Profile to return to; ignored when it no longer exists in the config. */
+  autoProfileRevertProfileId?: string
 }
 
 /** Four-digit pairing PIN (the QR/link is the low-friction path). */
@@ -113,6 +117,30 @@ export function normalizeProcessName(value: unknown): string | null {
   if (!name || name.length > 160) return null
   if (/[\u0000-\u001f\u007f]/.test(name)) return null
   return name
+}
+
+/**
+ * Validate the optional revert target. The id must have the same shape as any
+ * other profile id; whether that profile still exists is checked against the
+ * current deck config by the watcher and the IPC handler.
+ */
+export function sanitizeAutoProfileRevertProfileId(value: unknown): string | undefined {
+  return normalizeProfileId(value) ?? undefined
+}
+
+/**
+ * The revert target that should actually be used, or null when the feature is
+ * off, no target is selected, or the selected profile was deleted.
+ */
+export function autoProfileRevertTargetId(
+  settings: Pick<AppSettings, 'autoProfileRevertEnabled' | 'autoProfileRevertProfileId'>,
+  profileIds?: ReadonlySet<string>,
+): string | null {
+  if (!settings.autoProfileRevertEnabled) return null
+  const profileId = settings.autoProfileRevertProfileId
+  if (!profileId) return null
+  if (profileIds && !profileIds.has(profileId)) return null
+  return profileId
 }
 
 /**
@@ -278,6 +306,7 @@ export function defaultSettings(): AppSettings {
     lights: [],
     autoProfileEnabled: false,
     autoProfileRules: [],
+    autoProfileRevertEnabled: false,
   }
 }
 
@@ -345,6 +374,13 @@ function sanitize(input: Partial<AppSettings> | null | undefined): AppSettings {
         ? input.autoProfileEnabled
         : defaults.autoProfileEnabled,
     autoProfileRules: sanitizeAutoProfileRules(input.autoProfileRules),
+    autoProfileRevertEnabled:
+      typeof input.autoProfileRevertEnabled === 'boolean'
+        ? input.autoProfileRevertEnabled
+        : defaults.autoProfileRevertEnabled,
+    autoProfileRevertProfileId: sanitizeAutoProfileRevertProfileId(
+      input.autoProfileRevertProfileId,
+    ),
   }
 }
 

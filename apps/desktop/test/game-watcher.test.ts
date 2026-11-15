@@ -7,6 +7,7 @@ import {
   type GameWatcherOptions,
 } from '../src/main/game-watcher'
 import type { AutoProfileRule } from '../src/main/settings-store'
+import type { AutoProfileSettings } from '../src/main/game-watcher'
 import type { Logger } from '../src/main/logger'
 
 const RULES: AutoProfileRule[] = [
@@ -26,7 +27,8 @@ function fakeLogger(): Logger & { info: ReturnType<typeof vi.fn>; warn: ReturnTy
 interface WatcherHarness {
   watcher: GameWatcher
   switches: Array<{ profileId: string; rule: AutoProfileRule }>
-  settings: { enabled: boolean; rules: AutoProfileRule[] }
+  reverts: string[]
+  settings: AutoProfileSettings
   setProcesses(names: string[]): void
   logger: ReturnType<typeof fakeLogger>
 }
@@ -34,13 +36,24 @@ interface WatcherHarness {
 function harness(options: Partial<GameWatcherOptions> = {}): WatcherHarness {
   let processes: string[] = []
   const switches: Array<{ profileId: string; rule: AutoProfileRule }> = []
-  const settings = { enabled: true, rules: RULES.map((rule) => ({ ...rule })) }
+  const reverts: string[] = []
+  const settings: AutoProfileSettings = {
+    enabled: true,
+    rules: RULES.map((rule) => ({ ...rule })),
+    revertEnabled: false,
+  }
   const logger = fakeLogger()
   const watcher = new GameWatcher({
-    getSettings: () => ({ enabled: settings.enabled, rules: settings.rules }),
-    getProfileIds: () => ['browser', 'game'],
+    getSettings: () => ({
+      enabled: settings.enabled,
+      rules: settings.rules,
+      revertEnabled: settings.revertEnabled,
+      revertProfileId: settings.revertProfileId,
+    }),
+    getProfileIds: () => ['browser', 'game', 'desktop'],
     provider: { list: async () => [...processes] },
     onSwitch: (profileId, rule) => switches.push({ profileId, rule }),
+    onRevert: (profileId) => reverts.push(profileId),
     intervalMs: 1000,
     logger,
     ...options,
@@ -48,12 +61,18 @@ function harness(options: Partial<GameWatcherOptions> = {}): WatcherHarness {
   return {
     watcher,
     switches,
+    reverts,
     settings,
     setProcesses: (names) => {
       processes = names
     },
     logger,
   }
+}
+
+/** Advance past the 5 s revert debounce (plus async provider work). */
+async function advanceRevert(ms = 5000): Promise<void> {
+  await vi.advanceTimersByTimeAsync(ms)
 }
 
 async function tick(times = 1): Promise<void> {
@@ -207,6 +226,152 @@ describe('GameWatcher transitions', () => {
 
     await tick(2)
     expect(h.switches).toEqual([])
+  })
+
+  it('returns to the configured profile once after the debounce when the game exits', async () => {
+    const h = harness()
+    h.settings.revertEnabled = true
+    h.settings.revertProfileId = 'desktop'
+    h.setProcesses(['game'])
+    h.watcher.start()
+
+    await tick()
+    expect(h.switches.map((item) => item.profileId)).toEqual(['game'])
+
+    h.setProcesses([])
+    await tick()
+    expect(h.reverts).toEqual([])
+
+    await advanceRevert(4999)
+    expect(h.reverts).toEqual([])
+
+    await advanceRevert(1)
+    await tick(0)
+    expect(h.reverts).toEqual(['desktop'])
+
+    await tick(5)
+    expect(h.reverts).toEqual(['desktop'])
+  })
+
+  it('cancels the return when the game relaunches within the debounce', async () => {
+    const h = harness()
+    h.settings.revertEnabled = true
+    h.settings.revertProfileId = 'desktop'
+    h.setProcesses(['game'])
+    h.watcher.start()
+
+    await tick()
+    h.setProcesses([])
+    await tick()
+    await advanceRevert(2500)
+
+    h.setProcesses(['game'])
+    await tick()
+    expect(h.switches.map((item) => item.profileId)).toEqual(['game', 'game'])
+
+    await advanceRevert(6000)
+    expect(h.reverts).toEqual([])
+  })
+
+  it('switches to another mapped game instead of reverting', async () => {
+    const h = harness()
+    h.settings.revertEnabled = true
+    h.settings.revertProfileId = 'desktop'
+    h.setProcesses(['game'])
+    h.watcher.start()
+
+    await tick()
+    h.setProcesses(['chrome'])
+    await tick()
+    expect(h.switches.map((item) => item.profileId)).toEqual(['game', 'browser'])
+
+    await advanceRevert(6000)
+    expect(h.reverts).toEqual([])
+  })
+
+  it('does not revert when the feature is off or no target is selected', async () => {
+    const h = harness()
+    h.setProcesses(['game'])
+    h.watcher.start()
+
+    await tick()
+    h.setProcesses([])
+    await tick()
+    await advanceRevert(6000)
+    expect(h.reverts).toEqual([])
+
+    h.settings.revertEnabled = true
+    h.setProcesses(['game'])
+    await tick()
+    h.setProcesses([])
+    await tick()
+    await advanceRevert(6000)
+    expect(h.reverts).toEqual([])
+  })
+
+  it('does not revert to a profile that was deleted', async () => {
+    const h = harness()
+    h.settings.revertEnabled = true
+    h.settings.revertProfileId = 'deleted'
+    h.setProcesses(['game'])
+    h.watcher.start()
+
+    await tick()
+    h.setProcesses([])
+    await tick()
+    await advanceRevert(6000)
+    expect(h.reverts).toEqual([])
+  })
+
+  it('waits for the matched process to exit even if its rule profile is deleted', async () => {
+    let profiles = ['browser', 'game', 'desktop']
+    const h = harness({ getProfileIds: () => profiles })
+    h.settings.revertEnabled = true
+    h.settings.revertProfileId = 'desktop'
+    h.setProcesses(['game'])
+    h.watcher.start()
+
+    await tick()
+    expect(h.switches.map((item) => item.profileId)).toEqual(['game'])
+
+    profiles = ['browser', 'desktop']
+    await tick()
+    await advanceRevert(6000)
+    expect(h.reverts).toEqual([])
+
+    h.setProcesses([])
+    await tick()
+    await advanceRevert(5000)
+    await tick(0)
+    expect(h.reverts).toEqual(['desktop'])
+  })
+
+  it('clears a pending return when the watcher is disabled or disposed', async () => {
+    const h = harness()
+    h.settings.revertEnabled = true
+    h.settings.revertProfileId = 'desktop'
+    h.setProcesses(['game'])
+    h.watcher.start()
+
+    await tick()
+    h.setProcesses([])
+    await tick()
+
+    h.settings.enabled = false
+    h.watcher.refresh()
+    expect(h.watcher.running).toBe(false)
+    await advanceRevert(6000)
+    expect(h.reverts).toEqual([])
+
+    h.settings.enabled = true
+    h.watcher.refresh()
+    h.setProcesses(['game'])
+    await tick()
+    h.setProcesses([])
+    await tick()
+    h.watcher.dispose()
+    await advanceRevert(6000)
+    expect(h.reverts).toEqual([])
   })
 
   it('stops polling when disabled or when there are no rules', async () => {

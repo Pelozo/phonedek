@@ -58,6 +58,7 @@ import {
   MAX_AUTO_PROFILE_RULES,
   MAX_LIGHT_DEVICES,
   SettingsStore,
+  sanitizeAutoProfileRevertProfileId,
   sanitizeAutoProfileRules,
   sanitizeLightDevices,
   sanitizeLightHost,
@@ -289,6 +290,8 @@ async function buildServerInfo(): Promise<ServerInfoView> {
       lights: lightDeviceViews(currentSettings.lights),
       autoProfileEnabled: currentSettings.autoProfileEnabled,
       autoProfileRules: currentSettings.autoProfileRules.map((rule) => ({ ...rule })),
+      autoProfileRevertEnabled: currentSettings.autoProfileRevertEnabled,
+      autoProfileRevertProfileId: currentSettings.autoProfileRevertProfileId ?? '',
     },
     clients: server?.getClients() ?? [],
     error: serverError,
@@ -418,8 +421,23 @@ async function buildState(): Promise<AppState> {
       lights: lightDeviceViews(settings.get().lights),
       autoProfileEnabled: settings.get().autoProfileEnabled,
       autoProfileRules: settings.get().autoProfileRules.map((rule) => ({ ...rule })),
+      autoProfileRevertEnabled: settings.get().autoProfileRevertEnabled,
+      autoProfileRevertProfileId: settings.get().autoProfileRevertProfileId ?? '',
     },
   }
+}
+
+/**
+ * Drop a return target whose profile was deleted. Run at startup and whenever
+ * the deck config changes; the watcher also ignores a stale id defensively.
+ */
+function pruneAutoProfileRevertProfile(): void {
+  const profileId = settings.get().autoProfileRevertProfileId
+  if (!profileId) return
+  if (store.get().profiles.some((profile) => profile.id === profileId)) return
+  settings.update({ autoProfileRevertProfileId: undefined })
+  gameWatcher?.refresh()
+  logger?.info(`Auto-profile: cleared return profile "${profileId}" because it was deleted`)
 }
 
 /** Recompute both input gates after the master switch or a native dialog changes. */
@@ -1106,6 +1124,41 @@ function registerIpc(): void {
         patch.autoProfileRules = rules
       }
 
+      if (value.revertEnabled !== undefined) {
+        if (typeof value.revertEnabled !== 'boolean') {
+          return {
+            ok: false,
+            error: 'Return-after-close must be true or false',
+            state: await buildState(),
+          }
+        }
+        patch.autoProfileRevertEnabled = value.revertEnabled
+      }
+
+      if (value.revertProfileId !== undefined) {
+        if (value.revertProfileId === null) {
+          patch.autoProfileRevertProfileId = undefined
+        } else {
+          const revertProfileId = sanitizeAutoProfileRevertProfileId(value.revertProfileId)
+          if (!revertProfileId) {
+            return {
+              ok: false,
+              error: 'Choose a valid return profile.',
+              state: await buildState(),
+            }
+          }
+          const profileIds = new Set(store.get().profiles.map((profile) => profile.id))
+          if (!profileIds.has(revertProfileId)) {
+            return {
+              ok: false,
+              error: 'The return profile must exist in this deck.',
+              state: await buildState(),
+            }
+          }
+          patch.autoProfileRevertProfileId = revertProfileId
+        }
+      }
+
       settings.update(patch)
       gameWatcher?.refresh()
       await pushServerInfo()
@@ -1613,6 +1666,7 @@ async function bootstrap(): Promise<void> {
   store = new ConfigStore({ dir: userData, logger })
   if (store.getLastError()) logger.warn(`Config was repaired: ${store.getLastError()}`)
   settings = new SettingsStore(userData, logger)
+  pruneAutoProfileRevertProfile()
   assets = new AssetStore(store.assetsDir, logger)
 
   keySender = createKeySender(helperPath(), process.platform, logger)
@@ -2100,9 +2154,14 @@ async function bootstrap(): Promise<void> {
     getSettings: () => ({
       enabled: settings.get().autoProfileEnabled,
       rules: settings.get().autoProfileRules,
+      revertEnabled: settings.get().autoProfileRevertEnabled,
+      revertProfileId: settings.get().autoProfileRevertProfileId,
     }),
     getProfileIds: () => store.get().profiles.map((profile) => profile.id),
     onSwitch: (profileId) => {
+      server.broadcastProfile(profileId)
+    },
+    onRevert: (profileId) => {
       server.broadcastProfile(profileId)
     },
     logger,
@@ -2116,6 +2175,7 @@ async function bootstrap(): Promise<void> {
   })
 
   store.onChange(() => {
+    pruneAutoProfileRevertProfile()
     server.broadcastConfig()
     pairCache = null
     void pushServerInfo()
