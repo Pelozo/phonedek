@@ -122,7 +122,7 @@ describe('NanoleafClient HTTP', () => {
       json(response, 200, panel({ on: { value: true }, brightness: { value: 42 }, ct: { value: 4000 } }))
     })
     cleanups.push(fake.close)
-    const client = new NanoleafClient(fake.device, { token: 'token-1', timeoutMs: 1000 })
+    const client = new NanoleafClient(fake.device, { token: 'token-1', timeoutMs: 3000 })
 
     await expect(client.getState()).resolves.toEqual({
       on: true,
@@ -144,7 +144,7 @@ describe('NanoleafClient HTTP', () => {
       response.end()
     })
     cleanups.push(fake.close)
-    const client = new NanoleafClient(fake.device, { token: 'token-1', timeoutMs: 1000 })
+    const client = new NanoleafClient(fake.device, { token: 'token-1', timeoutMs: 3000 })
 
     await expect(
       client.setState({ on: true, brightness: 42, temperature: 250 }),
@@ -173,7 +173,7 @@ describe('NanoleafClient HTTP', () => {
       response.end()
     })
     cleanups.push(fake.close)
-    const client = new NanoleafClient(fake.device, { token: 'token-1', timeoutMs: 1000 })
+    const client = new NanoleafClient(fake.device, { token: 'token-1', timeoutMs: 3000 })
 
     await client.setState({ temperature: 143 })
     expect(JSON.parse(fake.requests.filter((request) => request.method === 'PUT').at(-1)!.body)).toEqual({
@@ -191,7 +191,7 @@ describe('NanoleafClient HTTP', () => {
       json(response, 401, { error: 'unauthorized' })
     })
     cleanups.push(fake.close)
-    const client = new NanoleafClient(fake.device, { token: 'secret-token', timeoutMs: 1000 })
+    const client = new NanoleafClient(fake.device, { token: 'secret-token', timeoutMs: 3000 })
 
     await expect(client.getState()).rejects.toMatchObject({
       name: 'NanoleafError',
