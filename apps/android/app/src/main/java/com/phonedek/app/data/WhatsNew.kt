@@ -11,6 +11,13 @@ data class WhatsNewEntry(
  * each release; versions without a key fall back to [GENERIC_WHATS_NEW].
  */
 private val WHATS_NEW: Map<String, WhatsNewEntry> = mapOf(
+    "0.17.0" to WhatsNewEntry(
+        title = "Export for older desktops",
+        highlights = listOf(
+            "Settings → Backup can export a JSON deck with rigs, automation rules and rig buttons removed.",
+            "The rest of the deck is unchanged, so an older PhoneDeck can import it safely.",
+        ),
+    ),
     "0.16.2" to WhatsNewEntry(
         title = "Streamer.bot and copy fixes",
         highlights = listOf(

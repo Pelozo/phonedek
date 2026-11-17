@@ -10,6 +10,13 @@ export interface WhatsNewEntry {
  * Keep highlights short: the dialog is a summary, not release notes.
  */
 const WHATS_NEW: Readonly<Record<string, WhatsNewEntry>> = {
+  '0.17.0': {
+    title: 'Export for older desktops',
+    highlights: [
+      'Settings → Backup can export a JSON deck with rigs, automation rules and rig buttons removed.',
+      'The rest of the deck is unchanged, so an older PhoneDeck can import it safely.',
+    ],
+  },
   '0.16.2': {
     title: 'Streamer.bot and copy fixes',
     highlights: [
