@@ -126,6 +126,7 @@ const api: PhoneDeckApi = {
   fireRule: (ruleId: string): Promise<RuleFireView> => ipcRenderer.invoke(IPC.fireRule, ruleId),
   clearRuleHistory: (): Promise<{ ok: true }> => ipcRenderer.invoke(IPC.clearRuleHistory),
   exportConfig: (): Promise<OperationResult> => ipcRenderer.invoke(IPC.exportConfig),
+  exportLegacyConfig: (): Promise<OperationResult> => ipcRenderer.invoke(IPC.exportLegacyConfig),
   importConfig: (): Promise<SaveConfigResult> => ipcRenderer.invoke(IPC.importConfig),
   openLogs: (): Promise<void> => ipcRenderer.invoke(IPC.openLogs),
   openAccessibility: (): Promise<void> => ipcRenderer.invoke(IPC.openAccessibility),

@@ -13,7 +13,7 @@ import {
   Tray,
 } from 'electron'
 import type { MenuItemConstructorOptions, OpenDialogOptions, SaveDialogOptions } from 'electron'
-import { existsSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 import { basename, isAbsolute, join } from 'node:path'
 import { z } from 'zod'
 import {
@@ -51,6 +51,7 @@ import { KeyboardRouter, keyboardInputAllowed } from './keyboard-input'
 import { createKeyboardSender, type KeyboardSender } from './keyboard-sender'
 import { createLogger, type Logger } from './logger'
 import { lanAddresses, primaryLanAddress, urlsForPort } from './lan'
+import { legacyConfigJson } from './legacy-export'
 import { keyboardHelperPath } from './platform'
 import { PointerRouter, pointerInputAllowed } from './pointer-input'
 import { RigRunner } from './rig-runner'
@@ -1950,6 +1951,23 @@ function registerIpc(): void {
       for (const warning of written.warnings) logger.warn(warning)
       logger.info(`Exported backup with ${written.assets} assets (${written.bytes} bytes)`)
       return { ok: true, path: result.filePath }
+    } catch (error) {
+      return { ok: false, error: (error as Error).message }
+    }
+  })
+
+  ipcMain.handle(IPC.exportLegacyConfig, async (): Promise<OperationResult> => {
+    const result = await showSave({
+      title: 'Export deck for an older desktop',
+      defaultPath: 'phonedek-compatible.json',
+      filters: [{ name: 'PhoneDeck config', extensions: ['json'] }],
+    })
+    if (result.canceled || !result.filePath) return { ok: false }
+    try {
+      const exported = legacyConfigJson(store.get())
+      writeFileSync(result.filePath, exported.json, 'utf8')
+      logger.info(`Exported compatible config ${result.filePath}: ${exported.summary}`)
+      return { ok: true, path: result.filePath, message: exported.summary }
     } catch (error) {
       return { ok: false, error: (error as Error).message }
     }

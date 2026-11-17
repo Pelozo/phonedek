@@ -523,6 +523,8 @@ export interface OperationResult {
   error?: string
   state?: AppState
   path?: string
+  /** Optional human summary, e.g. what a compatibility export removed. */
+  message?: string
 }
 
 /** macOS input-control permission (called Accessibility before macOS 27). */
@@ -615,6 +617,7 @@ export interface PhoneDeckApi {
   /** Clear the in-memory run history. */
   clearRuleHistory(): Promise<{ ok: true }>
   exportConfig(): Promise<OperationResult>
+  exportLegacyConfig(): Promise<OperationResult>
   importConfig(): Promise<SaveConfigResult>
   openLogs(): Promise<void>
   openAccessibility(): Promise<void>
@@ -687,6 +690,7 @@ export const IPC = {
   fireRule: 'phonedek:rule-fire',
   clearRuleHistory: 'phonedek:rules-clear',
   exportConfig: 'phonedek:export-config',
+  exportLegacyConfig: 'phonedek:export-legacy-config',
   importConfig: 'phonedek:import-config',
   openLogs: 'phonedek:open-logs',
   openAccessibility: 'phonedek:open-accessibility',

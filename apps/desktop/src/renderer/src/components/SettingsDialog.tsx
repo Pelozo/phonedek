@@ -466,6 +466,17 @@ export function SettingsDialog({
     }
   }
 
+  const exportLegacyConfig = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      const result = await window.phonedek.exportLegacyConfig()
+      if (result.ok) onToast(result.message ?? 'Compatible deck exported', 'success')
+      else if (result.error) onToast(result.error, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const importConfig = async (): Promise<void> => {
     setBusy(true)
     try {
@@ -666,6 +677,24 @@ export function SettingsDialog({
                   </button>
                   <button type="button" className="button secondary" onClick={() => void importConfig()} disabled={busy}>
                     <Icon name="upload" size={15} /> Import backup
+                  </button>
+                </div>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <strong>Export for older desktop</strong>
+                  <small>
+                    Removes rigs, automation rules and rig buttons; the rest of the deck is unchanged.
+                  </small>
+                </div>
+                <div className="row gap">
+                  <button
+                    type="button"
+                    className="button secondary"
+                    onClick={() => void exportLegacyConfig()}
+                    disabled={busy}
+                  >
+                    <Icon name="download" size={15} /> Export for older desktop
                   </button>
                 </div>
               </div>
