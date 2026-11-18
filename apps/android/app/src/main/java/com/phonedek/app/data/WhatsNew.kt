@@ -11,6 +11,13 @@ data class WhatsNewEntry(
  * each release; versions without a key fall back to [GENERIC_WHATS_NEW].
  */
 private val WHATS_NEW: Map<String, WhatsNewEntry> = mapOf(
+    "0.19.1" to WhatsNewEntry(
+        title = "Config repair",
+        highlights = listOf(
+            "A deck that points at a deleted rig, profile or page now repairs those references instead of resetting to the starter deck.",
+            "The original config is preserved as config.repaired-<timestamp>.json next to the repaired file.",
+        ),
+    ),
     "0.19.0" to WhatsNewEntry(
         title = "Quick Settings tile",
         highlights = listOf(

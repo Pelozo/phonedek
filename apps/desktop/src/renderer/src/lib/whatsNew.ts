@@ -10,6 +10,13 @@ export interface WhatsNewEntry {
  * Keep highlights short: the dialog is a summary, not release notes.
  */
 const WHATS_NEW: Readonly<Record<string, WhatsNewEntry>> = {
+  '0.19.1': {
+    title: 'Config repair',
+    highlights: [
+      'A deck that points at a deleted rig, profile or page now repairs those references instead of resetting to the starter deck.',
+      'The original config is preserved as config.repaired-<timestamp>.json next to the repaired file.',
+    ],
+  },
   '0.19.0': {
     title: 'Quick Settings tile',
     highlights: [
