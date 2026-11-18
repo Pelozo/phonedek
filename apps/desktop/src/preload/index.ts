@@ -12,6 +12,12 @@ import type {
   HuePairResult,
   LightSettingsInput,
   LightStatusView,
+  MacroCaptureInputEvent,
+  MacroCaptureStartInput,
+  MacroCaptureStartResult,
+  MacroCaptureStoppedView,
+  MacroCaptureStopResult,
+  MacroCaptureSupportView,
   ObsInputsResult,
   ObsSettingsInput,
   ObsStatusView,
@@ -140,6 +146,22 @@ const api: PhoneDeckApi = {
   getUpdateStatus: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.getUpdateStatus),
   checkForUpdates: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.checkForUpdates),
   installUpdate: (): Promise<void> => ipcRenderer.invoke(IPC.installUpdate),
+  getMacroCaptureSupport: (): Promise<MacroCaptureSupportView> =>
+    ipcRenderer.invoke(IPC.getMacroCaptureSupport),
+  startMacroCapture: (input?: MacroCaptureStartInput): Promise<MacroCaptureStartResult> =>
+    ipcRenderer.invoke(IPC.startMacroCapture, input),
+  stopMacroCapture: (): Promise<MacroCaptureStopResult> =>
+    ipcRenderer.invoke(IPC.stopMacroCapture),
+  onMacroCaptureEvent: (listener: (event: MacroCaptureInputEvent) => void): (() => void) => {
+    const handler = (_event: unknown, input: MacroCaptureInputEvent): void => listener(input)
+    ipcRenderer.on(IPC.macroCaptureEvent, handler)
+    return () => ipcRenderer.removeListener(IPC.macroCaptureEvent, handler)
+  },
+  onMacroCaptureStopped: (listener: (event: MacroCaptureStoppedView) => void): (() => void) => {
+    const handler = (_event: unknown, input: MacroCaptureStoppedView): void => listener(input)
+    ipcRenderer.on(IPC.macroCaptureStoppedEvent, handler)
+    return () => ipcRenderer.removeListener(IPC.macroCaptureStoppedEvent, handler)
+  },
   onUpdateStatus: (listener: (status: UpdateStatus) => void): (() => void) => {
     const handler = (_event: unknown, status: UpdateStatus): void => listener(status)
     ipcRenderer.on(IPC.updateStatusEvent, handler)

@@ -9,6 +9,8 @@ import type {
   LightAction,
   LightPlanStep,
   MacroStep,
+  MouseButton,
+  MouseStep,
   ObsAction,
   ObsPlanStep,
   PagePlanStep,
@@ -405,6 +407,16 @@ export interface MacroRecorderOptions {
   captureDelays?: boolean
   /** Coalesce plain typing into text steps instead of individual key presses. */
   coalesceText?: boolean
+  /** Record mouse buttons and wheel steps. Default true. */
+  captureMouse?: boolean
+  /** Record free mouse movement; drag paths are always recorded. Default false. */
+  captureMouseMove?: boolean
+  /** Minimum distance in screen pixels between recorded move steps. Default 4. */
+  mouseMoveMinPx?: number
+  /** Minimum time in milliseconds between recorded move steps. Default 40. */
+  mouseMoveMinMs?: number
+  /** Hard cap on recorded move steps per recording. Default 500. */
+  maxMouseMoves?: number
 }
 
 export interface RawKeyEvent {
@@ -415,9 +427,45 @@ export interface RawKeyEvent {
   time: number
 }
 
+/** Absolute screen coordinates throughout, matching the existing MouseStep. */
+export interface RawMouseButtonEvent {
+  kind: 'down' | 'up'
+  button: MouseButton
+  x: number
+  y: number
+  /** Milliseconds. */
+  time: number
+}
+
+export interface RawMouseMoveEvent {
+  kind: 'move'
+  x: number
+  y: number
+  /** Milliseconds. */
+  time: number
+}
+
+export interface RawMouseWheelEvent {
+  kind: 'wheel'
+  direction: 'up' | 'down' | 'left' | 'right'
+  /** Positive notches, 1..100. Derived from rotation when omitted. */
+  amount?: number
+  /** Raw signed wheel rotation from the OS hook. */
+  rotation?: number
+  /** Milliseconds. */
+  time: number
+}
+
+export type RawMouseEvent = RawMouseButtonEvent | RawMouseMoveEvent | RawMouseWheelEvent
+/** Everything the recorder understands; key events have a `key` field. */
+export type RawMacroEvent = RawKeyEvent | RawMouseEvent
+
 const TEXT_GAP_MS = 500
 const DELAY_THRESHOLD_MS = 140
 const MAX_RECORDED_DELAY_MS = 2000
+const DEFAULT_MOUSE_MOVE_MIN_PX = 4
+const DEFAULT_MOUSE_MOVE_MIN_MS = 40
+const DEFAULT_MAX_MOUSE_MOVES = 500
 
 function chordToText(chord: readonly string[]): string | null {
   if (chord.length !== 1) return null
@@ -431,17 +479,36 @@ function chordToText(chord: readonly string[]): string | null {
   return null
 }
 
+/** Normalize a wheel event to 1..100 notches; fall back to raw rotation. */
+function wheelAmount(amount: number | undefined, rotation: number | undefined): number {
+  const clicks =
+    Number.isFinite(amount) && (amount as number) > 0
+      ? (amount as number)
+      : Number.isFinite(rotation)
+        ? Math.abs(rotation as number) >= 120
+          ? Math.abs(rotation as number) / 120
+          : Math.abs(rotation as number)
+        : 1
+  return Math.max(1, Math.min(100, Math.round(clicks)))
+}
+
 /**
- * Turns a live keyboard stream into macro steps:
+ * Turns a live keyboard/mouse stream into macro steps:
  * - chords become `hotkey` steps,
  * - plain typing is coalesced into `text` steps,
- * - human pauses become bounded `delay` steps.
+ * - human pauses become bounded `delay` steps,
+ * - buttons/wheel become `mouse` steps and drag paths become sampled moves.
  */
 export class MacroRecorder {
   private readonly options: Required<MacroRecorderOptions>
   private steps: MacroStep[] = []
   private held = new Set<string>()
   private heldOrder: string[] = []
+  /** Modifiers already emitted as explicit `action: 'down'` steps. */
+  private emittedModifiers = new Set<string>()
+  private buttonsDown = new Set<MouseButton>()
+  private lastMove: { x: number; y: number; time: number } | null = null
+  private mouseMoves = 0
   private pendingText = ''
   private lastTime: number | null = null
   private started = false
@@ -449,7 +516,15 @@ export class MacroRecorder {
   private paused = false
 
   constructor(options: MacroRecorderOptions = {}) {
-    this.options = { captureDelays: options.captureDelays ?? true, coalesceText: options.coalesceText ?? true }
+    this.options = {
+      captureDelays: options.captureDelays ?? true,
+      coalesceText: options.coalesceText ?? true,
+      captureMouse: options.captureMouse ?? true,
+      captureMouseMove: options.captureMouseMove ?? false,
+      mouseMoveMinPx: Math.max(0, options.mouseMoveMinPx ?? DEFAULT_MOUSE_MOVE_MIN_PX),
+      mouseMoveMinMs: Math.max(0, options.mouseMoveMinMs ?? DEFAULT_MOUSE_MOVE_MIN_MS),
+      maxMouseMoves: Math.max(0, Math.round(options.maxMouseMoves ?? DEFAULT_MAX_MOUSE_MOVES)),
+    }
   }
 
   get isRecording(): boolean {
@@ -475,23 +550,30 @@ export class MacroRecorder {
     return this.pendingText.length > 0 || this.steps.length > 0
   }
 
-  record(event: RawKeyEvent): void {
+  record(event: RawMacroEvent): void {
     if (this.finished || this.paused) return
     if (!this.started) {
       this.started = true
       this.lastTime = event.time
     }
-    if (event.kind === 'down') this.onDown(event.key, event.time)
-    else this.onUp(event.key, event.time)
+    if ('key' in event) {
+      if (event.kind === 'down') this.onDown(event.key, event.time)
+      else this.onUp(event.key, event.time)
+      return
+    }
+    this.onMouse(event)
   }
 
   pause(time: number): void {
     if (this.finished) return
     this.flushText()
+    this.releaseEmittedModifiers()
     this.paused = true
     this.lastTime = time
     this.held.clear()
     this.heldOrder = []
+    this.buttonsDown.clear()
+    this.lastMove = null
   }
 
   resume(time: number): void {
@@ -514,9 +596,11 @@ export class MacroRecorder {
   finish(): MacroStep[] {
     if (this.finished) return this.getSteps()
     this.flushText()
+    this.releaseEmittedModifiers()
     this.finished = true
     this.held.clear()
     this.heldOrder = []
+    this.buttonsDown.clear()
     return this.getSteps()
   }
 
@@ -525,6 +609,9 @@ export class MacroRecorder {
     this.pendingText = ''
     this.held.clear()
     this.heldOrder = []
+    this.emittedModifiers.clear()
+    this.buttonsDown.clear()
+    this.lastMove = null
     this.started = false
     this.finished = true
     this.paused = false
@@ -559,6 +646,17 @@ export class MacroRecorder {
     if (!this.held.has(key)) return
     this.lastTime = time
 
+    // A modifier already emitted explicitly for a mouse action gets an explicit
+    // release when the user lets it go (Shift-click / Ctrl-click replay order).
+    if (this.emittedModifiers.has(key)) {
+      this.held.delete(key)
+      this.heldOrder = this.heldOrder.filter((candidate) => candidate !== key && this.held.has(candidate))
+      this.emittedModifiers.delete(key)
+      this.flushText()
+      this.pushHotkey([key], 'up')
+      return
+    }
+
     const chord = normalizeCombo(this.heldOrder)
     const hasNonModifier = chord.some((candidate) => !isModifier(candidate))
 
@@ -572,7 +670,10 @@ export class MacroRecorder {
       this.pendingText += text
     } else {
       this.flushText()
-      this.pushHotkey(chord)
+      // Modifiers already held by an explicit down step must not be pressed a
+      // second time by the chord.
+      const keys = chord.filter((candidate) => !this.emittedModifiers.has(candidate))
+      if (keys.length > 0) this.pushHotkey(keys)
     }
 
     // The non-modifier part of the chord is consumed. Keep only modifiers that
@@ -585,14 +686,97 @@ export class MacroRecorder {
     }
   }
 
+  /* -------------------------- mouse recording -------------------------- */
+
+  private onMouse(event: RawMouseEvent): void {
+    if (!this.options.captureMouse) return
+
+    if (event.kind === 'move') {
+      this.onMouseMove(event)
+      return
+    }
+
+    this.beforeMouseAction(event.time)
+
+    if (event.kind === 'wheel') {
+      const amount = wheelAmount(event.amount, event.rotation)
+      this.pushMouse({ type: 'mouse', button: 'middle', action: 'scroll', direction: event.direction, amount })
+      return
+    }
+
+    const x = Math.round(event.x)
+    const y = Math.round(event.y)
+    if (event.kind === 'down') this.buttonsDown.add(event.button)
+    else this.buttonsDown.delete(event.button)
+    // Anchor movement sampling at each button event so a 1px jitter right
+    // after pressing does not become the first drag point.
+    this.lastMove = { x, y, time: event.time }
+    this.pushMouse({ type: 'mouse', button: event.button, action: event.kind, x, y })
+  }
+
+  private onMouseMove(event: RawMouseMoveEvent): void {
+    const dragging = this.buttonsDown.size > 0
+    if (!dragging && !this.options.captureMouseMove) return
+    if (this.mouseMoves >= this.options.maxMouseMoves) return
+
+    const x = Math.round(event.x)
+    const y = Math.round(event.y)
+    const previous = this.lastMove
+    if (previous) {
+      const dx = x - previous.x
+      const dy = y - previous.y
+      const distance = Math.sqrt(dx * dx + dy * dy)
+      if (distance < this.options.mouseMoveMinPx) return
+      if (event.time - previous.time < this.options.mouseMoveMinMs) return
+      // Duplicate coordinates are pure jitter even with a stale timestamp.
+      if (distance === 0) return
+    }
+
+    this.lastMove = { x, y, time: event.time }
+    this.mouseMoves += 1
+    this.lastTime = event.time
+    this.pushMouse({ type: 'mouse', button: 'middle', action: 'move', x, y })
+  }
+
+  /** Flush text, add a bounded pause and emit modifier-down steps before a click. */
+  private beforeMouseAction(time: number): void {
+    this.flushText()
+    if (this.lastTime !== null) {
+      const gap = time - this.lastTime
+      if (gap > 0 && this.options.captureDelays && gap >= DELAY_THRESHOLD_MS && this.steps.length > 0) {
+        this.pushDelay(Math.min(gap, MAX_RECORDED_DELAY_MS))
+      }
+    }
+    this.lastTime = time
+    if (this.heldOrder.length > 0) {
+      for (const key of normalizeCombo(this.heldOrder).filter((candidate) => isModifier(candidate))) {
+        if (this.emittedModifiers.has(key)) continue
+        this.emittedModifiers.add(key)
+        this.pushHotkey([key], 'down')
+      }
+    }
+  }
+
+  private releaseEmittedModifiers(): void {
+    if (this.emittedModifiers.size === 0) return
+    for (const key of normalizeCombo([...this.emittedModifiers])) {
+      this.pushHotkey([key], 'up')
+    }
+    this.emittedModifiers.clear()
+  }
+
+  private pushMouse(step: MouseStep): void {
+    this.steps.push(step)
+  }
+
   private flushText(): void {
     if (!this.pendingText) return
     this.steps.push({ type: 'text', text: this.pendingText })
     this.pendingText = ''
   }
 
-  private pushHotkey(keys: string[]): void {
-    this.steps.push({ type: 'hotkey', keys })
+  private pushHotkey(keys: string[], action?: 'down' | 'up'): void {
+    this.steps.push(action ? { type: 'hotkey', keys, action } : { type: 'hotkey', keys })
   }
 
   private pushDelay(ms: number): void {

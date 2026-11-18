@@ -6,6 +6,8 @@ import type {
   LightDeviceType,
   MixerSnapshot,
   PressResult,
+  RawKeyEvent,
+  RawMouseEvent,
   RigGuardProbe,
   RigRunStatus,
   RuleActionOutcome,
@@ -539,6 +541,50 @@ export interface PermissionStatus {
   appPath: string | null
 }
 
+/** One raw keyboard or mouse event from the global capture hook. */
+export type MacroCaptureInputEvent = RawKeyEvent | RawMouseEvent
+
+export type MacroCaptureStopReason = 'user' | 'hotkey' | 'disposed' | 'error'
+
+export interface MacroCaptureSupportView {
+  supported: boolean
+  platform: string
+  /** Electron accelerator; shown in the recorder dialog. */
+  stopHotkey: string
+  /** Why capture is unavailable (Wayland, missing binary, permissions). */
+  reason?: string
+}
+
+export interface MacroCaptureStartInput {
+  /** Record clicks and wheel steps. Default true. */
+  captureMouse?: boolean
+  /** Record free movement. Drag paths are recorded regardless. Default false. */
+  captureMouseMove?: boolean
+  /** Ignore events while a PhoneDeck window is focused. Default true. */
+  ignoreSelf?: boolean
+}
+
+export interface MacroCaptureStartResult {
+  ok: boolean
+  active: boolean
+  stopHotkey: string
+  captureMouse: boolean
+  captureMouseMove: boolean
+  ignoreSelf: boolean
+  error?: string
+}
+
+export interface MacroCaptureStopResult {
+  ok: boolean
+  reason: MacroCaptureStopReason
+}
+
+export interface MacroCaptureStoppedView {
+  reason: MacroCaptureStopReason
+  stopHotkey: string
+  at: number
+}
+
 export interface PhoneDeckApi {
   getState(): Promise<AppState>
   saveConfig(config: DeckConfig): Promise<SaveConfigResult>
@@ -630,6 +676,15 @@ export interface PhoneDeckApi {
   getUpdateStatus(): Promise<UpdateStatus>
   checkForUpdates(): Promise<UpdateStatus>
   installUpdate(): Promise<void>
+  /** Probe global keyboard/mouse capture support (Wayland/permissions). */
+  getMacroCaptureSupport(): Promise<MacroCaptureSupportView>
+  /** Begin opt-in global capture after the recorder countdown. */
+  startMacroCapture(input?: MacroCaptureStartInput): Promise<MacroCaptureStartResult>
+  /** Stop global capture. Idempotent; also called on cancel/dialog close. */
+  stopMacroCapture(): Promise<MacroCaptureStopResult>
+  onMacroCaptureEvent(listener: (event: MacroCaptureInputEvent) => void): () => void
+  /** Fired when the global stop hotkey/quit ends capture outside the dialog. */
+  onMacroCaptureStopped(listener: (event: MacroCaptureStoppedView) => void): () => void
   onUpdateStatus(listener: (status: UpdateStatus) => void): () => void
   onServerInfo(listener: (info: ServerInfoView) => void): () => void
   onConfigChanged(listener: (config: DeckConfig) => void): () => void
@@ -703,6 +758,11 @@ export const IPC = {
   getUpdateStatus: 'phonedek:update-get-status',
   checkForUpdates: 'phonedek:update-check',
   installUpdate: 'phonedek:update-install',
+  getMacroCaptureSupport: 'phonedek:macro-capture-support',
+  startMacroCapture: 'phonedek:macro-capture-start',
+  stopMacroCapture: 'phonedek:macro-capture-stop',
+  macroCaptureEvent: 'phonedek:macro-capture-event',
+  macroCaptureStoppedEvent: 'phonedek:macro-capture-stopped',
   updateStatusEvent: 'phonedek:update-status',
   serverInfoEvent: 'phonedek:server-info',
   configChangedEvent: 'phonedek:config-changed',

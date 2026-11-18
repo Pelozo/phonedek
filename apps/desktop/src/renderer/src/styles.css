@@ -3570,6 +3570,20 @@ input[type="range"]:disabled {
   background: var(--surface-2);
 }
 
+.record-error,
+.record-notice {
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.record-error {
+  color: var(--danger);
+}
+
+.record-notice {
+  color: var(--accent);
+}
+
 .macro-toolbar {
   display: flex;
   align-items: center;

@@ -5,6 +5,11 @@ appId: com.phonedek.desktop
 productName: PhoneDeck
 copyright: Copyright © 2026 Pelozo
 asar: true
+# libuiohook ships an N-API .node binary that cannot be loaded from inside an
+# asar archive. Keep the whole package unpacked for Windows, macOS and Linux.
+asarUnpack:
+  - '**/node_modules/uiohook-napi/**'
+  - '**/node_modules/node-gyp-build/**'
 npmRebuild: false
 directories:
   output: release

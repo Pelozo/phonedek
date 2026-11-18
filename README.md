@@ -51,7 +51,7 @@ No cloud, no account, no vendor lock-in: the phone talks directly to your PC ove
 - **Shortcuts** — Ctrl+C, Cmd+Shift+3, Alt+Tab, media keys, F-keys, punctuation… labels and presets follow the host OS, so macOS shows Cmd/Option and Windows shows Win/Alt.
 - **Preset packs** — Chrome, OBS Studio, VS Code, System and Media shortcuts, filterable and platform-aware.
 - **Full-screen screenshots** — the Screenshot button captures the whole desktop directly to a PNG on Windows and macOS (no Snipping Tool), saved to the configured folder with a completion notification. Buttons imported from a macOS profile work on Windows too.
-- **Macros** — record chords, typing and pauses with pause/resume/undo; choose whether pauses and text grouping are captured; repeat a macro 1–50× with a gap; edit/reorder/duplicate steps; mouse click, double-click, hold, release, move and scroll; launch/URL/command steps; keys can press, hold or release. Macro actions stay collapsed as one summary until you expand them.
+- **Macros** — record chords, typing, mouse clicks/double-clicks/drags/wheel and optional sampled movement; capture can run system-wide (outside PhoneDeck) with a `Ctrl/Cmd+Alt+F10` stop hotkey, or fall back to focused recording; choose whether pauses and text grouping are captured; repeat a macro 1–50× with a gap; edit/reorder/duplicate steps; launch/URL/command steps; keys can press, hold or release. Macro actions stay collapsed as one summary until you expand them.
 - **Type text** — full Unicode text typed into the active window.
 - **Launch applications** — pick an `.exe`, `.lnk`, `.bat` or `.cmd`, with arguments.
 - **Open URLs** — http/https only.
@@ -198,7 +198,9 @@ Macros are built from ordered steps:
 - mouse click / double-click / hold / release / move / scroll
 - launch app, open URL, run command
 
-Recording options: capture pauses as delays, group typing into text steps (turn off for game inputs), pause/resume, undo the last step, repeat the macro up to 50× with a per-repeat delay.
+Recording options: capture pauses as delays, group typing into text steps (turn off for game inputs), pause/resume, undo the last step, repeat the macro up to 50× with a per-repeat delay. Mouse buttons, drags, wheel and optional movement are recorded as editable steps.
+
+Global capture (Windows, macOS and Linux X11) uses a native input hook and records keystrokes and mouse activity in other apps. It is opt-in per recording, shows an OS notification, ignores input while a PhoneDeck window is focused, and stops with `Ctrl/Cmd+Alt+F10` (or the Stop button). If the hook cannot start (Wayland, missing permissions, native module failure) the recorder falls back to focused capture. macOS requires Accessibility and Input Monitoring permission; Windows cannot capture input aimed at elevated apps (UIPI). libuiohook does not expose an “injected” flag, so avoid triggering phone actions while recording, or they may appear as steps.
 
 ## How actions execute
 
@@ -222,6 +224,7 @@ PhoneDeck is a LAN tool, not an internet service.
 - The QR code contains the PIN, so treat a screenshot of it like a password.
 - **Run command** and **Launch app** actions execute with your Windows account. Only import configs you trust.
 - **Rigs and automation** can trigger those actions without a press. Automation is disarmed by default on every PC and after every import; arm it only for decks you trust.
+- **Global macro capture** sees keystrokes and mouse activity in every app while recording. It is explicitly started per recording, shows a native notification, uses a global stop hotkey and ignores PhoneDeck-focused input. Only record while you control the machine; stop it before leaving.
 - Generate a new PIN in **Pair phone** to disconnect every phone immediately.
 - There is no TLS: do not expose the port to the internet or to untrusted networks. Use a firewall rule limited to Private networks.
 

@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   clipboard,
   dialog,
+  globalShortcut,
   ipcMain,
   Menu,
   nativeImage,
@@ -53,6 +54,7 @@ import { createLogger, type Logger } from './logger'
 import { lanAddresses, primaryLanAddress, urlsForPort } from './lan'
 import { legacyConfigJson } from './legacy-export'
 import { keyboardHelperPath } from './platform'
+import { InputCapture } from './input-capture'
 import { PointerRouter, pointerInputAllowed } from './pointer-input'
 import { RigRunner } from './rig-runner'
 import type { RigPreview, RigRunResult } from './rig-runner'
@@ -127,6 +129,9 @@ import type {
   LightDeviceView,
   LightSettingsInput,
   LightStatusView,
+  MacroCaptureStartInput,
+  MacroCaptureStartResult,
+  MacroCaptureSupportView,
   ObsInputsResult,
   ObsSettingsInput,
   ObsStatusView,
@@ -186,6 +191,7 @@ let keyboardSender: KeyboardSender | null = null
 let keyboardRouter: KeyboardRouter | null = null
 let gameWatcher: GameWatcher | null = null
 let ruleService: RuleService | null = null
+let macroCapture: InputCapture | null = null
 /** A native import/destructive dialog is waiting for a decision. */
 let dialogOpen = false
 let updater: UpdateService
@@ -761,6 +767,41 @@ async function restartServer(port: number): Promise<OperationResult> {
   }
   await pushServerInfo()
   return { ok: true, state: await buildState() }
+}
+
+/** Lazily create the global capture service (never loads the native module at startup). */
+function captureService(): InputCapture {
+  if (!macroCapture) {
+    macroCapture = new InputCapture({
+      shortcut: globalShortcut,
+      isSelfFocused: () =>
+        BrowserWindow.getAllWindows().some((window) => !window.isDestroyed() && window.isFocused()),
+      accessibilityGranted: () =>
+        process.platform !== 'darwin' || systemPreferences.isTrustedAccessibilityClient(false),
+      send: (channel, payload) => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload)
+      },
+      notify: (title, body) => {
+        try {
+          if (!Notification.isSupported()) return
+          new Notification({ title, body }).show()
+        } catch {
+          // Notifications are optional (Linux without a server, macOS denial).
+        }
+      },
+      logger,
+    })
+  }
+  return macroCapture
+}
+
+function captureInputOf(value: unknown): MacroCaptureStartInput {
+  const raw = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+  return {
+    captureMouse: typeof raw['captureMouse'] === 'boolean' ? raw['captureMouse'] : undefined,
+    captureMouseMove: typeof raw['captureMouseMove'] === 'boolean' ? raw['captureMouseMove'] : undefined,
+    ignoreSelf: typeof raw['ignoreSelf'] === 'boolean' ? raw['ignoreSelf'] : undefined,
+  }
 }
 
 function registerIpc(): void {
@@ -2049,6 +2090,17 @@ function registerIpc(): void {
   ipcMain.handle(IPC.getUpdateStatus, async () => updater.getStatus())
   ipcMain.handle(IPC.checkForUpdates, async () => updater.check())
   ipcMain.handle(IPC.installUpdate, async (): Promise<void> => updater.install())
+
+  ipcMain.handle(
+    IPC.getMacroCaptureSupport,
+    async (): Promise<MacroCaptureSupportView> => captureService().support(),
+  )
+  ipcMain.handle(
+    IPC.startMacroCapture,
+    async (_event, input?: unknown): Promise<MacroCaptureStartResult> =>
+      captureService().start(captureInputOf(input)),
+  )
+  ipcMain.handle(IPC.stopMacroCapture, async () => captureService().stop('user'))
 }
 
 /**
@@ -2132,6 +2184,7 @@ function createWindow(): void {
     }
   })
   mainWindow.on('closed', () => {
+    macroCapture?.stop('user')
     mainWindow = null
     updateTrayMenu()
   })
@@ -2901,6 +2954,7 @@ if (!gotLock) {
     void (async () => {
       try {
         await inputRouter?.dispose()
+        macroCapture?.dispose()
         rigRunner?.abort()
         controlState?.dispose()
         mixer?.dispose()

@@ -39,6 +39,13 @@ jobs:
           }
           Get-Content "$release/latest.yml"
           Get-Content "$release/win-unpacked/resources/app-update.yml"
+          # The global macro hook is an N-API native module and must be
+          # unpacked from asar beside its runtime loader.
+          $uiohook = "$release/win-unpacked/resources/app.asar.unpacked/node_modules/uiohook-napi/prebuilds/win32-x64/uiohook-napi.node"
+          $loader = "$release/win-unpacked/resources/app.asar.unpacked/node_modules/node-gyp-build/index.js"
+          if (-not (Test-Path $uiohook)) { throw "uiohook native module is missing from the packaged app" }
+          if (-not (Test-Path $loader)) { throw "node-gyp-build loader is missing from the unpacked app" }
+          node -e "const m=require('./apps/desktop/release/win-unpacked/resources/app.asar.unpacked/node_modules/uiohook-napi'); if (typeof m.uIOhook.start !== 'function') process.exit(1); console.log('uiohook native loaded')"
       - uses: actions/upload-artifact@v4
         with:
           name: PhoneDeck-Windows
@@ -115,6 +122,15 @@ jobs:
           test -n "$APP"
           EXE="$APP/Contents/MacOS/PhoneDeck"
           test -x "$EXE"
+          UIOHOOK="$(find "$APP" -path '*/app.asar.unpacked/node_modules/uiohook-napi/prebuilds/darwin-arm64/uiohook-napi.node' -print -quit)"
+          test -n "$UIOHOOK"
+          UIOHOOK_PKG="$(find "$APP" -path '*/app.asar.unpacked/node_modules/uiohook-napi' -type d -print -quit)"
+          test -n "$UIOHOOK_PKG"
+          test -n "$(find "$APP" -path '*/app.asar.unpacked/node_modules/node-gyp-build/index.js' -print -quit)"
+          if [ -n "${CSC_LINK:-}" ]; then
+            codesign --verify --strict "$UIOHOOK"
+          fi
+          node -e "const m=require(process.argv[1]); if (typeof m.uIOhook.start !== 'function') process.exit(1); console.log('uiohook native loaded')" "$UIOHOOK_PKG"
           # TCC attributes input permission to these identifiers; a stale
           # "Electron" identity makes the grant silently miss the helper.
           codesign -dv --verbose=4 "$EXE" 2>&1 | grep -q 'Identifier=com.phonedek.desktop'

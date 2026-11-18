@@ -8,6 +8,9 @@ const alias = { '@phonedek/shared': shared }
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin({ exclude: ['@phonedek/shared'] })],
+    // Keep the native N-API hook out of the bundle; it is lazy-required at
+    // runtime and unpacked from the asar archive (see electron-builder.yml).
+    build: { rollupOptions: { external: ['uiohook-napi'] } },
     resolve: { alias },
   },
   preload: {
