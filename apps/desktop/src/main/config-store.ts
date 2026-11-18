@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFil
 import { dirname, join } from 'node:path'
 import { createDefaultConfig, migrateStarterDeck } from '@phonedek/shared'
 import { parseConfig } from '@phonedek/shared'
+import { repairDanglingReferences } from '@phonedek/shared'
 import type { DeckConfig } from '@phonedek/shared'
 import type { Logger } from './logger'
 
@@ -73,24 +74,71 @@ export class ConfigStore {
       return config
     }
     const raw = readFileSync(this.file, 'utf8')
+
+    let input: unknown
     try {
-      const parsed = parseConfig(JSON.parse(raw))
+      input = JSON.parse(raw)
+    } catch (error) {
+      // A syntax error cannot be repaired by dropping references.
+      return this.resetCorrupt(error)
+    }
+
+    try {
+      const parsed = parseConfig(input)
       const migrated = migrateStarterDeck(parsed, process.platform)
       if (migrated !== parsed) this.write(migrated)
       return migrated
     } catch (error) {
-      this.lastError = error instanceof Error ? error.message : String(error)
-      const backup = join(dirname(this.file), `config.corrupt-${Date.now()}.json`)
-      try {
-        copyFileSync(this.file, backup)
-      } catch {
-        // best effort
-      }
-      this.logger?.warn(`Config was invalid; backed up to ${backup}. ${this.lastError}`)
-      const config = createDefaultConfig(process.platform, this.now())
-      this.write(config)
-      return config
+      const repaired = this.tryRepairDanglingReferences(input)
+      return repaired ?? this.resetCorrupt(error)
     }
+  }
+
+  /**
+   * Retry validation after removing dangling rig/rule references. Returns null
+   * when the repair made no useful change or the result is still invalid, so
+   * the caller can fall back to the corrupt-backup/reset path.
+   */
+  private tryRepairDanglingReferences(input: unknown): DeckConfig | null {
+    const repair = repairDanglingReferences(input)
+    if (!repair.repaired) return null
+
+    let config: DeckConfig
+    try {
+      config = migrateStarterDeck(parseConfig(repair.config), process.platform)
+    } catch {
+      return null
+    }
+
+    // Keep the user's original file once, separate from corrupt backups.
+    const backup = join(dirname(this.file), `config.repaired-${Date.now()}.json`)
+    try {
+      copyFileSync(this.file, backup)
+    } catch {
+      // best effort
+    }
+    this.write(config)
+    const { rigActions, rigStates, ruleActions, rules } = repair.removed
+    this.lastError =
+      `Repaired dangling config references: ${rigActions} rig action(s), ` +
+      `${rigStates} rig state(s), ${ruleActions} rule action(s), ${rules} empty rule(s). ` +
+      `Original backed up to ${backup}.`
+    this.logger?.warn(this.lastError)
+    return config
+  }
+
+  private resetCorrupt(error: unknown): DeckConfig {
+    this.lastError = error instanceof Error ? error.message : String(error)
+    const backup = join(dirname(this.file), `config.corrupt-${Date.now()}.json`)
+    try {
+      copyFileSync(this.file, backup)
+    } catch {
+      // best effort
+    }
+    this.logger?.warn(`Config was invalid; backed up to ${backup}. ${this.lastError}`)
+    const config = createDefaultConfig(process.platform, this.now())
+    this.write(config)
+    return config
   }
 
   private commit(config: DeckConfig): void {
