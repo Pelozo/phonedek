@@ -10,6 +10,14 @@ export interface WhatsNewEntry {
  * Keep highlights short: the dialog is a summary, not release notes.
  */
 const WHATS_NEW: Readonly<Record<string, WhatsNewEntry>> = {
+  '0.18.0': {
+    title: 'Mouse macros and global capture',
+    highlights: [
+      'Macros can record clicks, double-clicks, drags, wheel and optional mouse movement.',
+      'Global capture records keyboard and mouse in other apps; stop with Ctrl/Cmd+Alt+F10.',
+      'Focused recording remains the fallback; PhoneDeck-focused input is ignored.',
+    ],
+  },
   '0.17.0': {
     title: 'Export for older desktops',
     highlights: [

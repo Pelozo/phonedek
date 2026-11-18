@@ -11,6 +11,14 @@ data class WhatsNewEntry(
  * each release; versions without a key fall back to [GENERIC_WHATS_NEW].
  */
 private val WHATS_NEW: Map<String, WhatsNewEntry> = mapOf(
+    "0.18.0" to WhatsNewEntry(
+        title = "Mouse macros and global capture",
+        highlights = listOf(
+            "Macros can record clicks, double-clicks, drags, wheel and optional mouse movement.",
+            "Global capture records keyboard and mouse in other apps; stop with Ctrl/Cmd+Alt+F10.",
+            "Focused recording remains the fallback; PhoneDeck-focused input is ignored.",
+        ),
+    ),
     "0.17.0" to WhatsNewEntry(
         title = "Export for older desktops",
         highlights = listOf(
