@@ -152,6 +152,16 @@ fun DeckScreen(
         if (!canHideChrome) chromeRevealed = false
     }
 
+    // The Quick Settings tile can open Settings directly when it has no valid
+    // favorite. Consume the one-shot request so rotation does not reopen it.
+    LaunchedEffect(state.quickTileSettingsRequest) {
+        if (state.quickTileSettingsRequest > 0) {
+            settingsChangeServerOnOpen = false
+            showSettings = true
+            viewModel.consumeQuickTileSettingsRequest()
+        }
+    }
+
     // A disappeared control view cannot leave the pager locked.
     LaunchedEffect(page?.id) {
         controlInteracting = false
@@ -288,6 +298,8 @@ fun DeckScreen(
             onHideTopBarWhenConnected = viewModel::setHideTopBarWhenConnected,
             onLockLandscape = viewModel::setLockLandscape,
             onRotateContentInPortrait = viewModel::setRotateContentInPortrait,
+            onSelectQuickTileFavorite = viewModel::setQuickTileFavorite,
+            onClearQuickTileFavorite = viewModel::clearQuickTileFavorite,
             onSaveBackup = viewModel::saveBackup,
             onSendBackup = viewModel::sendBackup,
             onShowSetupGuide = {

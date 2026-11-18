@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -51,13 +53,20 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.phonedek.app.BuildConfig
+import com.phonedek.app.data.DeckConfig
 import com.phonedek.app.data.Pairing
+import com.phonedek.app.data.QuickTileFavorite
+import com.phonedek.app.data.QuickTileFavoriteStatus
+import com.phonedek.app.data.quickTileEntries
+import com.phonedek.app.data.quickTileFavoriteStatus
+import com.phonedek.app.data.sameQuickTileButton
 import com.phonedek.app.util.Diag
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -88,6 +97,8 @@ fun SettingsSheet(
     onHideTopBarWhenConnected: (Boolean) -> Unit,
     onLockLandscape: (Boolean) -> Unit,
     onRotateContentInPortrait: (Boolean) -> Unit,
+    onSelectQuickTileFavorite: (QuickTileFavorite) -> Unit,
+    onClearQuickTileFavorite: () -> Unit,
     onSaveBackup: (Uri) -> Unit,
     onSendBackup: (Uri) -> Unit,
     onShowSetupGuide: () -> Unit,
@@ -102,6 +113,7 @@ fun SettingsSheet(
         mutableStateOf(confirmChangeOnOpen)
     }
     var logs by remember { mutableStateOf(Diag.snapshot()) }
+    var showQuickTilePicker by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
 
     val requestChangeServer: () -> Unit = { confirmChange = true }
@@ -139,6 +151,8 @@ fun SettingsSheet(
             onHideTopBarWhenConnected = onHideTopBarWhenConnected,
             onLockLandscape = onLockLandscape,
             onRotateContentInPortrait = onRotateContentInPortrait,
+            onChooseQuickTile = { showQuickTilePicker = true },
+            onClearQuickTileFavorite = onClearQuickTileFavorite,
             onLaunchBackup = launchBackup,
             onLaunchImport = launchImport,
             onShowSetupGuide = onShowSetupGuide,
@@ -158,6 +172,8 @@ fun SettingsSheet(
             onHideTopBarWhenConnected = onHideTopBarWhenConnected,
             onLockLandscape = onLockLandscape,
             onRotateContentInPortrait = onRotateContentInPortrait,
+            onChooseQuickTile = { showQuickTilePicker = true },
+            onClearQuickTileFavorite = onClearQuickTileFavorite,
             onLaunchBackup = launchBackup,
             onLaunchImport = launchImport,
             onShowSetupGuide = onShowSetupGuide,
@@ -165,6 +181,18 @@ fun SettingsSheet(
             onRefreshLogs = refreshLogs,
             onCopyLogs = copyLogs,
             onClearLogs = clearLogs,
+        )
+    }
+
+    if (showQuickTilePicker) {
+        QuickTilePickerDialog(
+            config = state.config,
+            favorite = state.quickTileFavorite,
+            onDismiss = { showQuickTilePicker = false },
+            onSelect = { favorite ->
+                showQuickTilePicker = false
+                onSelectQuickTileFavorite(favorite)
+            },
         )
     }
 
@@ -191,6 +219,8 @@ private fun SettingsBottomSheet(
     onHideTopBarWhenConnected: (Boolean) -> Unit,
     onLockLandscape: (Boolean) -> Unit,
     onRotateContentInPortrait: (Boolean) -> Unit,
+    onChooseQuickTile: () -> Unit,
+    onClearQuickTileFavorite: () -> Unit,
     onLaunchBackup: () -> Unit,
     onLaunchImport: () -> Unit,
     onShowSetupGuide: () -> Unit,
@@ -242,6 +272,14 @@ private fun SettingsBottomSheet(
             Spacer(Modifier.height(20.dp))
             HorizontalDivider(color = Hairline)
             Spacer(Modifier.height(16.dp))
+            SettingsQuickTileSection(
+                state = state,
+                onChooseQuickTile = onChooseQuickTile,
+                onClearQuickTileFavorite = onClearQuickTileFavorite,
+            )
+            Spacer(Modifier.height(20.dp))
+            HorizontalDivider(color = Hairline)
+            Spacer(Modifier.height(16.dp))
             SettingsDiagnosticsSection(
                 logs = logs,
                 onRefreshLogs = onRefreshLogs,
@@ -273,6 +311,8 @@ private fun SettingsConsolePanel(
     onHideTopBarWhenConnected: (Boolean) -> Unit,
     onLockLandscape: (Boolean) -> Unit,
     onRotateContentInPortrait: (Boolean) -> Unit,
+    onChooseQuickTile: () -> Unit,
+    onClearQuickTileFavorite: () -> Unit,
     onLaunchBackup: () -> Unit,
     onLaunchImport: () -> Unit,
     onShowSetupGuide: () -> Unit,
@@ -339,6 +379,14 @@ private fun SettingsConsolePanel(
                                 onHideTopBarWhenConnected = onHideTopBarWhenConnected,
                                 onLockLandscape = onLockLandscape,
                                 onRotateContentInPortrait = onRotateContentInPortrait,
+                            )
+                            Spacer(Modifier.height(20.dp))
+                            HorizontalDivider(color = Hairline)
+                            Spacer(Modifier.height(16.dp))
+                            SettingsQuickTileSection(
+                                state = state,
+                                onChooseQuickTile = onChooseQuickTile,
+                                onClearQuickTileFavorite = onClearQuickTileFavorite,
                             )
                         }
                         Box(
@@ -506,6 +554,248 @@ private fun SettingsBehaviorSection(
         checked = state.hideTopBarWhenConnected,
         onCheckedChange = onHideTopBarWhenConnected,
     )
+}
+
+@Composable
+private fun SettingsQuickTileSection(
+    state: UiState,
+    onChooseQuickTile: () -> Unit,
+    onClearQuickTileFavorite: () -> Unit,
+) {
+    val favorite = state.quickTileFavorite
+    val status = quickTileFavoriteStatus(state.config, favorite)
+
+    ConsoleSectionLabel(index = "05", label = "QUICK SETTINGS")
+    Spacer(Modifier.height(6.dp))
+    Text(
+        text = "Press one deck button from the phone's Quick Settings panel. " +
+            "Edit the panel and add the PhoneDeck tile.",
+        color = TextMuted,
+        fontSize = 11.sp,
+        lineHeight = 16.sp,
+    )
+    Spacer(Modifier.height(12.dp))
+
+    Surface(
+        shape = ControlShape,
+        color = InkDeep,
+        border = BorderStroke(1.dp, Hairline),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Text(
+                text = "CURRENT TILE",
+                color = TextFaint,
+                fontFamily = ConsoleMono,
+                fontSize = 9.sp,
+                letterSpacing = 1.sp,
+            )
+            Spacer(Modifier.height(5.dp))
+            when {
+                state.config == null -> Text(
+                    text = "No cached deck yet. Open PhoneDeck while connected " +
+                        "to load the buttons, then choose one.",
+                    color = TextMuted,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                )
+
+                status is QuickTileFavoriteStatus.NotConfigured -> Text(
+                    text = "No button selected.",
+                    color = TextMuted,
+                    fontSize = 12.sp,
+                )
+
+                status is QuickTileFavoriteStatus.Missing -> {
+                    Text(
+                        text = favorite?.label?.takeIf { it.isNotBlank() }
+                            ?: "Saved button not found",
+                        color = StatusDanger,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = "It is no longer in this deck or cannot run from the tile. Choose again.",
+                        color = TextMuted,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                    )
+                }
+
+                status is QuickTileFavoriteStatus.Ready -> Text(
+                    text = status.target.path,
+                    color = TextPrimary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    lineHeight = 17.sp,
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedButton(
+                    onClick = onChooseQuickTile,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(40.dp),
+                    shape = ControlShape,
+                    border = BorderStroke(1.dp, HairlineStrong),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
+                ) {
+                    Text(
+                        text = if (favorite == null) "Choose button\u2026" else "Change button\u2026",
+                        fontSize = 12.sp,
+                    )
+                }
+                if (favorite != null) {
+                    TextButton(onClick = onClearQuickTileFavorite) {
+                        Text("Clear", color = TextMuted, fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickTilePickerDialog(
+    config: DeckConfig?,
+    favorite: QuickTileFavorite?,
+    onDismiss: () -> Unit,
+    onSelect: (QuickTileFavorite) -> Unit,
+) {
+    val entries = remember(config) { quickTileEntries(config) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        ),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.72f))
+                .safeDrawingPadding()
+                .padding(16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Surface(
+                modifier = Modifier
+                    .widthIn(max = 620.dp)
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.88f),
+                shape = PanelShape,
+                color = Panel,
+                border = BorderStroke(1.dp, HairlineStrong),
+                shadowElevation = 16.dp,
+            ) {
+                Column(Modifier.fillMaxSize()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ConsoleTitleRule(
+                            title = "Quick Settings tile",
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = onDismiss) {
+                            Text("Close", color = TextMuted, fontSize = 12.sp)
+                        }
+                    }
+                    HorizontalDivider(color = Hairline)
+                    if (entries.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .padding(24.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "No cached deck buttons yet. Open PhoneDeck once " +
+                                    "while connected to the PC, then choose again.",
+                                color = TextMuted,
+                                fontSize = 12.sp,
+                                lineHeight = 17.sp,
+                                textAlign = TextAlign.Center,
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                        ) {
+                            items(
+                                items = entries,
+                                key = { entry ->
+                                    "${entry.favorite.profileId}/" +
+                                        "${entry.favorite.pageId}/" +
+                                        entry.favorite.buttonId
+                                },
+                            ) { entry ->
+                                val selected = entry.favorite.sameQuickTileButton(favorite)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(
+                                            if (selected) {
+                                                Accent.copy(alpha = 0.12f)
+                                            } else {
+                                                Color.Transparent
+                                            },
+                                            ControlShape,
+                                        )
+                                        .clickable { onSelect(entry.favorite) }
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = entry.path,
+                                        color = if (selected) TextPrimary else TextSecondary,
+                                        fontSize = 13.sp,
+                                        lineHeight = 18.sp,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    if (entry.isRig) {
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            text = "RIG",
+                                            color = Accent,
+                                            fontFamily = ConsoleMono,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.8.sp,
+                                        )
+                                    }
+                                    if (selected) {
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            text = "SELECTED",
+                                            color = Accent,
+                                            fontFamily = ConsoleMono,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.8.sp,
+                                        )
+                                    }
+                                }
+                                HorizontalDivider(color = Hairline)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -781,7 +1071,7 @@ private fun SettingsBackupSection(
 
 @Composable
 private fun SettingsAboutSection(onShowWhatsNew: () -> Unit) {
-    ConsoleSectionLabel(index = "05", label = "ABOUT")
+    ConsoleSectionLabel(index = "06", label = "ABOUT")
     Spacer(Modifier.height(4.dp))
     Row(
         modifier = Modifier

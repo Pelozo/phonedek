@@ -24,6 +24,8 @@ data class StoredSettings(
     val onboardingSeen: Boolean,
     val lastProfileId: String?,
     val lastPageId: String?,
+    /** Deck button chosen for the Android Quick Settings tile, if any. */
+    val quickTileFavorite: QuickTileFavorite?,
     /** Version whose What's New dialog was dismissed, or recorded on first install. */
     val lastSeenVersion: String?,
 )
@@ -52,6 +54,10 @@ class PrefsRepository(private val context: Context) {
         val ONBOARDING_SEEN = booleanPreferencesKey("onboarding_seen")
         val LAST_PROFILE = stringPreferencesKey("last_profile")
         val LAST_PAGE = stringPreferencesKey("last_page")
+        val QUICK_TILE_PROFILE = stringPreferencesKey("quick_tile_profile")
+        val QUICK_TILE_PAGE = stringPreferencesKey("quick_tile_page")
+        val QUICK_TILE_BUTTON = stringPreferencesKey("quick_tile_button")
+        val QUICK_TILE_LABEL = stringPreferencesKey("quick_tile_label")
         val LAST_SEEN_VERSION = stringPreferencesKey("last_seen_version")
     }
 
@@ -104,6 +110,12 @@ class PrefsRepository(private val context: Context) {
             ),
             lastProfileId = prefs[Keys.LAST_PROFILE]?.takeIf { it.isNotBlank() },
             lastPageId = prefs[Keys.LAST_PAGE]?.takeIf { it.isNotBlank() },
+            quickTileFavorite = normalizeQuickTileFavorite(
+                profileId = prefs[Keys.QUICK_TILE_PROFILE],
+                pageId = prefs[Keys.QUICK_TILE_PAGE],
+                buttonId = prefs[Keys.QUICK_TILE_BUTTON],
+                label = prefs[Keys.QUICK_TILE_LABEL],
+            ),
             lastSeenVersion = prefs[Keys.LAST_SEEN_VERSION]?.takeIf { it.isNotBlank() },
         )
     }
@@ -132,7 +144,40 @@ class PrefsRepository(private val context: Context) {
             prefs.remove(Keys.SERVER_NAME)
             prefs.remove(Keys.LAST_PROFILE)
             prefs.remove(Keys.LAST_PAGE)
+            clearQuickTileFavorite(prefs)
         }
+    }
+
+    suspend fun setQuickTileFavorite(favorite: QuickTileFavorite) {
+        val normalized = normalizeQuickTileFavorite(
+            profileId = favorite.profileId,
+            pageId = favorite.pageId,
+            buttonId = favorite.buttonId,
+            label = favorite.label,
+        ) ?: return
+        context.deckDataStore.edit { prefs ->
+            prefs[Keys.QUICK_TILE_PROFILE] = normalized.profileId
+            prefs[Keys.QUICK_TILE_PAGE] = normalized.pageId
+            prefs[Keys.QUICK_TILE_BUTTON] = normalized.buttonId
+            if (normalized.label.isBlank()) {
+                prefs.remove(Keys.QUICK_TILE_LABEL)
+            } else {
+                prefs[Keys.QUICK_TILE_LABEL] = normalized.label
+            }
+        }
+    }
+
+    suspend fun clearQuickTileFavorite() {
+        context.deckDataStore.edit { prefs -> clearQuickTileFavorite(prefs) }
+    }
+
+    private fun clearQuickTileFavorite(
+        prefs: androidx.datastore.preferences.core.MutablePreferences,
+    ) {
+        prefs.remove(Keys.QUICK_TILE_PROFILE)
+        prefs.remove(Keys.QUICK_TILE_PAGE)
+        prefs.remove(Keys.QUICK_TILE_BUTTON)
+        prefs.remove(Keys.QUICK_TILE_LABEL)
     }
 
     suspend fun setKeepScreenOn(enabled: Boolean) {

@@ -183,6 +183,21 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         if (intent == null) return
+
+        // The Quick Settings tile opens the app with a one-shot setup message.
+        // Consume the extras so an activity recreation cannot open Settings again.
+        val quickTileMessage = intent.getStringExtra(EXTRA_QUICK_TILE_MESSAGE)
+        if (quickTileMessage != null) {
+            val openSettings = intent.getBooleanExtra(
+                EXTRA_QUICK_TILE_OPEN_SETTINGS,
+                false,
+            )
+            intent.removeExtra(EXTRA_QUICK_TILE_MESSAGE)
+            intent.removeExtra(EXTRA_QUICK_TILE_OPEN_SETTINGS)
+            Diag.i("Quick tile setup requested (openSettings=$openSettings)")
+            viewModel.onQuickTileSetupRequested(quickTileMessage, openSettings)
+        }
+
         val data = intent.data ?: return
         if (data.scheme != "phonedek" || data.host != "pair") return
 
@@ -212,5 +227,12 @@ class MainActivity : ComponentActivity() {
             return
         }
         viewModel.handleDeepLink(host, port, token, name)
+    }
+
+    companion object {
+        const val ACTION_QUICK_TILE_SETUP = "com.phonedek.app.action.QUICK_TILE_SETUP"
+        const val EXTRA_QUICK_TILE_MESSAGE = "com.phonedek.app.extra.QUICK_TILE_MESSAGE"
+        const val EXTRA_QUICK_TILE_OPEN_SETTINGS =
+            "com.phonedek.app.extra.QUICK_TILE_OPEN_SETTINGS"
     }
 }

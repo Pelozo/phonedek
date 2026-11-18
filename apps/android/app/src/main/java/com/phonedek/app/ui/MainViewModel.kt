@@ -22,7 +22,9 @@ import com.phonedek.app.data.Pairing
 import com.phonedek.app.data.PairingDraft
 import com.phonedek.app.data.PointerButtonEvent
 import com.phonedek.app.data.PrefsRepository
+import com.phonedek.app.data.QuickTileFavorite
 import com.phonedek.app.data.RigProgressDto
+import com.phonedek.app.data.normalizeQuickTileFavorite
 import com.phonedek.app.data.shouldShowWhatsNew
 import com.phonedek.app.net.BackupResult
 import com.phonedek.app.net.ConnectionStatus
@@ -112,6 +114,10 @@ data class UiState(
     val hideTopBarWhenConnected: Boolean = true,
     val lockLandscape: Boolean = true,
     val rotateContentInPortrait: Boolean = true,
+    /** Button selected for the Android Quick Settings tile. */
+    val quickTileFavorite: QuickTileFavorite? = null,
+    /** Increments when the tile asks the app to open the favorite picker. */
+    val quickTileSettingsRequest: Int = 0,
     val pairingBusy: Boolean = false,
     val pairingError: String? = null,
     val pairingDraft: PairingDraft? = null,
@@ -716,6 +722,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setRotateContentInPortrait(enabled: Boolean) {
         _state.update { it.copy(rotateContentInPortrait = enabled) }
         viewModelScope.launch { runCatching { prefs.setRotateContentInPortrait(enabled) } }
+    }
+
+    /** Stores the Quick Settings favorite; survives config refreshes. */
+    fun setQuickTileFavorite(favorite: QuickTileFavorite) {
+        val normalized = normalizeQuickTileFavorite(
+            profileId = favorite.profileId,
+            pageId = favorite.pageId,
+            buttonId = favorite.buttonId,
+            label = favorite.label,
+        ) ?: run {
+            emit("That button could not be saved for the Quick Settings tile.")
+            return
+        }
+        _state.update { it.copy(quickTileFavorite = normalized) }
+        viewModelScope.launch {
+            runCatching { prefs.setQuickTileFavorite(normalized) }
+                .onFailure { Diag.w("Could not save Quick Settings favorite: ${it.message}") }
+        }
+    }
+
+    fun clearQuickTileFavorite() {
+        _state.update { it.copy(quickTileFavorite = null) }
+        viewModelScope.launch {
+            runCatching { prefs.clearQuickTileFavorite() }
+                .onFailure { Diag.w("Could not clear Quick Settings favorite: ${it.message}") }
+        }
+    }
+
+    /**
+     * The tile could not run (no pairing, no favorite, stale id) and opened the
+     * app. Show why, and optionally open Settings so the user can choose again.
+     */
+    fun onQuickTileSetupRequested(message: String, openSettings: Boolean) {
+        emit(message)
+        if (openSettings) {
+            _state.update { it.copy(quickTileSettingsRequest = it.quickTileSettingsRequest + 1) }
+        }
+    }
+
+    fun consumeQuickTileSettingsRequest() {
+        _state.update { it.copy(quickTileSettingsRequest = 0) }
     }
 
     fun completeOnboarding() {
@@ -2172,6 +2219,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             hideTopBarWhenConnected = stored.hideTopBarWhenConnected,
             lockLandscape = stored.lockLandscape,
             rotateContentInPortrait = stored.rotateContentInPortrait,
+            quickTileFavorite = current.quickTileFavorite ?: stored.quickTileFavorite,
         )
         loaded = true
 
