@@ -11,6 +11,14 @@ data class WhatsNewEntry(
  * each release; versions without a key fall back to [GENERIC_WHATS_NEW].
  */
 private val WHATS_NEW: Map<String, WhatsNewEntry> = mapOf(
+    "0.19.0" to WhatsNewEntry(
+        title = "Quick Settings tile",
+        highlights = listOf(
+            "Pick one deck button or rig in Settings → Quick Settings and press it from the Android Quick Settings panel.",
+            "The tile uses the cached deck and saved pairing; locked phones ask to unlock first.",
+            "Pairing, missing-button, rate-limit and offline errors are shown directly.",
+        ),
+    ),
     "0.18.0" to WhatsNewEntry(
         title = "Mouse macros and global capture",
         highlights = listOf(

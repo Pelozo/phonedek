@@ -10,6 +10,14 @@ export interface WhatsNewEntry {
  * Keep highlights short: the dialog is a summary, not release notes.
  */
 const WHATS_NEW: Readonly<Record<string, WhatsNewEntry>> = {
+  '0.19.0': {
+    title: 'Quick Settings tile',
+    highlights: [
+      'Pick one deck button or rig in Settings → Quick Settings and press it from the Android Quick Settings panel.',
+      'The tile uses the cached deck and saved pairing; locked phones ask to unlock first.',
+      'Pairing, missing-button, rate-limit and offline errors are shown directly.',
+    ],
+  },
   '0.18.0': {
     title: 'Mouse macros and global capture',
     highlights: [
