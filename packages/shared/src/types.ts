@@ -41,6 +41,12 @@ export const LIGHT_CAPABILITY = 'light-v1' as const
 /** Desktop capability for per-application audio volume/mute control. */
 export const MIXER_CAPABILITY = 'mixer-v1' as const
 
+/**
+ * Desktop capability for enumerating PC audio endpoints and switching the
+ * default output/input device (`audio-device-v1`).
+ */
+export const AUDIO_DEVICE_CAPABILITY = 'audio-device-v1' as const
+
 /** Desktop capability for triggering Streamer.bot actions over its local API. */
 export const STREAMERBOT_CAPABILITY = 'streamerbot-v1' as const
 
@@ -449,9 +455,11 @@ export type ExecutableAction = Action | MicAction | TwitchAction
  * `ExecutableAction['type']` compiles unchanged until it adds that UI.
  *
  * `StreamerBotAction` follows the same rule: the desktop plans and executes it,
- * while the renderer adds its editor entry in a follow-up.
+ * while the renderer adds its editor entry in a follow-up. `AudioDeviceAction`
+ * is the same staged pattern: it is plannable/executable now, and it joins
+ * `ConfigAction`/`StateBinding` when the editor UI lands.
  */
-export type PlannableAction = ExecutableAction | LightAction | StreamerBotAction
+export type PlannableAction = ExecutableAction | LightAction | StreamerBotAction | AudioDeviceAction
 
 /**
  * Action union currently consumed by the editor UI. `StreamerBotAction` is
@@ -588,6 +596,83 @@ export type AppVolumeAction =
   | { type: 'appVolume'; action: 'toggleMute'; match: AppVolumeMatch }
 
 /* ------------------------------------------------------------------ */
+/* PC audio devices                                                     */
+/* ------------------------------------------------------------------ */
+
+/** Which system default an audio-device action or state refers to. */
+export type AudioDeviceKind = 'output' | 'input'
+
+/** Cosmetic picker tag for an endpoint (e.g. `USB`, `BT`, `HDMI`). */
+export type AudioDeviceForm =
+  | 'speakers'
+  | 'headphones'
+  | 'headset'
+  | 'microphone'
+  | 'usb'
+  | 'bluetooth'
+  | 'hdmi'
+  | 'virtual'
+  | 'other'
+
+/**
+ * A desktop-config-owned device target.
+ *
+ * `id` is a host-generated opaque key (a hash of the OS endpoint id), never a
+ * registry key or endpoint path. `name` is the friendly-name fallback used when
+ * the OS recreates the endpoint id after a driver update. The schema requires
+ * at least one of the two; both ids and names are resolved on the desktop only.
+ */
+export interface AudioDeviceRef {
+  /** Opaque host key, 1..128 safe characters. */
+  id?: string
+  /** Friendly name fallback, 1..120 characters. */
+  name?: string
+}
+
+/**
+ * Set the default output/input, or cycle through an ordered 2..8 target list.
+ *
+ * Staged union: `ActionSchema` (including `rigStepActionSchema`) already accepts
+ * this shape so new configs validate and round-trip. P1 adds it to
+ * `PlannableAction` and the desktop plan/executor; it stays out of `Action`,
+ * `ConfigAction`, `RigStepAction` and `StateBinding` until the editor and phone
+ * readback land (so the existing renderer keeps compiling).
+ *
+ * `allRoles` is Windows-only (console + multimedia + communications, default
+ * true); macOS and Linux have one system-wide default per direction.
+ */
+export type AudioDeviceAction =
+  | {
+      type: 'audioDevice'
+      action: 'set'
+      kind: AudioDeviceKind
+      device: AudioDeviceRef
+      allRoles?: boolean
+    }
+  | {
+      type: 'audioDevice'
+      action: 'cycle'
+      kind: AudioDeviceKind
+      /** Ordered 2..8 targets. Two targets make it a toggle. */
+      devices: AudioDeviceRef[]
+      allRoles?: boolean
+    }
+
+/**
+ * Read-only current-default tile read through `control-state-v1`.
+ *
+ * Staged union: accepted by `StateBindingSchema`, but not yet part of
+ * `StateBinding`; P1/P4 add runtime readback and renderer/phone display.
+ * Without `device` the tile is a generic Output/Input readout. With it, the
+ * tile is active only while that target is the current default.
+ */
+export interface AudioDeviceStateBinding {
+  type: 'audioDevice'
+  target: AudioDeviceKind
+  device?: AudioDeviceRef
+}
+
+/* ------------------------------------------------------------------ */
 /* Rig presets                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -623,8 +708,15 @@ export interface RigGuard {
  * and nested rigs are not valid steps, so a rig can never recurse or move the
  * phone away while it runs. AppVolume is already accepted by the schema and the
  * planner; it stays outside `PlannableAction` until the renderer catches up.
+ *
+ * `AudioDeviceAction` is excluded statically: the schema accepts it (and the
+ * host planner/executor handle the resulting step), but the editor's rig-step
+ * picker union is still narrow. P3 widens the renderer and removes this
+ * exclusion.
  */
-export type RigStepAction = Exclude<PlannableAction, PageAction> | AppVolumeAction
+export type RigStepAction =
+  | Exclude<PlannableAction, PageAction | AudioDeviceAction>
+  | AppVolumeAction
 
 export interface RigStep {
   /** Optional stable id, unique within its rig. */
@@ -1157,6 +1249,29 @@ export interface StreamerBotPlanStep {
   args?: Record<string, string>
 }
 
+/**
+ * Switch (or cycle) the OS default output/input device.
+ *
+ * The refs are copied from the config action; resolution against the live host
+ * enumeration happens in the desktop controller, never in the plan builder.
+ * `allRoles` is Windows-only (console + multimedia + communications).
+ */
+export type AudioDevicePlanStep =
+  | {
+      kind: 'audioDevice'
+      action: 'set'
+      deviceKind: AudioDeviceKind
+      device: AudioDeviceRef
+      allRoles?: boolean
+    }
+  | {
+      kind: 'audioDevice'
+      action: 'cycle'
+      deviceKind: AudioDeviceKind
+      devices: AudioDeviceRef[]
+      allRoles?: boolean
+    }
+
 export type PlanStep =
   | KeyPlanStep
   | TextPlanStep
@@ -1173,6 +1288,7 @@ export type PlanStep =
   | LightPlanStep
   | AppVolumePlanStep
   | StreamerBotPlanStep
+  | AudioDevicePlanStep
 
 export type KeyboardPlanStep = KeyPlanStep | TextPlanStep | DelayPlanStep | MediaPlanStep | MousePlanStep
 
@@ -1329,6 +1445,69 @@ export interface MixerResult {
   error?: string
 }
 
+/**
+ * One audio endpoint row in a live device list. `id` is an opaque host key;
+ * `name` is the sanitized friendly name. `form` is a cosmetic picker tag and
+ * `detail` an optional short host note.
+ */
+export interface AudioDeviceEntry {
+  id: string
+  name: string
+  deviceKind: AudioDeviceKind
+  form?: AudioDeviceForm
+  /** True while this endpoint is the current OS default for its kind. */
+  current: boolean
+  /** False when the endpoint vanished after the snapshot was requested. */
+  available: boolean
+  /** Optional short display detail, ≤64 chars. */
+  detail?: string
+}
+
+/**
+ * Subscribe to (or stop) the live audio-device panel for this connection. The
+ * desktop replies with an immediate `audioDevicesState` and then polls while
+ * subscribed. Additive: old peers ignore it and never receive state.
+ */
+export interface AudioDevicesMessage {
+  type: 'audioDevices'
+  phase: 'start' | 'stop'
+}
+
+/**
+ * Set the OS default device by opaque id. The phone never sends a name or path:
+ * the desktop validates the id against its latest enumeration.
+ */
+export interface AudioDeviceSetMessage {
+  type: 'audioDeviceSet'
+  requestId: string
+  deviceKind: AudioDeviceKind
+  /** Opaque id from the latest `audioDevicesState`, 1..64 chars. */
+  deviceId: string
+}
+
+/** Server → subscribed phone: live audio-device snapshot (~1 Hz). */
+export interface AudioDevicesStateMessage {
+  type: 'audioDevicesState'
+  available: boolean
+  /** Why switching is unavailable (unsupported platform, helper missing). */
+  reason?: string
+  output: AudioDeviceEntry[]
+  input: AudioDeviceEntry[]
+  currentOutputId?: string
+  currentInputId?: string
+  /** Desktop clock in ms when this snapshot was produced. */
+  updatedAt: number
+}
+
+/** Acknowledges an `audioDeviceSet` (success or a human-readable error). */
+export interface AudioDeviceResult {
+  requestId: string
+  ok: boolean
+  error?: string
+  /** The new current endpoint id for the requested kind, when known. */
+  currentId?: string
+}
+
 export type ClientMessage =
   | {
       type: 'hello'
@@ -1344,6 +1523,8 @@ export type ClientMessage =
   | KeyboardMessage
   | MixerMessage
   | MixerCommandMessage
+  | AudioDevicesMessage
+  | AudioDeviceSetMessage
   | { type: 'ping'; t: number }
 
 /* ------------------------------------------------------------------ */
@@ -1509,6 +1690,8 @@ export type ServerMessage =
   | RigProgressMessage
   | MixerStateMessage
   | ({ type: 'mixerResult' } & MixerResult)
+  | AudioDevicesStateMessage
+  | ({ type: 'audioDeviceResult' } & AudioDeviceResult)
   | ({ type: 'keyboardResult' } & KeyboardResult)
   | { type: 'navigate'; direction: 'next' | 'prev' | 'goto'; pageId?: string }
   | { type: 'error'; code: string; message: string }

@@ -270,6 +270,81 @@ export const MixerResultMessageSchema = z.object({
   error: z.string().max(300).optional(),
 })
 
+/** Opaque host-generated endpoint key. Never a path or registry key. */
+const audioDeviceEntryId = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/, 'Device ids are opaque host keys')
+
+const audioDeviceEntryName = z
+  .string()
+  .min(1)
+  .max(120, 'Device names are limited to 120 characters')
+  .refine((value) => value.trim().length > 0, 'Device names cannot be blank')
+  .refine(
+    (value) => !/[\u0000-\u001f\u007f]/.test(value),
+    'Device names cannot contain control characters',
+  )
+
+const audioDeviceFormSchema = z.enum([
+  'speakers',
+  'headphones',
+  'headset',
+  'microphone',
+  'usb',
+  'bluetooth',
+  'hdmi',
+  'virtual',
+  'other',
+])
+
+/** One endpoint row in a live `audioDevicesState` snapshot. */
+export const AudioDeviceEntrySchema = z.object({
+  id: audioDeviceEntryId,
+  name: audioDeviceEntryName,
+  deviceKind: z.enum(['output', 'input']),
+  form: audioDeviceFormSchema.optional(),
+  current: z.boolean(),
+  available: z.boolean(),
+  detail: z.string().max(64).optional(),
+})
+
+/** Client subscription to the live audio-device panel; one per connection. */
+export const AudioDevicesMessageSchema = z.object({
+  type: z.literal('audioDevices'),
+  phase: z.enum(['start', 'stop']),
+})
+
+/** Client default-device write; only an id from the latest snapshot is valid. */
+export const AudioDeviceSetMessageSchema = z.object({
+  type: z.literal('audioDeviceSet'),
+  requestId: z.string().min(1).max(64),
+  deviceKind: z.enum(['output', 'input']),
+  deviceId: audioDeviceEntryId,
+})
+
+/** Server → subscribed phone: live audio-device snapshot (~1 Hz). */
+export const AudioDevicesStateMessageSchema = z.object({
+  type: z.literal('audioDevicesState'),
+  available: z.boolean(),
+  reason: z.string().max(200).optional(),
+  output: z.array(AudioDeviceEntrySchema).max(64, 'At most 64 output devices are reported'),
+  input: z.array(AudioDeviceEntrySchema).max(64, 'At most 64 input devices are reported'),
+  currentOutputId: z.string().max(64).optional(),
+  currentInputId: z.string().max(64).optional(),
+  updatedAt: z.number().int().min(0),
+})
+
+/** Server → phone acknowledgement of an `audioDeviceSet`. */
+export const AudioDeviceResultMessageSchema = z.object({
+  type: z.literal('audioDeviceResult'),
+  requestId: z.string().min(1).max(64),
+  ok: z.boolean(),
+  error: z.string().max(300).optional(),
+  currentId: z.string().max(64).optional(),
+})
+
 export const ClientMessageSchema = z.union([
   z.object({
     type: z.literal('hello'),
@@ -299,6 +374,8 @@ export const ClientMessageSchema = z.union([
   KeyboardMessageSchema,
   MixerMessageSchema,
   MixerCommandMessageSchema,
+  AudioDevicesMessageSchema,
+  AudioDeviceSetMessageSchema,
   z.object({ type: z.literal('ping'), t: z.number().finite() }),
 ])
 
@@ -340,4 +417,16 @@ export function isMixerCommandMessage(
   message: ClientMessage,
 ): message is Extract<ClientMessage, { type: 'mixerCommand' }> {
   return message.type === 'mixerCommand'
+}
+
+export function isAudioDevicesMessage(
+  message: ClientMessage,
+): message is Extract<ClientMessage, { type: 'audioDevices' }> {
+  return message.type === 'audioDevices'
+}
+
+export function isAudioDeviceSetMessage(
+  message: ClientMessage,
+): message is Extract<ClientMessage, { type: 'audioDeviceSet' }> {
+  return message.type === 'audioDeviceSet'
 }

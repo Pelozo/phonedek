@@ -25,6 +25,7 @@ import {
   type ConfigAction,
   type DeckConfig,
   type ScrollModifier,
+  type StateBinding,
   type StreamerBotAction,
 } from './types'
 import { MODIFIER_KEYS, isModifier, isValidKeyName, normalizeCombo, normalizeKey } from './keys'
@@ -331,6 +332,129 @@ const appVolumeSchema = z.union([
   }),
 ])
 
+/**
+ * Config-owned PC audio endpoint reference.
+ *
+ * Ids are opaque host keys (letters/digits/`-`/`_`), never endpoint paths, so
+ * there is no reference-to-device check at config time: the target is resolved
+ * against the live host enumeration when the action runs. At least one of `id`
+ * or `name` is required; `name` is the fallback after a driver reinstall.
+ */
+const audioDeviceId = z
+  .string()
+  .min(1)
+  .max(128, 'Device ids are limited to 128 characters')
+  .regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/, 'Device ids are opaque host keys')
+
+const audioDeviceName = z
+  .string()
+  .min(1)
+  .max(120, 'Device names are limited to 120 characters')
+  .refine((value) => value.trim().length > 0, 'Device names cannot be blank')
+
+export const audioDeviceRefSchema = z
+  .object({
+    id: audioDeviceId.optional(),
+    name: audioDeviceName.optional(),
+  })
+  .strict()
+  .superRefine((ref, ctx) => {
+    if (ref.id === undefined && ref.name === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'A device needs an id or a name',
+      })
+    }
+  })
+
+/**
+ * Normalization used only to reject duplicate cycle targets. It matches the
+ * desktop's later name-fallback comparison: NFKC, trim, collapse whitespace and
+ * lowercase. Parentheses are deliberate and preserved (`Speakers (Realtek)`).
+ */
+export function normalizeAudioDeviceName(name: string): string {
+  return name.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+/**
+ * `set` carries exactly one `device`; `cycle` carries an ordered 2..8 list and
+ * no singular target. Wrong-field combinations are schema errors so a broken
+ * config never reaches the executor.
+ */
+export const AudioDeviceActionSchema = z
+  .object({
+    type: z.literal('audioDevice'),
+    action: z.enum(['set', 'cycle']),
+    kind: z.enum(['output', 'input']),
+    device: audioDeviceRefSchema.optional(),
+    devices: z.array(audioDeviceRefSchema).max(8, 'A cycle accepts at most 8 devices').optional(),
+    allRoles: z.boolean().optional(),
+  })
+  .strict()
+  .superRefine((action, ctx) => {
+    if (action.action === 'set') {
+      if (!action.device) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['device'],
+          message: 'set requires a device',
+        })
+      }
+      if (action.devices !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['devices'],
+          message: 'set must not carry devices',
+        })
+      }
+      return
+    }
+
+    if (!action.devices || action.devices.length < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['devices'],
+        message: 'cycle needs 2..8 devices',
+      })
+    }
+    if (action.device !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['device'],
+        message: 'cycle must not carry device',
+      })
+    }
+
+    // Duplicate refs would let a cycle land on the same endpoint twice.
+    const keys = new Set<string>()
+    for (const [index, ref] of (action.devices ?? []).entries()) {
+      const key =
+        ref.id !== undefined
+          ? `id:${ref.id.toLowerCase()}`
+          : `name:${normalizeAudioDeviceName(ref.name ?? '')}`
+      if (keys.has(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['devices', index],
+          message: 'Duplicate device',
+        })
+      }
+      keys.add(key)
+    }
+  })
+
+/**
+ * Read-only current-default tile. `device` is optional: omitted = a generic
+ * Output/Input readout; present = active only while that target is current.
+ */
+export const AudioDeviceStateBindingSchema = z
+  .object({
+    type: z.literal('audioDevice'),
+    target: z.enum(['output', 'input']),
+    device: audioDeviceRefSchema.optional(),
+  })
+  .strict()
+
 export const MacroStepSchema = z.discriminatedUnion('type', [
   hotkeySchema,
   textSchema,
@@ -357,11 +481,12 @@ const macroSchema = z.object({
 })
 
 /**
- * Runtime union accepts `rig.run`, but its static output deliberately stays the
- * pre-rig wired union. Old desktop/renderer code passes parsed actions into
- * APIs typed with `ConfigAction`, so widening here would break P0's "old code
- * still compiles" rule. P1/P2 widen those consumers, then this annotation is
- * removed. Inspect rig actions structurally via `rigActionOf`/`isRigRunAction`.
+ * Runtime union accepts `rig.run` and `audioDevice`, but its static output
+ * deliberately stays the pre-rig wired union. Old desktop/renderer code passes
+ * parsed actions into APIs typed with `ConfigAction`, so widening here would
+ * break P0's "old code still compiles" rule. P1/P3 widen those consumers, then
+ * this annotation is removed. Inspect staged arms structurally via
+ * `rigActionOf`/`isRigRunAction` or the action's `type`.
  */
 export const ActionSchema = z.union([
   hotkeySchema,
@@ -382,6 +507,7 @@ export const ActionSchema = z.union([
   mixerLauncherSchema,
   streamerBotSchema,
   rigRunSchema,
+  AudioDeviceActionSchema,
 ]) as unknown as z.ZodType<ConfigAction | AppVolumeAction | StreamerBotAction>
 
 /* ------------------------------------------------------------------ */
@@ -391,7 +517,9 @@ export const ActionSchema = z.union([
 /**
  * Host actions allowed inside a rig step. Explicitly excludes `page`,
  * `keyboard`, `mixer` and `rig`, so a step cannot navigate the phone, open a
- * phone-local panel, or nest another rig.
+ * phone-local panel, or nest another rig. `audioDevice` is included at runtime
+ * (so a "Streaming" rig can switch the interface + mic); the static
+ * `RigStepAction` stays narrow until the editor's rig-step picker widens in P3.
  */
 const rigStepActionSchema = z.union([
   hotkeySchema,
@@ -408,6 +536,7 @@ const rigStepActionSchema = z.union([
   lightSchema,
   appVolumeSchema,
   streamerBotSchema,
+  AudioDeviceActionSchema,
 ])
 
 const rigGuardArg = z.string().min(1).max(260)
@@ -946,13 +1075,20 @@ export const AppVolumeStateBindingSchema = z.object({
   match: appVolumeMatch,
 })
 
+/**
+ * Runtime union accepts the staged rig and audio-device status tiles; its
+ * static output stays the narrower `StateBinding` so old renderers compile
+ * unchanged. `validateConfig` casts the parsed deck back at the boundary; the
+ * reference check below inspects rig state structurally.
+ */
 export const StateBindingSchema = z.union([
   ObsStateBindingSchema,
   TwitchStateBindingSchema,
   LightStateBindingSchema,
   AppVolumeStateBindingSchema,
   rigStateBindingSchema,
-])
+  AudioDeviceStateBindingSchema,
+]) as unknown as z.ZodType<StateBinding>
 
 export const ButtonSchema = z.object({
   id,
@@ -1132,10 +1268,17 @@ export const DeckConfigSchema = z
               }
             }
           }
-          if (button.state?.type === 'rig' && !rigIds.has(button.state.presetId)) {
+          // `StateBindingSchema` is staged narrow on purpose; inspect the parsed
+          // runtime value structurally so the rig reference check still runs.
+          const rigState = button.state as unknown as { type?: string; presetId?: unknown } | undefined
+          if (
+            rigState?.type === 'rig' &&
+            typeof rigState.presetId === 'string' &&
+            !rigIds.has(rigState.presetId)
+          ) {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
-              message: `Button "${button.label}" has an unknown rig state: ${button.state.presetId}`,
+              message: `Button "${button.label}" has an unknown rig state: ${rigState.presetId}`,
             })
           }
         }

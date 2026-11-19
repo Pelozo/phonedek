@@ -76,6 +76,9 @@ function estimateStepMs(step: PlanStep): number {
       return STEP_OVERHEAD_MS + SPAWN_OVERHEAD_MS
     case 'mouse':
       return STEP_OVERHEAD_MS + 10
+    case 'audioDevice':
+      // A device lookup plus one OS write is short, but not free (helper RPC).
+      return STEP_OVERHEAD_MS + 25
     default:
       return STEP_OVERHEAD_MS
   }

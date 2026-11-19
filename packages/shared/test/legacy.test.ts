@@ -169,6 +169,8 @@ describe('stripAutomationForLegacy', () => {
       rigStates: 0,
       buttons: 0,
     })
+    expect(removed.audioActions).toBeUndefined()
+    expect(removed.audioStates).toBeUndefined()
     expect(legacy).not.toBe(config)
   })
 
@@ -198,5 +200,106 @@ describe('stripAutomationForLegacy', () => {
     expect(legacy.profiles[0]!.pages[0]!.buttons[0]!.actions).toEqual([])
     expect(legacy.profiles[0]!.pages[0]!.buttons[0]!.state).toBeUndefined()
     expect(validateConfig(legacy).ok).toBe(true)
+  })
+})
+
+describe('stripAutomationForLegacy audio devices', () => {
+  const audioSet = {
+    type: 'audioDevice',
+    action: 'set',
+    kind: 'output',
+    device: { id: 'a1b2c3', name: 'Speakers (Realtek(R) Audio)' },
+  }
+  const audioInput = {
+    type: 'audioDevice',
+    action: 'set',
+    kind: 'input',
+    device: { id: '9f8e7d', name: 'HyperX Cloud II Microphone' },
+  }
+  const audioState = {
+    type: 'audioDevice',
+    target: 'output',
+    device: { id: 'a1b2c3', name: 'Speakers (Realtek(R) Audio)' },
+  }
+
+  function configWithAudioDevices(): DeckConfig {
+    const config = createDefaultConfig()
+    const page = config.profiles[0]!.pages[0]!
+    page.buttons = [
+      button({
+        id: 'btn-audio-only',
+        slot: 0,
+        label: 'Headset',
+        actions: [audioSet, audioInput],
+        state: audioState,
+      }),
+      button({
+        id: 'btn-audio-mixed',
+        slot: 1,
+        label: 'Speakers',
+        actions: [{ type: 'hotkey', keys: ['A'] }, audioSet],
+        state: audioState,
+      }),
+      button({
+        id: 'btn-audio-control',
+        slot: 2,
+        label: 'Volume',
+        actions: [audioSet],
+        state: audioState,
+        control: {
+          kind: 'slider',
+          emit: 'value',
+          binding: { type: 'volume', mode: 'absolute' },
+        },
+      }),
+      button({
+        id: 'btn-keep',
+        slot: 3,
+        label: 'Mute',
+        actions: [{ type: 'media', key: 'mute' }],
+      }),
+    ]
+    return config
+  }
+
+  it('removes audio actions/states, counts them and drops dead audio tiles', () => {
+    const { config: legacy, removed } = stripAutomationForLegacy(configWithAudioDevices())
+
+    expect(removed.rigActions).toBe(0)
+    expect(removed.rigStates).toBe(0)
+    expect(removed.audioActions).toBe(4)
+    expect(removed.audioStates).toBe(3)
+    expect(removed.buttons).toBe(1)
+
+    const buttons = legacy.profiles[0]!.pages[0]!.buttons
+    expect(buttons.map((entry) => entry.id)).toEqual([
+      'btn-audio-mixed',
+      'btn-audio-control',
+      'btn-keep',
+    ])
+    expect(buttons.map((entry) => entry.slot)).toEqual([1, 2, 3])
+    expect(buttons[0]!.actions).toEqual([{ type: 'hotkey', keys: ['A'] }])
+    expect(buttons[0]!.state).toBeUndefined()
+    expect(buttons[1]!.actions).toEqual([])
+    expect(buttons[1]!.state).toBeUndefined()
+    expect(buttons[1]!.control?.kind).toBe('slider')
+    expect(buttons[2]!.actions).toEqual([{ type: 'media', key: 'mute' }])
+  })
+
+  it('produces a schema-valid v1 config after stripping audio wiring', () => {
+    const { config: legacy } = stripAutomationForLegacy(configWithAudioDevices())
+    const result = validateConfig(legacy)
+    expect(result.ok, result.ok ? '' : result.errors.join(' ')).toBe(true)
+    if (!result.ok) throw new Error(result.errors.join('\n'))
+    expect(result.config.schemaVersion).toBe(1)
+    expect(parseConfig(legacy)).toEqual(legacy)
+  })
+
+  it('does not mutate the input config', () => {
+    const config = configWithAudioDevices()
+    const before = structuredClone(config)
+    stripAutomationForLegacy(config)
+    expect(config).toEqual(before)
+    expect(config.profiles[0]!.pages[0]!.buttons[0]!.actions).toHaveLength(2)
   })
 })

@@ -2,6 +2,9 @@ import type {
   Action,
   AppVolumeAction,
   AppVolumePlanStep,
+  AudioDeviceAction,
+  AudioDevicePlanStep,
+  AudioDeviceRef,
   ConfigAction,
   ControlSpec,
   ExecutableAction,
@@ -207,13 +210,46 @@ function streamerBotActionToPlan(action: StreamerBotAction): StreamerBotPlanStep
   }
 }
 
+function copyDeviceRef(ref: AudioDeviceRef): AudioDeviceRef {
+  return {
+    ...(ref.id !== undefined ? { id: ref.id } : {}),
+    ...(ref.name !== undefined ? { name: ref.name } : {}),
+  }
+}
+
+/** Map every audio-device variant to its plan step (refs are cloned). */
+function audioDeviceActionToPlan(action: AudioDeviceAction): AudioDevicePlanStep {
+  if (action.action === 'set') {
+    return {
+      kind: 'audioDevice',
+      action: 'set',
+      deviceKind: action.kind,
+      device: copyDeviceRef(action.device),
+      ...(action.allRoles !== undefined ? { allRoles: action.allRoles } : {}),
+    }
+  }
+  return {
+    kind: 'audioDevice',
+    action: 'cycle',
+    deviceKind: action.kind,
+    devices: action.devices.map(copyDeviceRef),
+    ...(action.allRoles !== undefined ? { allRoles: action.allRoles } : {}),
+  }
+}
+
 /**
  * Flatten a button's actions into an ordered execution plan.
  * Page actions are returned as units; the phone normally handles them locally,
  * while the desktop executor ignores them.
  */
 export function actionsToPlan(
-  actions: readonly (ConfigAction | AppVolumeAction | StreamerBotAction | RigRunAction)[],
+  actions: readonly (
+    | ConfigAction
+    | AppVolumeAction
+    | StreamerBotAction
+    | RigRunAction
+    | AudioDeviceAction
+  )[],
   options: PlanOptions = {},
 ): PlanStep[] {
   const plan: PlanStep[] = []
@@ -272,6 +308,9 @@ export function actionsToPlan(
         break
       case 'streamerbot':
         plan.push(streamerBotActionToPlan(action))
+        break
+      case 'audioDevice':
+        plan.push(audioDeviceActionToPlan(action))
         break
       case 'keyboard':
         // Phone-local launcher: the phone opens its keyboard panel without a
@@ -823,8 +862,7 @@ export function describeStep(step: MacroStep): string {
 export function describeAction(
   action: PlannableAction | AppVolumeAction | RigRunAction,
   platform?: string,
-): string {
-  switch (action.type) {
+): string {  switch (action.type) {
     case 'hotkey':
       return formatCombo(action.keys, platform)
     case 'text':
@@ -927,5 +965,15 @@ export function describeAction(
     }
     case 'rig':
       return `Run rig "${action.presetId}"`
+    case 'audioDevice': {
+      if (action.action === 'cycle') {
+        return `Cycle ${action.kind} devices (${action.devices.length})`
+      }
+      const oneLine = (action.device.name ?? action.device.id ?? 'device')
+        .replace(/\s+/g, ' ')
+        .trim()
+      const label = oneLine.length > 40 ? `${oneLine.slice(0, 39)}…` : oneLine
+      return `Set ${action.kind} to "${label}"`
+    }
   }
 }
