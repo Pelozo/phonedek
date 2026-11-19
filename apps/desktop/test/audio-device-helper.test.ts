@@ -125,7 +125,7 @@ describe('audio device helper packaging', () => {
   })
 
   it('ships beside the keyboard helper, not inside the asar file list', () => {
-    const files = readFileSync(join(desktop, 'electron-builder.yml'), 'utf8')
+    const files = readFileSync(join(desktop, 'electron-builder.yml'), 'utf8').replace(/\r\n/g, '\n')
     expect(files).toContain('files:\n  - out/**\n  - package.json')
     expect(existsSync(join(desktop, 'resources', 'keyboard-helper.ps1'))).toBe(true)
     expect(existsSync(helperPath)).toBe(true)
