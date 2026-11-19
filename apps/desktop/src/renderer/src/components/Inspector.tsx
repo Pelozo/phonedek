@@ -5,6 +5,10 @@ import type {
   ActionPreset,
   AppVolumeAction,
   AppVolumeStateBinding,
+  AudioDeviceAction,
+  AudioDeviceKind,
+  AudioDeviceRef,
+  AudioDeviceStateBinding,
   DeckButton,
   MicAction,
   PointerBinding,
@@ -86,6 +90,17 @@ import {
 } from '../lib/appVolume'
 import { useMixerSnapshot } from '../lib/useMixerSnapshot'
 import { AppVolumeStatusEditor } from './AppVolumeStatusEditor'
+import {
+  audioDeviceActionOf,
+  audioDeviceActionSummary,
+  audioDeviceKindLower,
+  audioDeviceShortName,
+  audioDeviceStateBadge,
+  audioDeviceStateBindingOf,
+  audioDeviceStateSummary,
+} from '../lib/audioDevices'
+import { AudioDeviceDialog } from './AudioDeviceDialog'
+import { AudioDeviceStatusEditor } from './AudioDeviceStatusEditor'
 import { MixerSessionDialog } from './MixerSessionDialog'
 import { MixerSessionSelect } from './MixerSessionSelect'
 import { useObsInputs } from '../lib/useObsInputs'
@@ -136,15 +151,21 @@ import {
 
 const DEFAULT_MACRO_STEP: MacroStep = { type: 'hotkey', keys: ['CTRL', 'C'], holdMs: 35 }
 
+interface AudioPickerRequest {
+  mode: 'set' | 'cycle'
+  kind: AudioDeviceKind
+}
+
 /** Mic actions are valid in configs but not yet part of the legacy Action union. */
 const MIC_TOGGLE_ACTION: MicAction = { type: 'mic', action: 'toggleMute' }
-const asLegacyAction = (action: EditorAction): Action => action as unknown as Action
+const asLegacyAction = (action: EditorAction | AudioDeviceAction): Action => action as unknown as Action
 
 /** Static status labels for the binding families the editor can hold. */
-function stateBadge(state: StateBinding): string {
-  // The staged rig binding is already accepted by the schema but not yet part
-  // of `StateBinding`; inspect it structurally so the editor never crashes.
+function stateBadge(state: StateBinding | AudioDeviceStateBinding): string {
+  // Staged bindings (rig/audio) are already accepted by the schema but not yet
+  // part of `StateBinding`; inspect them structurally so the editor never crashes.
   if (rigStateOf(state)) return 'RIG'
+  if (state.type === 'audioDevice') return audioDeviceStateBadge(state.target)
   if (state.type === 'obs') return obsStateBadge(state.target)
   if (state.type === 'twitch') return twitchStateBadge(state.target)
   if (state.type === 'appVolume') return appVolumeStateBadge(state.target)
@@ -152,7 +173,7 @@ function stateBadge(state: StateBinding): string {
 }
 
 function stateSummary(
-  state: StateBinding,
+  state: StateBinding | AudioDeviceStateBinding,
   lights: ServerInfoView['settings']['lights'] = [],
   rigs: readonly RigPreset[] = [],
 ): string {
@@ -161,6 +182,7 @@ function stateSummary(
     const rig = findRig(rigs, rigState.presetId)
     return rig ? `${rig.name} · last run` : `Missing rig · ${rigState.presetId}`
   }
+  if (state.type === 'audioDevice') return audioDeviceStateSummary(state)
   if (state.type === 'obs') return obsStateBindingSummary(state) ?? 'OBS status'
   if (state.type === 'twitch') return twitchStateBindingSummary(state) ?? 'Twitch status'
   if (state.type === 'appVolume') return appVolumeStateBindingSummary(state) ?? 'App status'
@@ -237,6 +259,7 @@ export function Inspector({
   const [iconBusy, setIconBusy] = useState<'image' | 'video' | null>(null)
   const [shortcutTarget, setShortcutTarget] = useState<'keys' | 'reverse' | 'hold' | null>(null)
   const [appActionPicker, setAppActionPicker] = useState(false)
+  const [audioPicker, setAudioPicker] = useState<AudioPickerRequest | null>(null)
   const [rigPickerOpen, setRigPickerOpen] = useState(false)
   const [rigBusy, setRigBusy] = useState<'check' | 'run' | null>(null)
   const [rigStatus, setRigStatus] = useState<RigStatusView | null>(null)
@@ -246,11 +269,13 @@ export function Inspector({
   const rigs = rigsOf(config)
   const rigAction = rigActionOf(button?.actions)
   const activeRig = findRig(rigs, rigAction?.presetId)
+  const audioAction = audioDeviceActionOf(button?.actions)
   const initialObsBinding =
     button?.control && button.control.kind !== 'trackpad' && button.control.binding.type === 'obs'
       ? button.control.binding
       : null
   const rigState = rigStateOf(button?.state)
+  const audioState = audioDeviceStateBindingOf(button?.state)
   const statusBinding = button?.state ?? null
   const appControlBinding =
     button?.control && button.control.kind !== 'trackpad' && button.control.binding.type === 'appVolume'
@@ -286,6 +311,7 @@ export function Inspector({
   useEffect(() => {
     setShortcutTarget(null)
     setAppActionPicker(false)
+    setAudioPicker(null)
     setRigPickerOpen(false)
   }, [button?.id])
 
@@ -318,7 +344,10 @@ export function Inspector({
   const buttonDefaultBackground = profile.theme.buttonBackground
   const primaryKey = platform === 'darwin' ? '⌘' : 'Ctrl'
 
-  const testActions = async (actions: readonly EditorAction[], label: string): Promise<void> => {
+  const testActions = async (
+    actions: readonly (EditorAction | AudioDeviceAction)[],
+    label: string,
+  ): Promise<void> => {
     if (!actions.length) {
       onToast('This button has no actions yet', 'info')
       return
@@ -1179,7 +1208,7 @@ export function Inspector({
     )
   }
 
-  const updateAction = (index: number, action: EditorAction): void => {
+  const updateAction = (index: number, action: EditorAction | AudioDeviceAction): void => {
     update({
       actions: button.actions.map((item, current) => (current === index ? asLegacyAction(action) : item)),
     })
@@ -1289,6 +1318,52 @@ export function Inspector({
       ...(untitled ? { label: 'Streamer.bot', icon: '⚡', sublabel: 'Do action' } : {}),
     })
     onToast('Streamer.bot action added — choose its action before using it', 'info')
+  }
+
+  const pickAudioDevices = (refs: AudioDeviceRef[]): void => {
+    const request = audioPicker
+    setAudioPicker(null)
+    if (!request) return
+    const first = refs[0]
+    if (!first) return
+    const current = button.label.trim().toLowerCase()
+    const untitled =
+      current === '' || current === 'untitled' || current === 'untitled button' || current === 'new button'
+    if (request.mode === 'set') {
+      const action: AudioDeviceAction = {
+        type: 'audioDevice',
+        action: 'set',
+        kind: request.kind,
+        device: first,
+      }
+      update({
+        actions: [...button.actions, action as unknown as Action],
+        ...(untitled
+          ? {
+              label: audioDeviceShortName(first.name ?? first.id ?? 'Audio', 28) || 'Audio',
+              icon: request.kind === 'output' ? '🎧' : '🎙️',
+            }
+          : {}),
+      })
+      onToast(`${audioDeviceActionSummary(action)} added`, 'success')
+      return
+    }
+    if (refs.length < 2) {
+      onToast('A cycle needs at least two devices.', 'info')
+      return
+    }
+    const action: AudioDeviceAction = {
+      type: 'audioDevice',
+      action: 'cycle',
+      kind: request.kind,
+      devices: refs,
+    }
+    const lower = audioDeviceKindLower(request.kind)
+    update({
+      actions: [...button.actions, action as unknown as Action],
+      ...(untitled ? { label: `Cycle ${lower}`, icon: '🔀', sublabel: `${refs.length} devices` } : {}),
+    })
+    onToast(`${audioDeviceActionSummary(action)} added`, 'success')
   }
 
   const chooseIconMedia = async (kind: 'image' | 'video'): Promise<void> => {
@@ -1612,13 +1687,14 @@ export function Inspector({
             <p className="hint">
               Add a live readout to this button without replacing its tap actions. OBS uses its
               WebSocket connection, Twitch uses the Helix account, lights use the local device
-              APIs from Settings → Lights, app audio uses the desktop mixer, and Rig shows the
-              last run. All feed the phone through control-state-v1.
+              APIs from Settings → Lights, app audio uses the desktop mixer, audio device shows the
+              current OS default, and Rig shows the last run. All feed the phone through
+              control-state-v1.
             </p>
             <label className="field">
               <span>Status source</span>
               <select
-                value={rigState ? 'rig' : (statusBinding?.type ?? 'off')}
+                value={audioState ? 'audioDevice' : rigState ? 'rig' : (statusBinding?.type ?? 'off')}
                 onChange={(event) => {
                   const value = event.target.value
                   if (value === 'off') update({ state: undefined })
@@ -1630,6 +1706,10 @@ export function Inspector({
                     update({ state: { type: 'light', target: 'power' } })
                   } else if (value === 'appVolume') {
                     update({ state: { type: 'appVolume', target: 'volume', match: {} } })
+                  } else if (value === 'audioDevice') {
+                    update({
+                      state: { type: 'audioDevice', target: 'output' } as unknown as StateBinding,
+                    })
                   } else if (value === 'rig') {
                     if (rigs.length === 0) {
                       onToast('Create a rig in the rig library first.', 'info')
@@ -1646,6 +1726,7 @@ export function Inspector({
                 <option value="twitch">Twitch</option>
                 <option value="light">Local light</option>
                 <option value="appVolume">App audio</option>
+                <option value="audioDevice">Audio device</option>
                 <option value="rig" disabled={rigs.length === 0}>
                   {rigs.length === 0 ? 'Rig last run (no rigs)' : 'Rig last run'}
                 </option>
@@ -1727,6 +1808,24 @@ export function Inspector({
                   key={`app-${button.id}`}
                   binding={statusBinding}
                   onUpdate={(state: AppVolumeStateBinding) => update({ state })}
+                />
+                <button
+                  type="button"
+                  className="button danger ghost full"
+                  onClick={() => update({ state: undefined })}
+                >
+                  <Icon name="trash" size={15} /> Remove status
+                </button>
+              </>
+            )}
+            {audioState && (
+              <>
+                <AudioDeviceStatusEditor
+                  key={`audio-${button.id}`}
+                  binding={audioState}
+                  onUpdate={(state: AudioDeviceStateBinding) =>
+                    update({ state: state as unknown as StateBinding })
+                  }
                 />
                 <button
                   type="button"
@@ -2569,6 +2668,10 @@ export function Inspector({
                   { label: 'Run command', icon: 'terminal', description: 'Run a shell command', onClick: () => update({ actions: [...button.actions, makeAction('command')] }) },
                   { label: 'Media key', icon: 'music', description: 'Play, pause, volume…', onClick: () => update({ actions: [...button.actions, makeAction('media')] }) },
                   { label: 'App audio mute', section: 'Audio', icon: 'microphone', description: 'Toggle or set mute for one app audio session', onClick: () => setAppActionPicker(true) },
+                  { label: 'Set output device', icon: 'music', description: 'Switch the PC default playback device', onClick: () => setAudioPicker({ mode: 'set', kind: 'output' }) },
+                  { label: 'Set input device', icon: 'microphone', description: 'Switch the PC default capture device', onClick: () => setAudioPicker({ mode: 'set', kind: 'input' }) },
+                  { label: 'Cycle output devices', icon: 'refresh', description: 'One tap steps through 2–8 outputs', onClick: () => setAudioPicker({ mode: 'cycle', kind: 'output' }) },
+                  { label: 'Cycle input devices', icon: 'refresh', description: 'One tap steps through 2–8 inputs', onClick: () => setAudioPicker({ mode: 'cycle', kind: 'input' }) },
                   { label: 'Open mixer', icon: 'sliders', description: 'Full-screen per-app mixer on the phone', onClick: addMixerAction },
                   { label: 'Open phone keyboard', section: 'Integrations', icon: 'keyboard', description: 'Phone keyboard types into the active PC window', onClick: addKeyboardAction },
                   { label: 'Streamer.bot action', icon: 'bolt', description: 'Run one action in your local Streamer.bot', onClick: addStreamerbotAction },
@@ -2737,7 +2840,9 @@ export function Inspector({
                         ? MIXER_ACTION_TITLE
                         : candidate.type === 'streamerbot'
                           ? streamerbotActionSummary(candidate)
-                          : describeAction(candidate, platform),
+                          : candidate.type === 'audioDevice'
+                            ? audioDeviceActionSummary(candidate)
+                            : describeAction(candidate, platform),
                   )}
                 />
               ))}
@@ -2780,6 +2885,26 @@ export function Inspector({
             })
           }}
           onClose={() => setAppActionPicker(false)}
+        />
+      )}
+      {audioPicker && (
+        <AudioDeviceDialog
+          key={`${audioPicker.mode}-${audioPicker.kind}`}
+          kind={audioPicker.kind}
+          mode={audioPicker.mode}
+          initial={[]}
+          title={
+            audioPicker.mode === 'set'
+              ? `Add ${audioPicker.kind} device switcher`
+              : `Add ${audioPicker.kind} cycle`
+          }
+          description={
+            audioPicker.mode === 'set'
+              ? 'Pick the live endpoint this action switches to. Saved as a host id plus the friendly-name fallback.'
+              : 'Pick 2–8 endpoints in play order. A tap advances to the next connected device.'
+          }
+          onPick={pickAudioDevices}
+          onClose={() => setAudioPicker(null)}
         />
       )}
       {shortcut && shortcutTarget && (

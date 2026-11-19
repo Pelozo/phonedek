@@ -9,12 +9,19 @@ import {
   pageCapacity,
   pageGrid,
 } from '@phonedek/shared'
-import type { DeckConfig, DeckPage, DeckProfile } from '@phonedek/shared'
+import type { AudioDeviceStateBinding, DeckConfig, DeckPage, DeckProfile } from '@phonedek/shared'
 import type { ServerInfoView } from '../../../shared/api'
 import { obsStateBadge, obsStateBindingSummary } from '../lib/obs'
 import { twitchStateBadge, twitchStateBindingSummary } from '../lib/twitch'
 import { lightStateBadge, lightStateBindingSummary } from '../lib/lights'
 import { appVolumeStateBadge, appVolumeStateBindingSummary } from '../lib/appVolume'
+import {
+  audioDeviceActionOf,
+  audioDeviceActionSummary,
+  audioDeviceStateBadge,
+  audioDeviceStateBindingOf,
+  audioDeviceStateSummary,
+} from '../lib/audioDevices'
 import { findRig, rigActionOf, rigsOf, rigStateOf } from '../lib/rigs'
 import type { RigPreset, StateBinding } from '@phonedek/shared'
 import { backgroundStyle, buttonBackground, isVideoBackground, textColorFor } from '../lib/ui'
@@ -24,8 +31,9 @@ import { ControlPreview } from './ControlPreview'
 import { DeckMedia } from './DeckMedia'
 import { Icon } from './Icons'
 
-function statusBadge(state: StateBinding): string {
+function statusBadge(state: StateBinding | AudioDeviceStateBinding): string {
   if (rigStateOf(state)) return 'RIG'
+  if (state.type === 'audioDevice') return audioDeviceStateBadge(state.target)
   if (state.type === 'obs') return obsStateBadge(state.target)
   if (state.type === 'twitch') return twitchStateBadge(state.target)
   if (state.type === 'appVolume') return appVolumeStateBadge(state.target)
@@ -33,7 +41,7 @@ function statusBadge(state: StateBinding): string {
 }
 
 function statusSummary(
-  state: StateBinding,
+  state: StateBinding | AudioDeviceStateBinding,
   lights: ServerInfoView['settings']['lights'],
   rigs: readonly RigPreset[],
 ): string | null {
@@ -42,6 +50,7 @@ function statusSummary(
     const rig = findRig(rigs, rigState.presetId)
     return rig ? `${rig.name} · last run` : `Missing rig · ${rigState.presetId}`
   }
+  if (state.type === 'audioDevice') return audioDeviceStateSummary(state)
   if (state.type === 'obs') return obsStateBindingSummary(state)
   if (state.type === 'twitch') return twitchStateBindingSummary(state)
   if (state.type === 'appVolume') return appVolumeStateBindingSummary(state)
@@ -175,6 +184,8 @@ export function DeckCanvas({
               const background = buttonBackground(button, page, profile, server)
               const rigAction = rigActionOf(button.actions)
               const buttonRig = findRig(rigs, rigAction?.presetId)
+              const audioAction = audioDeviceActionOf(button.actions)
+              const audioState = audioDeviceStateBindingOf(button.state)
               const resolvedBackground = button.background ?? profile.theme.buttonBackground
               const buttonVideo = isVideoBackground(resolvedBackground) ? resolvedBackground : null
               return (
@@ -238,6 +249,14 @@ export function DeckCanvas({
                       title={statusSummary(button.state, server?.settings.lights ?? [], rigs) ?? undefined}
                     >
                       {statusBadge(button.state)}
+                    </span>
+                  )}
+                  {audioAction && !audioState && (
+                    <span
+                      className="deck-status-badge audio"
+                      title={`${audioDeviceActionSummary(audioAction)} · runs on this PC`}
+                    >
+                      {audioDeviceStateBadge(audioAction.kind)}
                     </span>
                   )}
                   {rigAction && !rigStateOf(button.state) && (

@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from 'react'
 import { describeAction, formatCombo } from '@phonedek/shared'
-import type { DeckPage, ExecutableAction, LightAction, MacroAction, MacroStep, MediaKey, ObsAction, TwitchAction } from '@phonedek/shared'
+import type { AudioDeviceAction, DeckPage, ExecutableAction, LightAction, MacroAction, MacroStep, MediaKey, ObsAction, TwitchAction } from '@phonedek/shared'
 import { Icon, type IconName } from './Icons'
 import { NumberField } from './Primitives'
 import { Keycaps, ShortcutDialog } from './ShortcutDialog'
@@ -10,6 +10,8 @@ import { ObsActionEditor } from './ObsActionEditor'
 import { TwitchActionEditor } from './TwitchActionEditor'
 import { AppVolumeActionEditor } from './AppVolumeActionEditor'
 import { StreamerbotActionEditor } from './StreamerbotActionEditor'
+import { AudioDeviceActionEditor } from './AudioDeviceActionEditor'
+import { audioDeviceActionSummary, audioDeviceActionTitle, isAudioDeviceAction } from '../lib/audioDevices'
 import { lightActionTitle } from '../lib/lights'
 import { obsActionTitle } from '../lib/obs'
 import { twitchActionTitle } from '../lib/twitch'
@@ -19,6 +21,9 @@ import {
 } from '../lib/streamerbot'
 import type { EditorAction } from '../lib/appVolume'
 import { appVolumeActionTitle } from '../lib/appVolume'
+
+/** Audio actions are accepted by the schema but not yet by `ConfigAction`. */
+type EditableAction = EditorAction | AudioDeviceAction
 import {
   KEYBOARD_ACTION_BODY,
   KEYBOARD_ACTION_SUMMARY,
@@ -120,7 +125,8 @@ function lightIconName(_action: LightAction): IconName {
   return 'light'
 }
 
-function actionIconName(action: EditorAction): IconName {
+function actionIconName(action: EditableAction): IconName {
+  if (isAudioDeviceAction(action)) return action.kind === 'output' ? 'music' : 'microphone'
   if (isKeyboardAction(action)) return 'keyboard'
   if (isMixerAction(action)) return 'sliders'
   if (action.type === 'obs') return obsIconName(action)
@@ -131,7 +137,8 @@ function actionIconName(action: EditorAction): IconName {
   return ACTION_ICONS[action.type]
 }
 
-function actionTitle(action: EditorAction): string {
+function actionTitle(action: EditableAction): string {
+  if (isAudioDeviceAction(action)) return audioDeviceActionTitle(action)
   if (isKeyboardAction(action)) return KEYBOARD_ACTION_TITLE
   if (isMixerAction(action)) return MIXER_ACTION_TITLE
   if (action.type === 'obs') return obsActionTitle(action)
@@ -142,7 +149,8 @@ function actionTitle(action: EditorAction): string {
   return ACTION_TITLES[action.type]
 }
 
-function actionSummary(action: EditorAction, platform: string): string {
+function actionSummary(action: EditableAction, platform: string): string {
+  if (isAudioDeviceAction(action)) return audioDeviceActionSummary(action)
   if (isKeyboardAction(action)) return KEYBOARD_ACTION_SUMMARY
   if (isMixerAction(action)) return MIXER_ACTION_SUMMARY
   if (action.type === 'streamerbot') return streamerbotActionSummary(action)
@@ -228,15 +236,15 @@ export function ActionEditor({
   collapsed = false,
   onToggleCollapse,
 }: {
-  action: EditorAction
+  action: EditableAction
   index: number
   total: number
   pages: DeckPage[]
   server: ServerInfoView | null
-  onUpdate: (action: EditorAction) => void
+  onUpdate: (action: EditableAction) => void
   onDelete: () => void
   onMove: (direction: -1 | 1) => void
-  onTest: (action: EditorAction) => void
+  onTest: (action: EditableAction) => void
   /** Optional compact host (rig steps): the card can stay collapsed by default. */
   collapsible?: boolean
   collapsed?: boolean
@@ -250,6 +258,7 @@ export function ActionEditor({
   const platform = useHostPlatform()
   /** Phone-local launchers have no host test and show a PHONE chip instead. */
   const phoneLocal = isKeyboardAction(action) || isMixerAction(action)
+  const audioAction = isAudioDeviceAction(action)
   const collapsibleCard = collapsible
   const expanded = collapsibleCard ? !collapsed : action.type === 'macro' ? macroOpen : true
 
@@ -326,7 +335,7 @@ export function ActionEditor({
           </div>
         )}
         <div className="action-tools">
-          {phoneLocal ? (
+          {audioAction ? null : phoneLocal ? (
             <span className="action-phone-chip" title="Runs on your phone, not on this PC">
               <Icon name="phone" size={12} /> Phone
             </span>
@@ -354,6 +363,10 @@ export function ActionEditor({
 
       {expanded && (
         <div className="action-body" id={action.type === 'macro' ? macroBodyId : undefined}>
+          {isAudioDeviceAction(action) && (
+            <AudioDeviceActionEditor action={action} onUpdate={onUpdate} />
+          )}
+
           {isKeyboardAction(action) && (
             <p className="hint keyboard-action-body">
               <Icon name="phone" size={15} />
