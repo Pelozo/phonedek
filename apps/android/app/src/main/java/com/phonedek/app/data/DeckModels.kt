@@ -117,6 +117,9 @@ data class DeckButton(
  *   or `NO SESSION`.
  * - `rig`: `presetId` selects the rig last-run status. The desktop owns the
  *   run; the phone only renders the short detail (`READY`, `3/9`, `FAILED`).
+ * - `audioDevice`: `output` or `input`. The desktop sends the current default
+ *   device short name as `detail`; the optional target ref is ignored here
+ *   because the phone only renders the read-only chip.
  *
  * Kept as one forgiving wire shape so old OBS-only configs still parse.
  */
@@ -283,6 +286,11 @@ data class ActionDto(
     val action: String? = null,
     /** Rig run action (`type == "rig"`, `action == "run"`): preset to run. */
     val presetId: String? = null,
+    /**
+     * Audio-device direction (`type == "audioDevice"`): `output` or `input`.
+     * Only used for the tile's OUT/IN badge; the desktop resolves the device.
+     */
+    val kind: String? = null,
 )
 
 @Serializable
@@ -700,6 +708,19 @@ private fun StateBindingDto.normalized(): StateBindingDto? =
             val preset = presetId?.trim()?.take(128)?.takeIf { it.isNotEmpty() }
                 ?: return null
             StateBindingDto(type = "rig", presetId = preset)
+        }
+
+        "audiodevice" -> {
+            // Read-only current-default tile. Only the direction matters: the
+            // optional device ref (`id`/`name`) is ignored because the desktop
+            // already sends the live short name as `detail`. A missing or
+            // unknown direction cannot be read by the desktop, so drop it.
+            val safeTarget = when (target.trim().lowercase()) {
+                "output" -> "output"
+                "input" -> "input"
+                else -> return null
+            }
+            StateBindingDto(type = "audioDevice", target = safeTarget)
         }
 
         else -> null

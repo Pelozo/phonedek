@@ -871,6 +871,123 @@ class DeckModelsTest {
     }
 
     @Test
+    fun parsesAudioDeviceStateTargetsAndDropsMissingOrInvalidOnes() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [
+                    {
+                      "id": "output",
+                      "slot": 0,
+                      "state": {
+                        "type": "audioDevice",
+                        "target": "output",
+                        "device": { "id": "a1b2c3d4", "name": "Speakers (Realtek)" }
+                      }
+                    },
+                    {
+                      "id": "input",
+                      "slot": 1,
+                      "state": {
+                        "type": " audioDevice ",
+                        "target": " INPUT ",
+                        "device": { "name": "Shure MV7" }
+                      }
+                    },
+                    {
+                      "id": "no-target",
+                      "slot": 2,
+                      "label": "Keep",
+                      "state": { "type": "audioDevice" }
+                    },
+                    {
+                      "id": "bad-target",
+                      "slot": 3,
+                      "label": "Keep",
+                      "state": { "type": "audioDevice", "target": "screens" }
+                    },
+                    {
+                      "id": "legacy-obs",
+                      "slot": 4,
+                      "state": { "type": "obs", "target": "streaming" }
+                    }
+                  ]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val buttons = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons
+
+        val output = buttons.first { it.id == "output" }.state!!
+        assertEquals("audioDevice", output.type)
+        assertEquals("output", output.target)
+
+        val input = buttons.first { it.id == "input" }.state!!
+        assertEquals("audioDevice", input.type)
+        assertEquals("input", input.target)
+
+        // A missing or unknown direction cannot be read by the desktop; the
+        // button itself stays usable as a normal tap tile.
+        assertNull(buttons.first { it.id == "no-target" }.state)
+        assertNull(buttons.first { it.id == "bad-target" }.state)
+        assertEquals("Keep", buttons.first { it.id == "no-target" }.label)
+        assertEquals("Keep", buttons.first { it.id == "bad-target" }.label)
+
+        // Existing state types keep parsing exactly as before.
+        assertEquals("streaming", buttons.first { it.id == "legacy-obs" }.state!!.target)
+    }
+
+    @Test
+    fun keepsAudioDeviceActionsAsRemoteTileActions() {
+        val raw = """
+            {
+              "profiles": [{
+                "id": "p",
+                "pages": [{
+                  "id": "page",
+                  "buttons": [{
+                    "id": "headset",
+                    "slot": 0,
+                    "label": "Headset",
+                    "actions": [
+                      {
+                        "type": "audioDevice",
+                        "action": "set",
+                        "kind": "output",
+                        "device": { "id": "a1b2c3d4", "name": "Headphones (HyperX)" }
+                      },
+                      {
+                        "type": "audioDevice",
+                        "action": "cycle",
+                        "kind": "input",
+                        "devices": [{ "id": "aa" }, { "id": "bb" }],
+                        "allRoles": true
+                      }
+                    ]
+                  }]
+                }]
+              }]
+            }
+        """.trimIndent()
+
+        val button = DeckJson.parse(raw)!!.profiles.single().pages.single().buttons.single()
+
+        // The phone never executes audio switching itself: the actions stay on
+        // the button so a press can be forwarded to the desktop.
+        assertEquals(2, button.actions.size)
+        assertEquals("audioDevice", button.actions[0].type)
+        assertEquals("set", button.actions[0].action)
+        assertEquals("output", button.actions[0].kind)
+        assertEquals("cycle", button.actions[1].action)
+        assertEquals("input", button.actions[1].kind)
+        assertNull(button.control)
+    }
+
+    @Test
     fun parsesEveryObsStateTargetOnPlainButtons() {
         val raw = """
             {

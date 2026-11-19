@@ -147,7 +147,18 @@ fun DeckButtonView(
         null
     }
     val stateActive = ControlStateStore.stateTileActive(controlState)
-    val chipText = rigChipText ?: stateText
+    // An audio-device tile without a live chip still reads as a switch: show
+    // OUT/IN from its action. A real current-device detail wins over the
+    // badge; the empty-state placeholder yields to it instead.
+    val audioBadge = if (control == null && rigPreset == null) {
+        ControlStateStore.audioDeviceBadge(button.actions)
+    } else {
+        null
+    }
+    val chipText = rigChipText
+        ?: stateText?.takeIf { it != ControlStateStore.NO_STATE }
+        ?: audioBadge
+        ?: stateText
     val chipActive = (rigChipText != null && rigActive) || (stateText != null && stateActive)
 
     val description = listOfNotNull(

@@ -1288,6 +1288,141 @@ class ControlStateStoreTest {
         ))
     }
 
+    @Test
+    fun audioDeviceStateTilesAreWatchableAndDetailFirst() {
+        val page = DeckPage(
+            id = "pg1",
+            buttons = listOf(
+                button("plain", control = null),
+                button(
+                    "headset",
+                    control = null,
+                    state = StateBindingDto(type = "audioDevice", target = "output"),
+                ),
+                button(
+                    "mic",
+                    control = null,
+                    state = StateBindingDto(type = "audioDevice", target = "input"),
+                ),
+                button(
+                    "no-target",
+                    control = null,
+                    state = StateBindingDto(type = "audioDevice", target = ""),
+                ),
+                button(
+                    "",
+                    control = null,
+                    state = StateBindingDto(type = "audioDevice", target = "input"),
+                ),
+            ),
+        )
+
+        assertEquals(
+            listOf("headset", "mic"),
+            ControlStateStore.statefulControlIds(page),
+        )
+
+        val binding = StateBindingDto(type = "audioDevice", target = "output")
+        fun text(
+            detail: String? = null,
+            active: Boolean? = null,
+            available: Boolean = true,
+        ) = ControlStateStore.stateTileText(
+            binding,
+            ControlStateEntryDto(
+                controlId = "headset",
+                revision = 1,
+                available = available,
+                detail = detail,
+                active = active,
+            ),
+            stateCapable = true,
+        )
+
+        // Detail-first: the desktop already shortens the current device name.
+        assertEquals("Headphones (HyperX Cloud II)", text(detail = "Headphones (HyperX Cloud II)"))
+        // Quiet unavailability details pass through; a missing one is NO AUDIO.
+        assertEquals("NO DEVICE", text(detail = "NO DEVICE", available = false))
+        assertEquals("NO AUDIO", text(available = false))
+        // An available entry with no name is not a silently blank chip.
+        assertEquals(ControlStateStore.NO_STATE, text())
+
+        // No entry yet: silent on an old desktop, placeholder when capable.
+        assertNull(ControlStateStore.stateTileText(binding, null, stateCapable = false))
+        assertEquals(
+            ControlStateStore.NO_STATE,
+            ControlStateStore.stateTileText(binding, null, stateCapable = true),
+        )
+        // A malformed binding never renders an audio tile.
+        assertNull(
+            ControlStateStore.stateTileText(
+                StateBindingDto(type = "audioDevice", target = "screens"),
+                state("headset", 1, detail = "Speakers"),
+                stateCapable = true,
+            ),
+        )
+    }
+
+    @Test
+    fun audioDeviceActiveRequiresAnAvailableCurrentTarget() {
+        assertTrue(
+            ControlStateStore.stateTileActive(
+                state("headset", 1, detail = "Speakers", active = true),
+            ),
+        )
+        assertFalse(
+            ControlStateStore.stateTileActive(
+                state("headset", 2, detail = "Headphones", active = false),
+            ),
+        )
+        assertFalse(
+            ControlStateStore.stateTileActive(
+                state("headset", 3, detail = "NO AUDIO", available = false, active = true),
+            ),
+        )
+    }
+
+    @Test
+    fun detectsAudioDeviceActionsAndBadges() {
+        val output = ActionDto(type = "audioDevice", action = "set", kind = "output")
+        val input = ActionDto(type = "audioDevice", action = "cycle", kind = " INPUT ")
+
+        assertTrue(ControlStateStore.hasAudioDeviceAction(listOf(output)))
+        assertTrue(ControlStateStore.hasAudioDeviceAction(listOf(input)))
+        assertFalse(
+            ControlStateStore.hasAudioDeviceAction(
+                listOf(ActionDto(type = "page", direction = "next")),
+            ),
+        )
+
+        assertEquals("OUT", ControlStateStore.audioDeviceBadge(listOf(output)))
+        assertEquals("IN", ControlStateStore.audioDeviceBadge(listOf(input)))
+        // The first audio action decides the badge (a mode tile sets output
+        // first, then input).
+        assertEquals(
+            "OUT",
+            ControlStateStore.audioDeviceBadge(listOf(output, input)),
+        )
+        assertNull(ControlStateStore.audioDeviceBadge(emptyList()))
+        assertNull(
+            ControlStateStore.audioDeviceBadge(
+                listOf(ActionDto(type = "audioDevice", action = "set")),
+            ),
+        )
+        assertNull(
+            ControlStateStore.audioDeviceBadge(
+                listOf(ActionDto(type = "audioDevice", action = "set", kind = "screens")),
+            ),
+        )
+        // Non-audio actions never earn an audio badge.
+        assertEquals(
+            null,
+            ControlStateStore.audioDeviceBadge(
+                listOf(ActionDto(type = "obs", action = "toggleMute", kind = "output")),
+            ),
+        )
+    }
+
     private fun state(
         id: String,
         revision: Int,

@@ -21,6 +21,8 @@ object ControlStateStore {
     const val NO_PLAYER = "NO PLAYER"
     const val NO_SESSION = "NO SESSION"
     const val NO_RIG = "NO RIG"
+    const val NO_AUDIO = "NO AUDIO"
+    const val NO_DEVICE = "NO DEVICE"
     const val UNSUPPORTED = "UNSUPPORTED"
     const val NO_MIXER = "NO MIXER"
     const val OFFLINE = "OFFLINE"
@@ -169,6 +171,30 @@ object ControlStateStore {
     fun hasRigStateBinding(button: DeckButton?): Boolean =
         button?.state?.type == "rig"
 
+    /** True when a button carries a desktop audio-device switch action. */
+    fun hasAudioDeviceAction(actions: List<ActionDto>): Boolean =
+        actions.any { it.type.trim().lowercase() == "audiodevice" }
+
+    /**
+     * `OUT`/`IN` chip for the first well-formed audio-device action on a tile.
+     *
+     * A `set`/`cycle` action switches the PC's default endpoint, so the tile
+     * reads as audio even without a state binding (e.g. a cycle tile). The
+     * direction comes from the action's `kind`; a missing or unknown kind does
+     * not earn a badge.
+     */
+    fun audioDeviceBadge(actions: List<ActionDto>): String? {
+        val kind = actions.asSequence()
+            .filter { it.type.trim().lowercase() == "audiodevice" }
+            .mapNotNull { it.kind?.trim()?.lowercase() }
+            .firstOrNull()
+        return when (kind) {
+            "output" -> "OUT"
+            "input" -> "IN"
+            else -> null
+        }
+    }
+
     /**
      * Chip text for a non-control tile with a state binding. The desktop's
      * `detail` already carries the short form (`LIVE`, `REC`, `OFF`, `42%`,
@@ -186,6 +212,7 @@ object ControlStateStore {
         "light" -> lightStateTileText(binding, state, stateCapable)
         "appVolume" -> appVolumeStateTileText(binding, state, stateCapable)
         "rig" -> rigStateTileText(binding, state, stateCapable)
+        "audioDevice" -> audioDeviceStateTileText(binding, state, stateCapable)
         else -> null
     }
 
@@ -350,6 +377,25 @@ object ControlStateStore {
         return NO_STATE
     }
 
+    /**
+     * Audio-device tiles are detail-first: the desktop sends the current
+     * default device's short name (≤60 chars), or `NO DEVICE` / `NO AUDIO`
+     * when the endpoint or backend is missing. An entry that has not arrived
+     * yet is quiet on an old desktop and `—` on a capable one. There is no
+     * value to derive: the phone never reads its own audio state.
+     */
+    private fun audioDeviceStateTileText(
+        binding: StateBindingDto,
+        state: ControlStateDto?,
+        stateCapable: Boolean,
+    ): String? {
+        if (binding.target != "output" && binding.target != "input") return null
+        if (state == null) return if (stateCapable) NO_STATE else null
+        val detail = state.detail?.trim()?.takeIf { it.isNotEmpty() }
+        if (!state.available) return detail ?: NO_AUDIO
+        return detail ?: NO_STATE
+    }
+
     /** True when the state chip should use the active/accent treatment. */
     fun stateTileActive(state: ControlStateDto?): Boolean =
         state?.available == true && state.active == true
@@ -357,16 +403,22 @@ object ControlStateStore {
     /**
      * Ids with a desktop live-state producer: absolute output volume,
      * microphone gain, OBS input volume, local-light controls, per-app volume,
-     * media position, and normal buttons with an OBS/Twitch/light/app/rig
-     * read-only `state` binding. Relative volume, scroll and trackpads stay
-     * open-loop.
+     * media position, and normal buttons with an OBS/Twitch/light/app/rig/
+     * audio-device read-only `state` binding. Relative volume, scroll and
+     * trackpads stay open-loop.
      */
     fun statefulControlIds(page: DeckPage): List<String> =
         page.buttons
             .asSequence()
             .filter { button ->
                 // A status tile uses the same channel, even without a control.
-                val stateType = button.state?.type
+                val state = button.state
+                val stateType = state?.type
+                if (stateType == "audioDevice") {
+                    // The desktop only watches a real output/input target; a
+                    // malformed binding is dropped like the other state types.
+                    return@filter state?.target == "output" || state?.target == "input"
+                }
                 if (stateType == "obs" || stateType == "twitch" ||
                     stateType == "light" || stateType == "appVolume" ||
                     stateType == "rig"

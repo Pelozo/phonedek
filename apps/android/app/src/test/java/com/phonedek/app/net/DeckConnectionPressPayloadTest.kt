@@ -88,4 +88,51 @@ class DeckConnectionPressPayloadTest {
         assertEquals("pg1", (payload["pageId"] as JsonPrimitive).contentOrNull)
         assertEquals("btn-mic", (payload["buttonId"] as JsonPrimitive).contentOrNull)
     }
+
+    @Test
+    fun audioDeviceActionTilePressesByIdSoTheDesktopSwitchesTheDevice() {
+        val button = DeckJson.parse(
+            """
+                {
+                  "profiles": [{
+                    "id": "p1",
+                    "pages": [{
+                      "id": "pg1",
+                      "buttons": [{
+                        "id": "btn-audio",
+                        "slot": 0,
+                        "label": "Headset",
+                        "actions": [{
+                          "type": "audioDevice",
+                          "action": "set",
+                          "kind": "output",
+                          "device": { "id": "a1b2c3d4", "name": "HyperX Cloud II" }
+                        }]
+                      }]
+                    }]
+                  }]
+                }
+            """.trimIndent(),
+        )!!.profiles.single().pages.single().buttons.single()
+
+        // The phone never talks to its own AudioManager; it forwards the tile
+        // id and the desktop resolves the configured target.
+        assertEquals("audioDevice", button.actions.single().type)
+        assertEquals("set", button.actions.single().action)
+        assertEquals("output", button.actions.single().kind)
+        assertTrue(ControlStateStore.hasAudioDeviceAction(button.actions))
+
+        val payload = buildPressPayload(
+            requestId = "r-audio",
+            profileId = "p1",
+            pageId = "pg1",
+            buttonId = button.id,
+        )
+
+        assertEquals("press", (payload["type"] as JsonPrimitive).contentOrNull)
+        assertEquals("r-audio", (payload["requestId"] as JsonPrimitive).contentOrNull)
+        assertEquals("p1", (payload["profileId"] as JsonPrimitive).contentOrNull)
+        assertEquals("pg1", (payload["pageId"] as JsonPrimitive).contentOrNull)
+        assertEquals("btn-audio", (payload["buttonId"] as JsonPrimitive).contentOrNull)
+    }
 }

@@ -2148,6 +2148,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val page = profile.pages.firstOrNull { it.id == snapshot.activePageId } ?: return
 
         val pageActions = button.actions.filter { it.type == "page" }
+        // Everything else is a desktop action, including audioDevice set/cycle:
+        // the phone forwards the button id and the desktop resolves the target.
         val remoteActions = button.actions.filterNot { it.type == "page" }
 
         for (action in pageActions) {
