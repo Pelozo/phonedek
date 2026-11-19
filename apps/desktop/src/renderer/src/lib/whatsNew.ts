@@ -10,6 +10,14 @@ export interface WhatsNewEntry {
  * Keep highlights short: the dialog is a summary, not release notes.
  */
 const WHATS_NEW: Readonly<Record<string, WhatsNewEntry>> = {
+  '0.20.0': {
+    title: 'Switch audio devices',
+    highlights: [
+      'Windows: set or cycle the PC’s default output/input from a deck button.',
+      'The editor lists live devices with speaker/headphone/USB/Bluetooth tags, and the tile shows the current device.',
+      'Android shows the current audio device and OUT/IN badges; macOS/Linux audio switching is not available yet.',
+    ],
+  },
   '0.19.1': {
     title: 'Config repair',
     highlights: [

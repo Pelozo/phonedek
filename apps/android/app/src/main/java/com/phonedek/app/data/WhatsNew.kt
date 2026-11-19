@@ -11,6 +11,14 @@ data class WhatsNewEntry(
  * each release; versions without a key fall back to [GENERIC_WHATS_NEW].
  */
 private val WHATS_NEW: Map<String, WhatsNewEntry> = mapOf(
+    "0.20.0" to WhatsNewEntry(
+        title = "Switch audio devices",
+        highlights = listOf(
+            "Windows: set or cycle the PC's default output/input from a deck button.",
+            "The editor lists live devices with speakers/headphones/USB/Bluetooth tags, and the tile shows the current device.",
+            "Android shows the current audio device and OUT/IN badges; mac/Linux audio switching is not available yet.",
+        ),
+    ),
     "0.19.1" to WhatsNewEntry(
         title = "Config repair",
         highlights = listOf(
