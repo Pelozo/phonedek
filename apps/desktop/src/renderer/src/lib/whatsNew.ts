@@ -10,6 +10,13 @@ export interface WhatsNewEntry {
  * Keep highlights short: the dialog is a summary, not release notes.
  */
 const WHATS_NEW: Readonly<Record<string, WhatsNewEntry>> = {
+  '0.20.1': {
+    title: 'Audio-device release fix',
+    highlights: [
+      'Fixed the Windows packaging test that blocked the 0.20.0 release.',
+      'Includes the new Windows audio-device switching, editor picker and Android OUT/IN state.',
+    ],
+  },
   '0.20.0': {
     title: 'Switch audio devices',
     highlights: [

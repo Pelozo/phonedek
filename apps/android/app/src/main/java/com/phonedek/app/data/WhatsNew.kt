@@ -11,6 +11,13 @@ data class WhatsNewEntry(
  * each release; versions without a key fall back to [GENERIC_WHATS_NEW].
  */
 private val WHATS_NEW: Map<String, WhatsNewEntry> = mapOf(
+    "0.20.1" to WhatsNewEntry(
+        title = "Audio-device release fix",
+        highlights = listOf(
+            "Fixed the Windows packaging test that blocked the 0.20.0 release.",
+            "Includes the new Windows audio-device switching, editor picker and Android OUT/IN state.",
+        ),
+    ),
     "0.20.0" to WhatsNewEntry(
         title = "Switch audio devices",
         highlights = listOf(
