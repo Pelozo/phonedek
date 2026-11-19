@@ -26,3 +26,21 @@ export function keyboardHelperPath(platform: NodeJS.Platform, options: HelperPat
   }
   return ''
 }
+
+/**
+ * Location of the Windows default-audio-device helper.
+ *
+ * It is separate from the persistent keyboard helper: an audio enumeration or
+ * COM policy call must never block a key press. Packaged builds copy it into
+ * the Electron resources directory (see electron-builder*.yml); development
+ * runs read it from the workspace.
+ */
+export function audioDeviceHelperPath(
+  platform: NodeJS.Platform,
+  options: HelperPathOptions,
+): string {
+  if (platform !== 'win32') return ''
+  return options.isPackaged
+    ? join(options.resourcesPath, 'audio-device-helper.ps1')
+    : join(options.appPath, 'resources', 'audio-device-helper.ps1')
+}

@@ -25,6 +25,8 @@ win:
   extraResources:
     - from: resources/keyboard-helper.ps1
       to: keyboard-helper.ps1
+    - from: resources/audio-device-helper.ps1
+      to: audio-device-helper.ps1
     - from: build/icon.png
       to: tray-icon.png
 publish:

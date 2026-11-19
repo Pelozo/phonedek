@@ -21,6 +21,16 @@ jobs:
       - run: npm test
       - run: npm run typecheck
       - run: npm run build
+      - name: Audio device helper self-test
+        shell: powershell
+        run: |
+          $result = & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File apps/desktop/resources/audio-device-helper.ps1 selftest
+          if ($LASTEXITCODE -ne 0) { throw "audio-device-helper selftest failed with exit code $LASTEXITCODE" }
+          $result
+          try { $json = $result | ConvertFrom-Json } catch { throw "selftest did not return valid JSON: $result" }
+          if ($null -eq $json -or $json.ok -ne $true) { throw "selftest response was not ok" }
+          if ($null -eq $json.output -or $null -eq $json.input) { throw "selftest response has no output/input lists" }
+          "Audio device helper selftest OK ($($json.output.Count) outputs, $($json.input.Count) inputs)"
       - name: Build NSIS installer
         run: npm run dist:win
       - name: Verify auto-update metadata
@@ -45,6 +55,9 @@ jobs:
           $loader = "$release/win-unpacked/resources/app.asar.unpacked/node_modules/node-gyp-build/index.js"
           if (-not (Test-Path $uiohook)) { throw "uiohook native module is missing from the packaged app" }
           if (-not (Test-Path $loader)) { throw "node-gyp-build loader is missing from the unpacked app" }
+          if (-not (Test-Path "$release/win-unpacked/resources/audio-device-helper.ps1")) {
+            throw "audio-device-helper.ps1 is missing from the packaged app"
+          }
           node -e "const m=require('./apps/desktop/release/win-unpacked/resources/app.asar.unpacked/node_modules/uiohook-napi'); if (typeof m.uIOhook.start !== 'function') process.exit(1); console.log('uiohook native loaded')"
       - uses: actions/upload-artifact@v4
         with:
