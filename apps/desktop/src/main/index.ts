@@ -53,7 +53,7 @@ import { createKeyboardSender, type KeyboardSender } from './keyboard-sender'
 import { createLogger, type Logger } from './logger'
 import { lanAddresses, primaryLanAddress, urlsForPort } from './lan'
 import { legacyConfigJson } from './legacy-export'
-import { keyboardHelperPath } from './platform'
+import { audioDeviceHelperPath, keyboardHelperPath } from './platform'
 import { InputCapture } from './input-capture'
 import { PointerRouter, pointerInputAllowed } from './pointer-input'
 import { RigRunner } from './rig-runner'
@@ -67,7 +67,7 @@ import {
   type PointerSender,
 } from './pointer-sender'
 import { createPairInfo } from './qr'
-import { DeckServer, type PressContext } from './server'
+import { AudioDeviceService, DeckServer, type PressContext } from './server'
 import {
   MAX_AUTO_PROFILE_RULES,
   MAX_LIGHT_DEVICES,
@@ -93,6 +93,12 @@ import { isRunningAppSigned, resolveUpdatePolicy } from './update-policy'
 import { createVolumeReader, HelperVolumeProbe, type VolumeReader } from './volume-source'
 import { createMicrophone, parseWindowsInputPayload, type Microphone } from './microphone-source'
 import {
+  audioDeviceUnsupportedReason,
+  createAudioDeviceController,
+  sanitizeAudioDeviceError,
+  type AudioDeviceController,
+} from './audio-device-source'
+import {
   createAppVolumeSource,
   type AppVolumeSource,
 } from './app-volume-source'
@@ -116,10 +122,12 @@ import {
 import { LightStateSource, type LightDeviceStatus } from './light-source'
 import { LightCredentialStore, isValidLightCredential } from './light-credentials'
 import { HueClient, discoverHueBridges, pairHueBridge, type HueLightInfo } from './hue-client'
-import { IPC } from '../shared/api'
+import { IPC, parseAudioDeviceSetInput } from '../shared/api'
 import type {
   AppState,
   AssetPickResult,
+  AudioDevicesResult,
+  AudioDeviceView,
   AutoProfileSettingsInput,
   HueDiscoveryResult,
   HueLightResult,
@@ -175,6 +183,8 @@ let mediaProbe: WindowsMediaProbe | null = null
 let mediaSource: MediaController | null = null
 let microphone: Microphone | null = null
 let appVolumeSource: AppVolumeSource | null = null
+let audioDevices: AudioDeviceController | null = null
+let audioDeviceService: AudioDeviceService | null = null
 let mixer: MixerService | null = null
 let obsClient: ObsClient | null = null
 let obsSource: ObsStateSource | null = null
@@ -255,6 +265,14 @@ async function buildPermissionStatus(): Promise<PermissionStatus> {
 
 function helperPath(): string {
   return keyboardHelperPath(process.platform, {
+    isPackaged: app.isPackaged,
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+  })
+}
+
+function audioHelperPath(): string {
+  return audioDeviceHelperPath(process.platform, {
     isPackaged: app.isPackaged,
     appPath: app.getAppPath(),
     resourcesPath: process.resourcesPath,
@@ -1896,6 +1914,71 @@ function registerIpc(): void {
   )
 
   ipcMain.handle(
+    IPC.getAudioDevices,
+    async (_event, force: unknown): Promise<AudioDevicesResult> => {
+      if (!audioDevices) {
+        return {
+          ok: false,
+          error:
+            audioDeviceUnsupportedReason(process.platform) ??
+            'Audio device switching is not available on this desktop.',
+          output: [],
+          input: [],
+        }
+      }
+      const snapshot = await audioDevices.list({ force: force === true })
+      if (!snapshot.available) {
+        return {
+          ok: false,
+          error: snapshot.reason ?? 'Audio device switching is not available on this desktop.',
+          output: [],
+          input: [],
+        }
+      }
+      const view = (entry: (typeof snapshot.output)[number]): AudioDeviceView => ({
+        id: entry.id,
+        name: entry.name,
+        deviceKind: entry.deviceKind,
+        ...(entry.form ? { form: entry.form } : {}),
+        current: entry.current,
+        available: entry.available,
+      })
+      return {
+        ok: true,
+        output: snapshot.output.map(view),
+        input: snapshot.input.map(view),
+        ...(snapshot.currentOutputId ? { currentOutputId: snapshot.currentOutputId } : {}),
+        ...(snapshot.currentInputId ? { currentInputId: snapshot.currentInputId } : {}),
+      }
+    },
+  )
+
+  ipcMain.handle(
+    IPC.setAudioDevice,
+    async (_event, kind: unknown, id: unknown): Promise<PressResult> => {
+      if (!audioDevices) {
+        return {
+          ok: false,
+          error:
+            audioDeviceUnsupportedReason(process.platform) ??
+            'Audio device switching is not available on this desktop.',
+        }
+      }
+      const parsed = parseAudioDeviceSetInput(kind, id)
+      if (!parsed) {
+        return { ok: false, error: 'Invalid audio device' }
+      }
+      try {
+        await audioDevices.setDefault(parsed.kind, { id: parsed.id })
+        await controlState?.noteAudioDeviceChanged(parsed.kind)
+        return { ok: true }
+      } catch (error) {
+        return { ok: false, error: sanitizeAudioDeviceError(error, 300) }
+      }
+    },
+  )
+
+  ipcMain.handle(
     IPC.setScreenshotDirectory,
     async (_event, input: unknown): Promise<OperationResult> => {
       if (typeof input !== 'string') {
@@ -2248,6 +2331,25 @@ async function bootstrap(): Promise<void> {
   } else if (process.platform === 'darwin') {
     logger.info('Per-app audio mixer disabled: macOS has no public per-app volume API')
   }
+  const audioHelper = audioHelperPath()
+  audioDevices = createAudioDeviceController(process.platform, {
+    helperPath: audioHelper,
+    logger,
+  })
+  if (audioDevices && process.platform === 'win32' && !existsSync(audioHelper)) {
+    // A packaged build without the helper must not advertise a panel that can
+    // only fail: drop the controller so the capability is absent and tiles stay
+    // on their quiet NO AUDIO fallback.
+    logger.warn(`Audio device switching unavailable: helper not found at ${audioHelper}`)
+    audioDevices.dispose()
+    audioDevices = null
+  } else if (audioDevices) {
+    logger.info('Audio device switching enabled (Windows Core Audio)')
+  } else {
+    logger.info(
+      `Audio device switching unavailable: ${audioDeviceUnsupportedReason(process.platform) ?? 'unsupported platform'}`,
+    )
+  }
   if (process.platform === 'win32') {
     mediaProbe = new WindowsMediaProbe(logger)
     mediaSource = createMediaController('win32', { windowsBackend: mediaProbe })
@@ -2395,6 +2497,18 @@ async function bootstrap(): Promise<void> {
       }
       await controlState?.noteAppVolumeChanged(step.match)
     },
+    ...(audioDevices
+      ? {
+          runAudioDeviceAction: async (step) => {
+            if (step.action === 'set') {
+              await audioDevices!.setDefault(step.deviceKind, step.device, step.allRoles)
+            } else {
+              await audioDevices!.cycle(step.deviceKind, step.devices, step.allRoles)
+            }
+            await controlState?.noteAudioDeviceChanged(step.deviceKind)
+          },
+        }
+      : {}),
     runStreamerBotAction: async (step) => {
       if (!streamerbotClient) throw new Error('Streamer.bot is not available on this desktop.')
       await streamerbotClient.doAction(step.actionName, step.args)
@@ -2472,6 +2586,7 @@ async function bootstrap(): Promise<void> {
     ...(obsSource ? { obsReader: obsSource } : {}),
     ...(twitchSource ? { twitchReader: twitchSource } : {}),
     ...(lightSource ? { lightReader: lightSource } : {}),
+    ...(audioDevices ? { audioReader: audioDevices } : {}),
     // Rig status is in-memory, so it is always readable (even with no device
     // integrations) and `control-state-v1` must stay advertised for rig tiles.
     rigReader: {
@@ -2505,6 +2620,14 @@ async function bootstrap(): Promise<void> {
       })
     : null
   if (mixer) logger.info('Live mixer transport enabled (subscribe + 1 Hz snapshots)')
+
+  audioDeviceService = audioDevices
+    ? new AudioDeviceService({
+        controller: audioDevices,
+        logger,
+        onChanged: (kind) => controlState?.noteAudioDeviceChanged(kind),
+      })
+    : null
 
   const router = new ControlInputRouter({
     execute: (actions, label) => executor.execute(actions, label),
@@ -2641,6 +2764,8 @@ async function bootstrap(): Promise<void> {
       keyboardRouter !== null && settings.get().allowKeyboardControl,
     mixerSupported: () => appVolumeSource !== null,
     mixer: mixer ?? undefined,
+    audioDevices: audioDeviceService ?? undefined,
+    audioDevicesSupported: () => audioDeviceService !== null,
     controlState: controlState ?? undefined,
     controlStateSupported: controlState !== null,
     obsSupported: () => obsClient?.connected === true,
@@ -2963,6 +3088,8 @@ if (!gotLock) {
         obsSource?.dispose()
         obsClient?.dispose()
         lightSource?.dispose()
+        audioDeviceService?.dispose()
+        audioDevices?.dispose()
         volumeProbe?.dispose()
         mediaProbe?.dispose()
         pointerRouter?.dispose()

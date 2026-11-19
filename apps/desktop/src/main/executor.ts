@@ -2,6 +2,7 @@ import { basename } from 'node:path'
 import { actionsToPlan, isScreenshotShortcut } from '@phonedek/shared'
 import type {
   AppVolumeAction,
+  AudioDeviceAction,
   ConfigAction,
   KeyboardPlanStep,
   PlanGroup,
@@ -97,7 +98,12 @@ export class ActionExecutor {
    * press/macro/screenshot behavior (and its `PressResult` shape) is unchanged.
    */
   execute(
-    actions: readonly (ConfigAction | AppVolumeAction | StreamerBotAction)[],
+    actions: readonly (
+      | ConfigAction
+      | AppVolumeAction
+      | StreamerBotAction
+      | AudioDeviceAction
+    )[],
     label = 'button',
   ): Promise<PressResult> {
     return this.executePlan([{ label, steps: actionsToPlan(actions) }], label).then((result) => {
@@ -363,6 +369,12 @@ export class ActionExecutor {
             throw new Error('Streamer.bot is not available on this desktop.')
           }
           await this.host.runStreamerBotAction(step)
+          break
+        case 'audioDevice':
+          if (!this.host.runAudioDeviceAction) {
+            throw new Error('Audio device switching is not available on this desktop.')
+          }
+          await this.host.runAudioDeviceAction(step)
           break
         default:
           if (KEYBOARD_KINDS.has(step.kind)) {

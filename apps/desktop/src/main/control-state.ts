@@ -1,6 +1,8 @@
 import type {
   AppVolumeMatch,
   AppVolumeStateTarget,
+  AudioDeviceKind,
+  AudioDeviceRef,
   ControlStateEntry,
   ControlStateMessage,
   DeckButton,
@@ -10,6 +12,11 @@ import type {
   TwitchStateTarget,
 } from '@phonedek/shared'
 import type { Logger } from './logger'
+import {
+  normalizeDeviceName,
+  sanitizeAudioDeviceName,
+  type AudioDeviceEntry,
+} from './audio-device-source'
 import type { VolumeReader, VolumeReading } from './volume-source'
 import type { MicReader, MicReading } from './microphone-source'
 import type { MediaReader, MediaReading } from './media-source'
@@ -34,6 +41,7 @@ export type ControlStateSource =
   | 'light'
   | 'appVolume'
   | 'rig'
+  | 'audioDevice'
 
 export interface StateControl {
   id: string
@@ -59,6 +67,10 @@ export interface StateControl {
   appTarget?: AppVolumeStateTarget
   /** Rig preset id for a `type:'rig'` last-run status tile. */
   rigPresetId?: string
+  /** Output/input direction for an `audioDevice` status tile. */
+  audioDeviceKind?: AudioDeviceKind
+  /** Optional configured target; `active` is true while it is the current default. */
+  audioDeviceTarget?: AudioDeviceRef
 }
 
 /** Read-only last-run status for one rig preset (implemented by the runner). */
@@ -79,6 +91,26 @@ export interface RigStatusReading {
  */
 export interface RigStateReader {
   readStatus(presetId: string): RigStatusReading | Promise<RigStatusReading>
+}
+
+/** Live current-default reading used by `audioDevice` status tiles. */
+export interface AudioDeviceStatusReading {
+  /** Short friendly name of the current default, ≤60 characters. */
+  detail: string
+  available: boolean
+  /** True only while the tile's configured target is the current default. */
+  active?: boolean
+  error?: string
+}
+
+/**
+ * Reads the current OS default endpoint per direction. The cached controller
+ * implements this; `invalidate` is optional because a successful write already
+ * refreshes the controller cache.
+ */
+export interface AudioDeviceStateReader {
+  current(kind: AudioDeviceKind): Promise<AudioDeviceEntry>
+  invalidate?(kind?: AudioDeviceKind): void
 }
 
 export interface AbsoluteVolumeControl {
@@ -194,6 +226,62 @@ export function isRigStateButton(button: DeckButton): boolean {
 }
 
 /**
+ * Read the staged `type:'audioDevice'` state binding structurally.
+ *
+ * `StateBinding` is intentionally still the pre-audio union until the renderer
+ * lands; this helper resolves the tile without a half-finished compile.
+ */
+export function audioDeviceBindingOf(
+  button: DeckButton,
+): { target: AudioDeviceKind; device?: AudioDeviceRef } | null {
+  const state = button.state as
+    | { type?: unknown; target?: unknown; device?: unknown }
+    | undefined
+  if (!state || state.type !== 'audioDevice') return null
+  if (state.target !== 'output' && state.target !== 'input') return null
+
+  const raw = state.device
+  let device: AudioDeviceRef | undefined
+  if (raw !== null && typeof raw === 'object') {
+    const record = raw as { id?: unknown; name?: unknown }
+    const id = typeof record.id === 'string' ? record.id.trim() : ''
+    const name = typeof record.name === 'string' ? record.name.trim() : ''
+    if (id || name) {
+      device = {
+        ...(id ? { id } : {}),
+        ...(name ? { name } : {}),
+      }
+    }
+  }
+  return { target: state.target, ...(device ? { device } : {}) }
+}
+
+/** A normal button with an audio-device read-only state binding (status tile). */
+export function isAudioDeviceStateButton(button: DeckButton): boolean {
+  return audioDeviceBindingOf(button) !== null
+}
+
+/**
+ * Compare a configured target with the live current endpoint: opaque id first,
+ * then the normalized friendly name. Missing ids fall back to the name.
+ */
+export function audioDeviceMatchesRef(
+  ref: AudioDeviceRef,
+  entry: Pick<AudioDeviceEntry, 'id' | 'name'>,
+): boolean {
+  const id = typeof ref.id === 'string' ? ref.id.trim() : ''
+  if (id && id.toLowerCase() === entry.id.toLowerCase()) return true
+  const name = sanitizeAudioDeviceName(ref.name)
+  if (!name) return false
+  return normalizeDeviceName(name) === normalizeDeviceName(entry.name)
+}
+
+/** Short tile detail for the current device name (protocol max is 64). */
+export function shortAudioDeviceDetail(name: string, max = 60): string {
+  return sanitizeAudioDeviceName(name, max) || 'UNKNOWN'
+}
+
+/**
  * Resolve the page's absolute-volume controls. Returns null when the profile
  * or page does not exist; unknown requested ids are ignored.
  */
@@ -240,6 +328,18 @@ export function resolveStateControls(
       continue
     }
     const state = button.state
+    const audioBinding = audioDeviceBindingOf(button)
+    if (audioBinding) {
+      controls.push({
+        id: button.id,
+        label: button.label,
+        source: 'audioDevice',
+        audioDeviceKind: audioBinding.target,
+        ...(audioBinding.device ? { audioDeviceTarget: audioBinding.device } : {}),
+      })
+      if (controls.length >= 32) break
+      continue
+    }
     if (state?.type === 'obs') {
       controls.push({
         id: button.id,
@@ -355,6 +455,7 @@ export interface ControlStateServiceOptions {
   lightReader?: LightStateReader | null
   appReader?: AppVolumeReader | null
   rigReader?: RigStateReader | null
+  audioReader?: AudioDeviceStateReader | null
   logger?: Logger
   now?: () => number
   defaultIntervalMs?: number
@@ -400,8 +501,14 @@ function isStatusReading(
     | TwitchStatusReading
     | LightStatusReading
     | AppVolumeReading
-    | RigStatusReading,
-): reading is ObsStatusReading | TwitchStatusReading | LightStatusReading | RigStatusReading {
+    | RigStatusReading
+    | AudioDeviceStatusReading,
+): reading is
+  | ObsStatusReading
+  | TwitchStatusReading
+  | LightStatusReading
+  | RigStatusReading
+  | AudioDeviceStatusReading {
   return typeof (reading as ObsStatusReading).detail === 'string'
 }
 
@@ -441,7 +548,13 @@ function unavailableDetail(source: ControlStateSource, error: string): string {
   if (source === 'light') return lightUnavailableDetail(error)
   if (source === 'media') return mediaUnavailableDetail(error)
   if (source === 'appVolume') return appVolumeUnavailableDetail(error)
+  if (source === 'audioDevice') return audioDeviceUnavailableDetail(error)
   return error.slice(0, 60)
+}
+
+function audioDeviceUnavailableDetail(error: string): string {
+  if (/not found|missing|unplugged/i.test(error)) return 'NO DEVICE'
+  return 'NO AUDIO'
 }
 
 function appVolumeUnavailableDetail(error: string): string {
@@ -491,6 +604,7 @@ function readingEntry(
     | LightStatusReading
     | AppVolumeReading
     | RigStatusReading
+    | AudioDeviceStatusReading
     | null,
   error: string | null,
   max?: number,
@@ -611,6 +725,7 @@ export class ControlStateService {
   private readonly lightReader?: LightStateReader | null
   private readonly appReader?: AppVolumeReader | null
   private readonly rigReader?: RigStateReader | null
+  private readonly audioReader?: AudioDeviceStateReader | null
   private readonly logger?: Logger
   private readonly now: () => number
   private readonly defaultIntervalMs: number
@@ -637,6 +752,7 @@ export class ControlStateService {
     this.lightReader = options.lightReader
     this.appReader = options.appReader
     this.rigReader = options.rigReader
+    this.audioReader = options.audioReader
     this.logger = options.logger
     this.now = options.now ?? Date.now
     this.defaultIntervalMs = clampInterval(options.defaultIntervalMs, DEFAULT_WATCH_INTERVAL_MS)
@@ -857,6 +973,19 @@ export class ControlStateService {
     if (this.disposed) return Promise.resolve()
     return this.enqueue(async () => {
       this.suppressUntil = Math.max(this.suppressUntil, this.now() + this.writeGraceMs)
+      await this.refresh(undefined, false, true)
+    })
+  }
+
+  /**
+   * The OS default changed (a phone press, a cycle or an editor test): push
+   * every affected tile immediately instead of waiting for the next tick.
+   * Readers that cache current endpoints may be invalidated for that kind.
+   */
+  noteAudioDeviceChanged(kind?: AudioDeviceKind): Promise<void> {
+    if (this.disposed) return Promise.resolve()
+    return this.enqueue(async () => {
+      this.audioReader?.invalidate?.(kind)
       await this.refresh(undefined, false, true)
     })
   }
@@ -1127,6 +1256,45 @@ export class ControlStateService {
       }
     }
 
+    const audioControls = watched.filter((control) => control.source === 'audioDevice')
+    if (audioControls.length > 0) {
+      // One current-device read per direction covers every tile for that kind.
+      const groups = new Map<AudioDeviceKind, typeof audioControls>()
+      for (const control of audioControls) {
+        const key = control.audioDeviceKind ?? 'output'
+        const group = groups.get(key)
+        if (group) group.push(control)
+        else groups.set(key, [control])
+      }
+      for (const [kind, controls] of groups) {
+        let current: AudioDeviceEntry | null = null
+        let error: string | null = null
+        if (!this.audioReader) {
+          error = 'Audio device switching is not available on this desktop.'
+        } else {
+          try {
+            current = await this.audioReader.current(kind)
+          } catch (caught) {
+            error = caught instanceof Error ? caught.message : String(caught)
+          }
+        }
+        for (const control of controls) {
+          // Detail is the live current name; a generic tile without a target
+          // stays neutral (`active` false) instead of lighting up.
+          const reading: AudioDeviceStatusReading | null = current
+            ? {
+                detail: shortAudioDeviceDetail(current.name),
+                available: true,
+                active: control.audioDeviceTarget
+                  ? audioDeviceMatchesRef(control.audioDeviceTarget, current)
+                  : false,
+              }
+            : null
+          this.updateEntry(control.key, control.controlId, 'audioDevice', reading, error)
+        }
+      }
+    }
+
     const now = this.now()
     for (const sub of [...this.subscriptions.values()]) {
       if (immediate === sub) {
@@ -1166,6 +1334,8 @@ export class ControlStateService {
     appMatch?: AppVolumeMatch
     appTarget?: AppVolumeStateTarget
     rigPresetId?: string
+    audioDeviceKind?: AudioDeviceKind
+    audioDeviceTarget?: AudioDeviceRef
   }> {
     const controls = new Map<
       string,
@@ -1183,6 +1353,8 @@ export class ControlStateService {
         appMatch?: AppVolumeMatch
         appTarget?: AppVolumeStateTarget
         rigPresetId?: string
+        audioDeviceKind?: AudioDeviceKind
+        audioDeviceTarget?: AudioDeviceRef
       }
     >()
     for (const sub of this.subscriptions.values()) {
@@ -1204,6 +1376,10 @@ export class ControlStateService {
           ...(meta?.appMatch ? { appMatch: { ...meta.appMatch } } : {}),
           ...(meta?.appTarget ? { appTarget: meta.appTarget } : {}),
           ...(meta?.rigPresetId ? { rigPresetId: meta.rigPresetId } : {}),
+          ...(meta?.audioDeviceKind ? { audioDeviceKind: meta.audioDeviceKind } : {}),
+          ...(meta?.audioDeviceTarget
+            ? { audioDeviceTarget: { ...meta.audioDeviceTarget } }
+            : {}),
         })
       }
     }
@@ -1232,6 +1408,8 @@ export class ControlStateService {
       | TwitchStatusReading
       | LightStatusReading
       | AppVolumeReading
+      | RigStatusReading
+      | AudioDeviceStatusReading
       | null,
     error: string | null,
     max?: number,

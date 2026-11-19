@@ -1,6 +1,8 @@
 import type {
   Action,
   AssetKind,
+  AudioDeviceForm,
+  AudioDeviceKind,
   ConnectedClient,
   DeckConfig,
   LightDeviceType,
@@ -585,6 +587,45 @@ export interface MacroCaptureStoppedView {
   at: number
 }
 
+/** One audio endpoint row shown in the editor device picker. */
+export interface AudioDeviceView {
+  /** Opaque host key from the controller; never a raw endpoint path. */
+  id: string
+  name: string
+  deviceKind: AudioDeviceKind
+  form?: AudioDeviceForm
+  /** True while this endpoint is the current OS default for its kind. */
+  current: boolean
+  available: boolean
+}
+
+/** Snapshot returned by `getAudioDevices`, already bounded and sanitized. */
+export interface AudioDevicesResult {
+  ok: boolean
+  /** Why switching is unavailable or enumeration failed. */
+  error?: string
+  output: AudioDeviceView[]
+  input: AudioDeviceView[]
+  currentOutputId?: string
+  currentInputId?: string
+}
+
+/**
+ * Validate an IPC audio-device set/test request. Only the opaque host id is
+ * accepted (no names or endpoint paths), and it must look like a controller id
+ * rather than an arbitrary string.
+ */
+export function parseAudioDeviceSetInput(
+  kind: unknown,
+  id: unknown,
+): { kind: AudioDeviceKind; id: string } | null {
+  if (kind !== 'output' && kind !== 'input') return null
+  if (typeof id !== 'string') return null
+  const clean = id.trim()
+  if (!/^[a-z0-9]{8,64}$/i.test(clean)) return null
+  return { kind, id: clean }
+}
+
 export interface PhoneDeckApi {
   getState(): Promise<AppState>
   saveConfig(config: DeckConfig): Promise<SaveConfigResult>
@@ -643,6 +684,13 @@ export interface PhoneDeckApi {
   getMixerSnapshot(): Promise<MixerSnapshot>
   setMixerVolume(sessionId: string, volume: number): Promise<PressResult>
   setMixerMute(sessionId: string, muted: boolean): Promise<PressResult>
+  /**
+   * Live output/input endpoints for the editor's device picker. `force` skips
+   * the controller's 2 s cache; unavailable hosts return `ok:false` + `error`.
+   */
+  getAudioDevices(force?: boolean): Promise<AudioDevicesResult>
+  /** Set the OS default device by opaque id (editor Test / picker). */
+  setAudioDevice(kind: AudioDeviceKind, id: string): Promise<PressResult>
   setAutoProfileSettings(input: AutoProfileSettingsInput): Promise<OperationResult>
   /** Evaluate a rig's guards without running it (no last-run/progress changes). */
   previewRig(presetId: string): Promise<RigPreviewView>
@@ -734,6 +782,8 @@ export const IPC = {
   getMixerSnapshot: 'phonedek:mixer-get-snapshot',
   setMixerVolume: 'phonedek:mixer-set-volume',
   setMixerMute: 'phonedek:mixer-set-mute',
+  getAudioDevices: 'phonedek:audio-devices-get',
+  setAudioDevice: 'phonedek:audio-devices-set',
   setAutoProfileSettings: 'phonedek:auto-profile-set-settings',
   previewRig: 'phonedek:rig-preview',
   runRig: 'phonedek:rig-run',

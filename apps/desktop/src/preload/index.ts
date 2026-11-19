@@ -1,9 +1,18 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { Action, AssetKind, ConnectedClient, DeckConfig, MixerSnapshot, PressResult } from '@phonedek/shared'
+import type {
+  Action,
+  AssetKind,
+  AudioDeviceKind,
+  ConnectedClient,
+  DeckConfig,
+  MixerSnapshot,
+  PressResult,
+} from '@phonedek/shared'
 import { IPC } from '../shared/api'
 import type {
   AppState,
   AssetPickResult,
+  AudioDevicesResult,
   AutoProfileSettingsInput,
   EventRulesView,
   HueDiscoveryResult,
@@ -117,6 +126,10 @@ const api: PhoneDeckApi = {
     ipcRenderer.invoke(IPC.setMixerVolume, sessionId, volume),
   setMixerMute: (sessionId: string, muted: boolean): Promise<PressResult> =>
     ipcRenderer.invoke(IPC.setMixerMute, sessionId, muted),
+  getAudioDevices: (force?: boolean): Promise<AudioDevicesResult> =>
+    ipcRenderer.invoke(IPC.getAudioDevices, force),
+  setAudioDevice: (kind: AudioDeviceKind, id: string): Promise<PressResult> =>
+    ipcRenderer.invoke(IPC.setAudioDevice, kind, id),
   setAutoProfileSettings: (input: AutoProfileSettingsInput): Promise<OperationResult> =>
     ipcRenderer.invoke(IPC.setAutoProfileSettings, input),
   previewRig: (presetId: string): Promise<RigPreviewView> =>

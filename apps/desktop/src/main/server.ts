@@ -6,6 +6,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { Socket } from 'node:net'
 import { WebSocket, WebSocketServer } from 'ws'
 import {
+  AUDIO_DEVICE_CAPABILITY,
   BRIGHTNESS_CAPABILITY,
   CONTROL_STATE_CAPABILITY,
   KEYBOARD_CAPABILITY,
@@ -23,6 +24,8 @@ import {
   parseClientMessage,
 } from '@phonedek/shared'
 import type {
+  AudioDeviceKind,
+  AudioDevicesStateMessage,
   BrightnessMessage,
   ClientMessage,
   ConnectedClient,
@@ -47,6 +50,14 @@ import type {
 import type { AssetStore } from './assets'
 import { resolveStateControls, type ControlStateSubscription } from './control-state'
 import type { MixerSubscription } from './mixer-service'
+import {
+  isAudioDeviceId,
+  sanitizeAudioDeviceError,
+  sanitizeAudioDeviceName,
+  type AudioDeviceController,
+  type AudioDeviceEntry,
+  type AudioDeviceSnapshot,
+} from './audio-device-source'
 import { isKeyboardLauncher } from './keyboard-input'
 import {
   previewBackup,
@@ -73,13 +84,15 @@ export const SERVER_CAPABILITIES = [
   STREAMERBOT_CAPABILITY,
   RIG_CAPABILITY,
   RULES_CAPABILITY,
+  AUDIO_DEVICE_CAPABILITY,
 ] as const
 
 /**
  * Capabilities for a specific host. Wayland/unsupported platforms must not
  * advertise `pointer-v1` or `keyboard-v1`, a host with no volume/mic/OBS/Twitch
  * state reader must not advertise `control-state-v1`, `mixer-v1` is omitted on
- * macOS (no public per-app volume API), and `obs-v1`/`twitch-v1` are dynamic:
+ * macOS (no public per-app volume API), `audio-device-v1` is omitted unless an
+ * audio-device controller was built, and `obs-v1`/`twitch-v1` are dynamic:
  * they are advertised only while that integration is identified/authorized.
  * `rig-v1` and `rules-v1` are unconditional: every desktop can run config-owned
  * rigs/rules, and old phones simply ignore the extra markers.
@@ -93,6 +106,7 @@ export function serverCapabilities(
   keyboardSupported = false,
   mixerSupported = false,
   streamerbotSupported = false,
+  audioDeviceSupported = false,
 ): string[] {
   return SERVER_CAPABILITIES.filter((capability) => {
     if (capability === POINTER_CAPABILITY) return pointerSupported
@@ -104,6 +118,7 @@ export function serverCapabilities(
     if (capability === LIGHT_CAPABILITY) return lightSupported
     if (capability === MIXER_CAPABILITY) return mixerSupported
     if (capability === STREAMERBOT_CAPABILITY) return streamerbotSupported
+    if (capability === AUDIO_DEVICE_CAPABILITY) return audioDeviceSupported
     return true
   })
 }
@@ -119,6 +134,314 @@ export interface MixerHub {
   subscribe(clientId: string, subscription: MixerSubscription): void | Promise<void>
   unsubscribe(clientId: string): void
   command(command: MixerCommandMessage): Promise<{ ok: boolean; error?: string }>
+}
+
+/** One subscriber of the live audio-device panel. */
+export interface AudioDeviceSubscription {
+  send: (message: AudioDevicesStateMessage) => void
+}
+
+export interface AudioDeviceCommandRequest {
+  deviceKind: AudioDeviceKind
+  /** Opaque id from the latest `audioDevicesState`; never a name or path. */
+  deviceId: string
+}
+
+export interface AudioDeviceCommandOutcome {
+  ok: boolean
+  error?: string
+  /** The new current endpoint id for the requested kind, when known. */
+  currentId?: string
+}
+
+/** Live audio-device panel surface used by the server; injected in tests. */
+export interface AudioDeviceHub {
+  subscribe(clientId: string, subscription: AudioDeviceSubscription): void | Promise<void>
+  unsubscribe(clientId: string): void
+  command(command: AudioDeviceCommandRequest): Promise<AudioDeviceCommandOutcome>
+}
+
+/** ~1 Hz while a panel is subscribed; enough for a device chip, cheap over LAN. */
+export const AUDIO_DEVICE_POLL_INTERVAL_MS = 1000
+/** Matches the shared protocol's per-kind list cap. */
+export const MAX_AUDIO_DEVICES_PER_KIND = 64
+
+/**
+ * Content signature for change-only delivery. `updatedAt` is deliberately
+ * excluded because it changes on every poll.
+ */
+export function audioDevicesStateSignature(snapshot: AudioDeviceSnapshot): string {
+  const list = (entries: readonly AudioDeviceEntry[]): string =>
+    entries
+      .slice(0, MAX_AUDIO_DEVICES_PER_KIND)
+      .map(
+        (entry) =>
+          `${entry.id}\u0000${entry.name}\u0000${entry.deviceKind}\u0000${entry.form ?? ''}\u0000${
+            entry.current ? '1' : '0'
+          }\u0000${entry.available === false ? '0' : '1'}`,
+      )
+      .join('\u0001')
+  return [
+    snapshot.available ? '1' : '0',
+    snapshot.reason ?? '',
+    snapshot.currentOutputId ?? '',
+    snapshot.currentInputId ?? '',
+    list(snapshot.output),
+    list(snapshot.input),
+  ].join('\u0002')
+}
+
+/** Map controller entries to the wire payload (validated and bounded). */
+export function toAudioDevicesStateMessage(
+  snapshot: AudioDeviceSnapshot,
+): AudioDevicesStateMessage {
+  const entries = (source: readonly AudioDeviceEntry[]): AudioDevicesStateMessage['output'] =>
+    source
+      .filter((entry) => isAudioDeviceId(entry.id))
+      .slice(0, MAX_AUDIO_DEVICES_PER_KIND)
+      .map((entry) => ({
+        id: entry.id,
+        name: sanitizeAudioDeviceName(entry.name) || 'Unknown audio device',
+        deviceKind: entry.deviceKind,
+        ...(entry.form ? { form: entry.form } : {}),
+        current: entry.current === true,
+        available: entry.available !== false,
+      }))
+  return {
+    type: 'audioDevicesState',
+    available: snapshot.available,
+    ...(snapshot.reason ? { reason: sanitizeAudioDeviceName(snapshot.reason, 200) } : {}),
+    output: entries(snapshot.output),
+    input: entries(snapshot.input),
+    ...(snapshot.currentOutputId && isAudioDeviceId(snapshot.currentOutputId)
+      ? { currentOutputId: snapshot.currentOutputId }
+      : {}),
+    ...(snapshot.currentInputId && isAudioDeviceId(snapshot.currentInputId)
+      ? { currentInputId: snapshot.currentInputId }
+      : {}),
+    updatedAt: Number.isFinite(snapshot.updatedAt) ? snapshot.updatedAt : 0,
+  }
+}
+
+interface AudioDeviceSubscriber extends AudioDeviceSubscription {
+  lastSignature: string | null
+}
+
+export interface AudioDeviceServiceOptions {
+  controller?: AudioDeviceController | null
+  logger?: Logger
+  now?: () => number
+  pollIntervalMs?: number
+  /** Reason included when the host has no controller at all. */
+  unavailableReason?: string
+  /** Called after a successful write so control tiles refresh immediately. */
+  onChanged?: (kind: AudioDeviceKind) => void | Promise<void>
+}
+
+/**
+ * Live audio-device transport for the phone's full-screen panel.
+ *
+ * - One subscription per connection: immediate snapshot, then ~1 Hz polls
+ *   while at least one client watches; the timer stops when nobody does.
+ * - Unchanged snapshots are not re-sent, and one enumeration per tick serves
+ *   every subscriber.
+ * - Commands accept only a kind + an id from the live snapshot; the cached
+ *   controller owns resolution, serialization and latest-wins coalescing.
+ */
+export class AudioDeviceService implements AudioDeviceHub {
+  private readonly controller: AudioDeviceController | null
+  private readonly logger?: Logger
+  private readonly now: () => number
+  private readonly pollIntervalMs: number
+  private readonly unavailableReason: string
+  private readonly onChanged?: (kind: AudioDeviceKind) => void | Promise<void>
+  private readonly subscriptions = new Map<string, AudioDeviceSubscriber>()
+  private timer: NodeJS.Timeout | null = null
+  private chain: Promise<void> = Promise.resolve()
+  private disposed = false
+
+  constructor(options: AudioDeviceServiceOptions = {}) {
+    this.controller = options.controller ?? null
+    this.logger = options.logger
+    this.now = options.now ?? Date.now
+    this.pollIntervalMs = Math.max(
+      250,
+      options.pollIntervalMs ?? AUDIO_DEVICE_POLL_INTERVAL_MS,
+    )
+    this.unavailableReason =
+      options.unavailableReason ?? 'Audio device switching is not available on this desktop.'
+    this.onChanged = options.onChanged
+  }
+
+  get subscriptionCount(): number {
+    return this.subscriptions.size
+  }
+
+  /** Add or replace this connection's single audio-device subscription. */
+  subscribe(clientId: string, subscription: AudioDeviceSubscription): Promise<void> {
+    if (this.disposed) return Promise.resolve()
+    const sub: AudioDeviceSubscriber = { send: subscription.send, lastSignature: null }
+    this.subscriptions.set(clientId, sub)
+    return this.enqueue(async () => {
+      if (this.subscriptions.get(clientId) !== sub) return
+      const snapshot = await this.readSnapshot()
+      // The client may have stopped (or replaced) the subscription during the read.
+      if (this.subscriptions.get(clientId) !== sub) return
+      this.deliver(snapshot, sub, true)
+      this.schedule()
+    })
+  }
+
+  unsubscribe(clientId: string): void {
+    if (!this.subscriptions.delete(clientId)) return
+    this.schedule()
+  }
+
+  /** Validate and apply one `audioDeviceSet` by opaque id. */
+  async command(command: AudioDeviceCommandRequest): Promise<AudioDeviceCommandOutcome> {
+    if (!this.controller) {
+      return { ok: false, error: this.unavailableReason }
+    }
+    const kind = command.deviceKind
+    if (kind !== 'output' && kind !== 'input') {
+      return { ok: false, error: 'Invalid audio device kind' }
+    }
+    const deviceId = typeof command.deviceId === 'string' ? command.deviceId.trim() : ''
+    if (!isAudioDeviceId(deviceId)) {
+      return { ok: false, error: 'Invalid audio device' }
+    }
+
+    try {
+      const snapshot = await this.controller.list({ force: true })
+      if (!snapshot.available) {
+        return {
+          ok: false,
+          error: sanitizeAudioDeviceError(snapshot.reason ?? this.unavailableReason, 300),
+        }
+      }
+      const entries = kind === 'output' ? snapshot.output : snapshot.input
+      const entry = entries.find(
+        (candidate) => candidate.id.toLowerCase() === deviceId.toLowerCase(),
+      )
+      if (!entry) {
+        return { ok: false, error: 'That audio device is no longer available.' }
+      }
+      if (entry.available === false) {
+        return { ok: false, error: 'That audio device is not connected.' }
+      }
+
+      const written = await this.controller.setDefault(kind, { id: entry.id })
+      try {
+        await this.onChanged?.(kind)
+      } catch (error) {
+        this.logger?.warn(
+          `Audio device state refresh after set failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        )
+      }
+      // One fresh snapshot (the controller cache was invalidated by the write)
+      // is pushed to every panel, including the requesting phone.
+      await this.enqueue(() => this.refreshAndBroadcast())
+      return { ok: true, currentId: written.id }
+    } catch (error) {
+      return { ok: false, error: sanitizeAudioDeviceError(error, 300) }
+    }
+  }
+
+  dispose(): void {
+    this.disposed = true
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = null
+    this.subscriptions.clear()
+  }
+
+  private enqueue(task: () => Promise<void>): Promise<void> {
+    const run = this.chain.then(task, task)
+    this.chain = run.catch(() => undefined)
+    return run.catch((error: unknown) => {
+      this.logger?.warn(
+        `Audio device update failed: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    })
+  }
+
+  private async refreshAndBroadcast(): Promise<void> {
+    if (this.disposed || this.subscriptions.size === 0) return
+    const snapshot = await this.readSnapshot()
+    for (const sub of this.subscriptions.values()) this.deliver(snapshot, sub, true)
+  }
+
+  private async readSnapshot(): Promise<AudioDeviceSnapshot> {
+    if (!this.controller) {
+      return {
+        available: false,
+        reason: this.unavailableReason,
+        output: [],
+        input: [],
+        updatedAt: this.now(),
+      }
+    }
+    try {
+      const snapshot = await this.controller.list()
+      return {
+        ...snapshot,
+        output: snapshot.output.slice(0, MAX_AUDIO_DEVICES_PER_KIND),
+        input: snapshot.input.slice(0, MAX_AUDIO_DEVICES_PER_KIND),
+        updatedAt: Number.isFinite(snapshot.updatedAt) ? snapshot.updatedAt : this.now(),
+      }
+    } catch (error) {
+      const reason = sanitizeAudioDeviceError(error, 300)
+      this.logger?.warn(`Audio device snapshot failed: ${reason}`)
+      return {
+        available: false,
+        reason,
+        output: [],
+        input: [],
+        updatedAt: this.now(),
+      }
+    }
+  }
+
+  private deliver(
+    snapshot: AudioDeviceSnapshot,
+    sub: AudioDeviceSubscriber,
+    force = false,
+  ): void {
+    if (this.disposed) return
+    const signature = audioDevicesStateSignature(snapshot)
+    if (!force && sub.lastSignature === signature) return
+    sub.lastSignature = signature
+    try {
+      sub.send(toAudioDevicesStateMessage(snapshot))
+    } catch (error) {
+      this.logger?.warn(
+        `Could not send audio device state: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+    }
+  }
+
+  private schedule(): void {
+    if (this.timer) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
+    if (this.disposed || this.subscriptions.size === 0) return
+    this.timer = setTimeout(() => {
+      this.timer = null
+      void this.enqueue(() => this.poll())
+    }, this.pollIntervalMs)
+    this.timer.unref?.()
+  }
+
+  private async poll(): Promise<void> {
+    if (this.disposed || this.subscriptions.size === 0) return
+    const snapshot = await this.readSnapshot()
+    for (const sub of this.subscriptions.values()) this.deliver(snapshot, sub)
+    this.schedule()
+  }
 }
 
 interface ControlNeeds {
@@ -225,6 +548,10 @@ export interface DeckServerOptions {
   controlStateSupported?: boolean
   /** Live per-app mixer transport; omitted when this host has no mixer. */
   mixer?: MixerHub
+  /** Live audio-device panel transport; omitted when no controller was built. */
+  audioDevices?: AudioDeviceHub
+  /** Advertise `audio-device-v1`; true only when a controller exists. */
+  audioDevicesSupported?: () => boolean
   /** Dynamic: advertise `obs-v1` only while the OBS client is identified. */
   obsSupported?: () => boolean
   /** Dynamic: advertise `twitch-v1` only while Twitch is authorized. */
@@ -256,6 +583,10 @@ interface ClientRecord {
   mixerTimes: number[]
   /** `mixerCommand` writes; a fast fader can legitimately exceed 1/s. */
   mixerCommandTimes: number[]
+  /** `audioDevices` start/stop attempts, so a flapping client cannot spam the service. */
+  audioDeviceTimes: number[]
+  /** `audioDeviceSet` writes; the panel is tap-driven, not a continuous stream. */
+  audioDeviceCommandTimes: number[]
   /** Last APP_OUTDATED message sent to this client, to avoid spamming. */
   outdatedNotice: string | null
 }
@@ -274,6 +605,8 @@ const BRIGHTNESS_RATE_LIMIT = 20
 const WATCH_RATE_LIMIT = 2
 const MIXER_SUBSCRIBE_RATE_LIMIT = 2
 const MIXER_COMMAND_RATE_LIMIT = 25
+const AUDIO_DEVICE_SUBSCRIBE_RATE_LIMIT = 2
+const AUDIO_DEVICE_COMMAND_RATE_LIMIT = 8
 const MAX_IMPORT_BYTES = 300 * 1024 * 1024
 const IMPORT_TEMP_PREFIX = 'phonedek-import-'
 
@@ -492,6 +825,8 @@ export class DeckServer {
       this.options.keyboardSupported?.() === true,
       this.options.mixerSupported?.() === true,
       this.options.streamerbotSupported?.() === true,
+      this.options.audioDevices !== undefined &&
+        this.options.audioDevicesSupported?.() === true,
     )
   }
 
@@ -568,6 +903,11 @@ export class DeckServer {
       }
       try {
         this.options.mixer?.unsubscribe(record.info.id)
+      } catch {
+        // ignore
+      }
+      try {
+        this.options.audioDevices?.unsubscribe(record.info.id)
       } catch {
         // ignore
       }
@@ -757,6 +1097,8 @@ export class DeckServer {
       watchTimes: [],
       mixerTimes: [],
       mixerCommandTimes: [],
+      audioDeviceTimes: [],
+      audioDeviceCommandTimes: [],
       outdatedNotice: null,
     }
     this.clients.set(id, record)
@@ -783,6 +1125,11 @@ export class DeckServer {
         this.options.mixer?.unsubscribe(record.info.id)
       } catch (error) {
         this.options.logger?.warn(`Mixer cleanup failed: ${String(error)}`)
+      }
+      try {
+        this.options.audioDevices?.unsubscribe(record.info.id)
+      } catch (error) {
+        this.options.logger?.warn(`Audio device cleanup failed: ${String(error)}`)
       }
       try {
         this.options.onClientClosed?.(record.info)
@@ -833,6 +1180,20 @@ export class DeckServer {
         this.sendMixerResult(record, candidate.requestId, { ok: false, error: result.error })
         return
       }
+      if (
+        candidate !== null &&
+        typeof candidate === 'object' &&
+        candidate.type === 'audioDeviceSet' &&
+        typeof candidate.requestId === 'string' &&
+        candidate.requestId.length >= 1 &&
+        candidate.requestId.length <= 64
+      ) {
+        this.sendAudioDeviceResult(record, candidate.requestId, {
+          ok: false,
+          error: result.error.slice(0, 300),
+        })
+        return
+      }
       this.send(record.ws, { type: 'error', code: 'BAD_MESSAGE', message: result.error })
       return
     }
@@ -868,6 +1229,12 @@ export class DeckServer {
         break
       case 'mixerCommand':
         await this.handleMixerCommand(record, message)
+        break
+      case 'audioDevices':
+        await this.handleAudioDevices(record, message)
+        break
+      case 'audioDeviceSet':
+        await this.handleAudioDeviceSet(record, message)
         break
     }
   }
@@ -1024,6 +1391,127 @@ export class DeckServer {
       result = { ok: false, error: error instanceof Error ? error.message : String(error) }
     }
     this.sendMixerResult(record, message.requestId, result)
+  }
+
+  private sendAudioDeviceResult(
+    record: ClientRecord,
+    requestId: string,
+    result: AudioDeviceCommandOutcome,
+  ): void {
+    this.send(record.ws, {
+      type: 'audioDeviceResult',
+      requestId,
+      ok: result.ok,
+      ...(result.error ? { error: result.error.slice(0, 300) } : {}),
+      ...(result.currentId ? { currentId: result.currentId } : {}),
+    })
+  }
+
+  /**
+   * Client-side gate for the live audio panel: the host needs a controller and
+   * the phone must have advertised `audio-device-v1` in hello. `stop` is always
+   * honoured so a stale subscription is always released.
+   */
+  private async handleAudioDevices(
+    record: ClientRecord,
+    message: Extract<ClientMessage, { type: 'audioDevices' }>,
+  ): Promise<void> {
+    if (message.phase === 'stop') {
+      try {
+        this.options.audioDevices?.unsubscribe(record.info.id)
+      } catch (error) {
+        this.options.logger?.warn(`Audio device cleanup failed: ${String(error)}`)
+      }
+      return
+    }
+
+    if (!this.options.audioDevices || this.options.audioDevicesSupported?.() !== true) return
+    if (!record.info.capabilities?.includes(AUDIO_DEVICE_CAPABILITY)) return
+
+    const now = Date.now()
+    record.audioDeviceTimes = record.audioDeviceTimes.filter((time) => now - time < 1000)
+    if (record.audioDeviceTimes.length >= AUDIO_DEVICE_SUBSCRIBE_RATE_LIMIT) {
+      this.send(record.ws, {
+        type: 'error',
+        code: 'RATE_LIMITED',
+        message: 'Too many audio device updates, slow down',
+      })
+      return
+    }
+    record.audioDeviceTimes.push(now)
+
+    try {
+      await this.options.audioDevices.subscribe(record.info.id, {
+        send: (state: AudioDevicesStateMessage) => this.send(record.ws, state),
+      })
+    } catch (error) {
+      this.options.logger?.warn(
+        `Could not subscribe to audio devices: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+    }
+  }
+
+  private async handleAudioDeviceSet(
+    record: ClientRecord,
+    message: Extract<ClientMessage, { type: 'audioDeviceSet' }>,
+  ): Promise<void> {
+    const now = Date.now()
+    record.audioDeviceCommandTimes = record.audioDeviceCommandTimes.filter(
+      (time) => now - time < 1000,
+    )
+    if (record.audioDeviceCommandTimes.length >= AUDIO_DEVICE_COMMAND_RATE_LIMIT) {
+      this.sendAudioDeviceResult(record, message.requestId, {
+        ok: false,
+        error: 'Too many audio device changes, slow down',
+      })
+      return
+    }
+    record.audioDeviceCommandTimes.push(now)
+
+    if (!this.options.audioDevices || this.options.audioDevicesSupported?.() !== true) {
+      this.sendAudioDeviceResult(record, message.requestId, {
+        ok: false,
+        error: 'Audio device switching is not available on this desktop.',
+      })
+      return
+    }
+    if (!record.info.capabilities?.includes(AUDIO_DEVICE_CAPABILITY)) {
+      this.sendAudioDeviceResult(record, message.requestId, {
+        ok: false,
+        error: 'Update the PhoneDeck app on your phone to switch audio devices.',
+      })
+      return
+    }
+    // The schema already restricts kind/id shape; a live snapshot check happens
+    // in the service so a stale or arbitrary id never reaches the backend.
+    if (message.deviceKind !== 'output' && message.deviceKind !== 'input') {
+      this.sendAudioDeviceResult(record, message.requestId, {
+        ok: false,
+        error: 'Invalid audio device kind',
+      })
+      return
+    }
+    const deviceId = message.deviceId.trim()
+    if (!isAudioDeviceId(deviceId)) {
+      this.sendAudioDeviceResult(record, message.requestId, {
+        ok: false,
+        error: 'Invalid audio device',
+      })
+      return
+    }
+
+    let result: AudioDeviceCommandOutcome
+    try {
+      result = await this.options.audioDevices.command({
+        deviceKind: message.deviceKind,
+        deviceId,
+      })
+    } catch (error) {
+      result = { ok: false, error: sanitizeAudioDeviceError(error, 300) }
+    }
+    this.sendAudioDeviceResult(record, message.requestId, result)
   }
 
   private async handlePress(record: ClientRecord, message: PressMessage): Promise<void> {

@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type {
   AppVolumePlanStep,
+  AudioDevicePlanStep,
   LightPlanStep,
   ObsPlanStep,
   StreamerBotPlanStep,
@@ -46,6 +47,8 @@ export interface HostActions {
   runAppVolumeAction?(step: AppVolumePlanStep): Promise<void>
   /** Run any Streamer.bot plan step (optional; absent when not wired). */
   runStreamerBotAction?(step: StreamerBotPlanStep): Promise<void>
+  /** Run any audio-device set/cycle step (optional; absent without a controller). */
+  runAudioDeviceAction?(step: AudioDevicePlanStep): Promise<void>
 }
 
 export interface HostActionOptions {
@@ -76,6 +79,8 @@ export interface HostActionOptions {
   runAppVolumeAction?: (step: AppVolumePlanStep) => Promise<void>
   /** Test seam / shared controller for Streamer.bot actions. */
   runStreamerBotAction?: (step: StreamerBotPlanStep) => Promise<void>
+  /** Test seam / shared controller for audio-device set/cycle actions. */
+  runAudioDeviceAction?: (step: AudioDevicePlanStep) => Promise<void>
   /** Overrides the user's home directory (used by tests to avoid touching ~/Desktop). */
   homeDir?: string
   logger?: Logger
@@ -483,6 +488,19 @@ export function createHostActions(options: HostActionOptions = {}): HostActions 
           async runStreamerBotAction(step: StreamerBotPlanStep) {
             await options.runStreamerBotAction!(step)
             logger?.info(`Ran Streamer.bot action: ${step.actionName}`)
+          },
+        }
+      : {}),
+
+    ...(options.runAudioDeviceAction
+      ? {
+          async runAudioDeviceAction(step: AudioDevicePlanStep) {
+            await options.runAudioDeviceAction!(step)
+            logger?.info(
+              step.action === 'cycle'
+                ? `Cycled ${step.deviceKind} devices (${step.devices.length})`
+                : `Set ${step.deviceKind} device`,
+            )
           },
         }
       : {}),
