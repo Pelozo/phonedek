@@ -10,6 +10,13 @@ export interface WhatsNewEntry {
  * Keep highlights short: the dialog is a summary, not release notes.
  */
 const WHATS_NEW: Readonly<Record<string, WhatsNewEntry>> = {
+  '0.22.1': {
+    title: 'Video memory fix',
+    highlights: [
+      'Android releases video players on preloaded pages instead of keeping decoders alive.',
+      'Video backgrounds and icons play when their page settles; no visual change otherwise.',
+    ],
+  },
   '0.22.0': {
     title: 'Mac audio switching',
     highlights: [

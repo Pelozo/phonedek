@@ -11,6 +11,13 @@ data class WhatsNewEntry(
  * each release; versions without a key fall back to [GENERIC_WHATS_NEW].
  */
 private val WHATS_NEW: Map<String, WhatsNewEntry> = mapOf(
+    "0.22.1" to WhatsNewEntry(
+        title = "Video memory fix",
+        highlights = listOf(
+            "Android releases video players on preloaded pages instead of keeping decoders alive.",
+            "Video backgrounds and icons play when their page settles; no visual change otherwise.",
+        ),
+    ),
     "0.22.0" to WhatsNewEntry(
         title = "Mac audio switching",
         highlights = listOf(
