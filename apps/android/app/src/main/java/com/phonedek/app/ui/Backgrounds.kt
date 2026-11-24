@@ -300,18 +300,20 @@ fun VideoSurface(
     modifier: Modifier = Modifier,
     onError: () -> Unit = {},
 ) {
+    // Only the settled page keeps video players alive. Preloaded adjacent
+    // pages still compose their fallback, but no ExoPlayer/decoder is held.
+    if (!isActive) return
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var failed by remember(url) { mutableStateOf(false) }
     val currentOnError by rememberUpdatedState(onError)
-    val currentActive by rememberUpdatedState(isActive)
     val currentFailed by rememberUpdatedState(failed)
     val exoPlayer = remember(url) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(url))
             repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
             volume = if (muted) 0f else 1f
-            playWhenReady = autoplay && isActive
+            playWhenReady = autoplay
         }
     }
 
@@ -333,7 +335,7 @@ fun VideoSurface(
             when (event) {
                 Lifecycle.Event.ON_STOP -> exoPlayer.pause()
                 Lifecycle.Event.ON_START -> {
-                    if (currentActive && autoplay && !currentFailed) exoPlayer.play()
+                    if (autoplay && !currentFailed) exoPlayer.play()
                 }
                 else -> Unit
             }
@@ -347,10 +349,10 @@ fun VideoSurface(
         }
     }
 
-    LaunchedEffect(exoPlayer, isActive, autoplay, loop, muted, failed) {
+    LaunchedEffect(exoPlayer, autoplay, loop, muted, failed) {
         exoPlayer.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         exoPlayer.volume = if (muted) 0f else 1f
-        if (failed || !isActive || !autoplay) {
+        if (failed || !autoplay) {
             exoPlayer.pause()
         } else {
             exoPlayer.play()
