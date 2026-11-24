@@ -842,6 +842,8 @@ try {
             }
             $response = $response | ConvertTo-Json -Compress -Depth 6
         } catch {
+            # Never leave a held shortcut key down after a failed command.
+            Release-HeldKeys
             $message = $_.Exception.Message
             if (-not $message) { $message = 'Unknown keyboard helper error' }
             $response = @{ id = $id; ok = $false; error = $message } | ConvertTo-Json -Compress
