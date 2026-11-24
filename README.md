@@ -177,6 +177,8 @@ On macOS, build the CGEvent helper before packaging: `npm run build:mac-helper -
 
 On Linux, `npm install` may need a filesystem that supports `chmod` (avoid NTFS/FUSE mounts for `node_modules`).
 
+After publishing a release, verify its assets with `scripts/verify-release.sh vX.Y.Z` (or add `apk` for a quick APK/feed check). It checks `SHA256SUMS`, the update feeds and the APK manifest version; set `AAPT2` if `aapt2` is not on `PATH`.
+
 ### Android
 
 Requirements: JDK 17/21 + Android SDK 34 (platform + build-tools 34.0.0).
