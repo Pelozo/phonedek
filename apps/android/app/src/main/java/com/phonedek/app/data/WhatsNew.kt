@@ -11,6 +11,13 @@ data class WhatsNewEntry(
  * each release; versions without a key fall back to [GENERIC_WHATS_NEW].
  */
 private val WHATS_NEW: Map<String, WhatsNewEntry> = mapOf(
+    "0.22.2" to WhatsNewEntry(
+        title = "Audio device list limit",
+        highlights = listOf(
+            "Hosts with many virtual audio endpoints now keep the current device within the 64-device protocol limit.",
+            "The phone no longer rejects the audio state when a host reports an unusually large device list.",
+        ),
+    ),
     "0.22.1" to WhatsNewEntry(
         title = "Video memory fix",
         highlights = listOf(

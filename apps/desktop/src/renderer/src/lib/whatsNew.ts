@@ -10,6 +10,13 @@ export interface WhatsNewEntry {
  * Keep highlights short: the dialog is a summary, not release notes.
  */
 const WHATS_NEW: Readonly<Record<string, WhatsNewEntry>> = {
+  '0.22.2': {
+    title: 'Audio device list limit',
+    highlights: [
+      'Hosts with many virtual audio endpoints now keep the current device within the 64-device protocol limit.',
+      'The phone no longer rejects the audio state when a host reports an unusually large device list.',
+    ],
+  },
   '0.22.1': {
     title: 'Video memory fix',
     highlights: [
