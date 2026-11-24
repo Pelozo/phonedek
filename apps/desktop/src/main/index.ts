@@ -2344,7 +2344,9 @@ async function bootstrap(): Promise<void> {
     audioDevices.dispose()
     audioDevices = null
   } else if (audioDevices) {
-    logger.info('Audio device switching enabled (Windows Core Audio)')
+    logger.info(
+      `Audio device switching enabled (${process.platform === 'linux' ? 'Linux pactl' : 'Windows Core Audio'})`,
+    )
   } else {
     logger.info(
       `Audio device switching unavailable: ${audioDeviceUnsupportedReason(process.platform) ?? 'unsupported platform'}`,

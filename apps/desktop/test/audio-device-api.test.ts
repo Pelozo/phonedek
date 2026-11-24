@@ -39,12 +39,11 @@ describe('audio device API validation', () => {
 })
 
 describe('audio device unsupported hosts', () => {
-  it('reports a reason and builds no controller outside Windows', () => {
-    expect(audioDeviceUnsupportedReason('linux')).toContain('Windows')
-    expect(audioDeviceUnsupportedReason('darwin')).toContain('Windows')
+  it('reports a reason and builds no controller on unsupported hosts', () => {
+    expect(audioDeviceUnsupportedReason('linux')).toContain('pactl')
+    expect(audioDeviceUnsupportedReason('darwin')).toContain('Windows and Linux')
     expect(audioDeviceUnsupportedReason('win32')).toBeNull()
 
-    expect(createAudioDeviceController('linux')).toBeNull()
     expect(createAudioDeviceController('darwin')).toBeNull()
   })
 })

@@ -1,7 +1,9 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import type { AudioDeviceForm, AudioDeviceKind, AudioDeviceRef } from '@phonedek/shared'
 import { windowsHelperLaunch, type HelperLaunch } from './key-sender'
+import { runCommandCapture, type CommandRunner } from './volume-source'
 import type { Logger } from './logger'
 
 /** One live audio endpoint, as exposed to the desktop controller. */
@@ -86,10 +88,13 @@ const AUDIO_DEVICE_FORMS: ReadonlySet<string> = new Set([
   'other',
 ])
 
-/** Why the platform has no audio-device controller (null on Windows). */
+/** Why the platform has no audio-device controller (null when one is available). */
 export function audioDeviceUnsupportedReason(platform: NodeJS.Platform): string | null {
   if (platform === 'win32') return null
-  return 'Audio device switching is only implemented on Windows in this build.'
+  if (platform === 'linux') {
+    return 'Audio device switching needs PulseAudio or PipeWire (pactl) on Linux.'
+  }
+  return 'Audio device switching is only implemented on Windows and Linux in this build.'
 }
 
 /** Strip control characters/newlines, collapse whitespace and clamp the length. */
@@ -665,6 +670,203 @@ export class WindowsAudioDeviceBackend implements AudioDeviceBackend {
   }
 }
 
+export interface LinuxAudioDeviceBackendOptions {
+  runCommand?: CommandRunner
+}
+
+/** One sink/source row from `pactl -f json list` or `pactl list short`. */
+export interface PactlAudioRow {
+  name: string
+  description?: string
+  state?: string
+}
+
+/** Parse `Default Sink:` / `Default Source:` from `pactl info`. */
+export function parsePactlInfo(raw: string): { sink?: string; source?: string } {
+  const sink = /^Default Sink:\s*(.+)$/im.exec(raw)?.[1]?.trim()
+  const source = /^Default Source:\s*(.+)$/im.exec(raw)?.[1]?.trim()
+  return {
+    ...(sink ? { sink } : {}),
+    ...(source ? { source } : {}),
+  }
+}
+
+/** Parse the JSON form of `pactl -f json list sinks|sources`. */
+export function parsePactlDeviceJson(raw: string): PactlAudioRow[] {
+  const parsed: unknown = JSON.parse(raw)
+  if (!Array.isArray(parsed)) throw new Error('pactl returned an invalid device list.')
+  const rows: PactlAudioRow[] = []
+  for (const value of parsed) {
+    const row = asRecord(value)
+    if (!row) continue
+    const name = typeof row.name === 'string' ? row.name.trim() : ''
+    if (!name) continue
+    const description = typeof row.description === 'string' ? row.description.trim() : undefined
+    const state = typeof row.state === 'string' ? row.state.trim() : undefined
+    rows.push({ name, ...(description ? { description } : {}), ...(state ? { state } : {}) })
+  }
+  return rows
+}
+
+/** Parse tab-separated `pactl list short sinks|sources` output. */
+export function parsePactlShortDevices(raw: string): PactlAudioRow[] {
+  const rows: PactlAudioRow[] = []
+  for (const line of raw.split(/\r?\n/)) {
+    const [index, name, , , state] = line.split('\t')
+    if (!index || !name || !/^\d+$/.test(index.trim())) continue
+    const cleanState = state?.trim()
+    rows.push({ name: name.trim(), ...(cleanState ? { state: cleanState } : {}) })
+  }
+  return rows
+}
+
+/** Stable opaque id for a PulseAudio/PipeWire sink or source name. */
+export function linuxAudioDeviceId(name: string): string {
+  return createHash('sha256').update(name).digest('hex').slice(0, 16)
+}
+
+function linuxAudioDeviceForm(row: PactlAudioRow, kind: AudioDeviceKind): AudioDeviceForm {
+  const label = `${row.name} ${row.description ?? ''}`.toLowerCase()
+  if (/bluez|bluetooth/.test(label)) return 'bluetooth'
+  if (/usb/.test(label)) return 'usb'
+  if (/hdmi|displayport/.test(label)) return 'hdmi'
+  if (/virtual|monitor|null|dummy|cable/.test(label)) return 'virtual'
+  if (/headphone|headset/.test(label)) return 'headphones'
+  if (kind === 'input' && /microphone|\bmic\b|analog/.test(label)) return 'microphone'
+  if (kind === 'output' && /speaker|analog/.test(label)) return 'speakers'
+  return 'other'
+}
+
+/**
+ * PulseAudio/PipeWire backend. It uses `pactl` only; missing `pactl` means no
+ * controller and no `audio-device-v1` capability. Setting a default only
+ * affects new streams; existing streams keep their sink until the app reopens.
+ */
+export class LinuxAudioDeviceBackend implements AudioDeviceBackend {
+  private readonly run: CommandRunner
+  private readonly names = new Map<string, string>()
+  private readonly currentIds = new Map<AudioDeviceKind, string>()
+  private readonly lastEntries = new Map<AudioDeviceKind, AudioDeviceEntry[]>()
+
+  constructor(options: LinuxAudioDeviceBackendOptions = {}) {
+    this.run =
+      options.runCommand ??
+      ((command, args) => runCommandCapture(command, args, AUDIO_DEVICE_LIST_TIMEOUT_MS))
+  }
+
+  private async checked(args: string[]): Promise<string> {
+    const result = await this.run('pactl', args)
+    if (result.code !== 0) {
+      const detail = (result.stderr.trim() || result.stdout.trim()).slice(0, 200)
+      throw new Error(`pactl exited with ${result.code}${detail ? `: ${detail}` : ''}`)
+    }
+    return result.stdout
+  }
+
+  private async defaults(): Promise<{ sink?: string; source?: string }> {
+    return parsePactlInfo(await this.checked(['info']))
+  }
+
+  private async readKind(
+    kind: AudioDeviceKind,
+    currentName: string | undefined,
+  ): Promise<AudioDeviceEntry[]> {
+    const plural = kind === 'output' ? 'sinks' : 'sources'
+    let rows: PactlAudioRow[]
+    try {
+      rows = parsePactlDeviceJson(await this.checked(['-f', 'json', 'list', plural]))
+    } catch {
+      // PulseAudio versions before 16 and some PipeWire builds lack JSON.
+      rows = parsePactlShortDevices(await this.checked(['list', 'short', plural]))
+    }
+
+    const currentId = currentName ? linuxAudioDeviceId(currentName) : undefined
+    if (currentId) this.currentIds.set(kind, currentId)
+    else this.currentIds.delete(kind)
+
+    const seen = new Set<string>()
+    const entries: AudioDeviceEntry[] = []
+    for (const row of rows) {
+      const id = linuxAudioDeviceId(row.name)
+      if (seen.has(id)) continue
+      seen.add(id)
+      this.names.set(id, row.name)
+      const display = sanitizeAudioDeviceName(row.description) || sanitizeAudioDeviceName(row.name)
+      entries.push({
+        id,
+        name: display || 'Unknown audio device',
+        deviceKind: kind,
+        form: linuxAudioDeviceForm(row, kind),
+        current: id === currentId,
+        available: true,
+      })
+    }
+    return entries
+  }
+
+  async list(): Promise<{
+    output: AudioDeviceEntry[]
+    input: AudioDeviceEntry[]
+    currentOutputId?: string
+    currentInputId?: string
+  }> {
+    const defaults = await this.defaults()
+    const [output, input] = await Promise.all([
+      this.readKind('output', defaults.sink),
+      this.readKind('input', defaults.source),
+    ])
+    this.lastEntries.set('output', output)
+    this.lastEntries.set('input', input)
+    const currentOutputId = this.currentIds.get('output')
+    const currentInputId = this.currentIds.get('input')
+    return {
+      output,
+      input,
+      ...(currentOutputId ? { currentOutputId } : {}),
+      ...(currentInputId ? { currentInputId } : {}),
+    }
+  }
+
+  async current(kind: AudioDeviceKind): Promise<AudioDeviceEntry> {
+    const defaults = await this.defaults()
+    const rawName = kind === 'output' ? defaults.sink : defaults.source
+    if (!rawName) throw new Error(`No default ${kind} device is available.`)
+    const id = linuxAudioDeviceId(rawName)
+    const cached = this.lastEntries.get(kind)?.find((candidate) => candidate.id === id)
+    if (cached) {
+      this.currentIds.set(kind, id)
+      return { ...cached, current: true }
+    }
+    const snapshot = await this.list()
+    const entry = (kind === 'output' ? snapshot.output : snapshot.input).find(
+      (candidate) => candidate.id === id,
+    )
+    if (!entry) throw new Error(`No default ${kind} device is available.`)
+    return { ...entry, current: true }
+  }
+
+  async setDefault(
+    kind: AudioDeviceKind,
+    id: string,
+    _allRoles: boolean,
+  ): Promise<AudioDeviceEntry> {
+    let rawName = this.names.get(id)
+    if (!rawName) {
+      await this.list()
+      rawName = this.names.get(id)
+    }
+    if (!rawName) throw new Error(`Unknown ${kind} device.`)
+    await this.checked([kind === 'output' ? 'set-default-sink' : 'set-default-source', rawName])
+    return this.current(kind)
+  }
+
+  dispose(): void {
+    this.names.clear()
+    this.currentIds.clear()
+    this.lastEntries.clear()
+  }
+}
+
 interface PendingProbe {
   resolve: (payload: unknown) => void
   reject: (error: Error) => void
@@ -878,17 +1080,36 @@ export interface AudioDeviceSourceOptions extends AudioDeviceControllerOptions {
   helperPath?: string
   backend?: AudioDeviceBackend
   transport?: AudioDeviceTransport
+  runCommand?: CommandRunner
+}
+
+function pactlAvailable(): boolean {
+  try {
+    return spawnSync('pactl', ['--version'], { stdio: 'ignore', windowsHide: true }).status === 0
+  } catch {
+    return false
+  }
 }
 
 /**
- * Build the desktop audio-device controller. Windows gets a real Core Audio
- * helper; every other platform stays unsupported in this phase, with the reason
- * available through `audioDeviceUnsupportedReason`.
+ * Build the desktop audio-device controller. Windows uses the Core Audio helper
+ * and Linux uses `pactl` when PulseAudio/PipeWire is present. macOS has no
+ * controller yet, so the capability stays absent there.
  */
 export function createAudioDeviceController(
   platform: NodeJS.Platform,
   options: AudioDeviceSourceOptions = {},
 ): AudioDeviceController | null {
+  if (platform === 'linux') {
+    const backend =
+      options.backend ??
+      (pactlAvailable()
+        ? new LinuxAudioDeviceBackend({
+            ...(options.runCommand ? { runCommand: options.runCommand } : {}),
+          })
+        : null)
+    return backend ? new CachedAudioDeviceController(backend, options) : null
+  }
   if (platform !== 'win32') return null
 
   const backend =

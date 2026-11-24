@@ -574,19 +574,21 @@ describe('CachedAudioDeviceController', () => {
 })
 
 describe('platform support', () => {
-  it('builds a controller only on Windows', () => {
+  it('builds a controller on Windows and Linux with a backend', () => {
     const backend = new FakeBackend()
     expect(createAudioDeviceController('darwin')).toBeNull()
-    expect(createAudioDeviceController('linux')).toBeNull()
+    expect(createAudioDeviceController('linux', { backend })).toBeInstanceOf(
+      CachedAudioDeviceController,
+    )
     expect(createAudioDeviceController('win32', { backend })).toBeInstanceOf(
       CachedAudioDeviceController,
     )
   })
 
-  it('returns a clear non-Windows reason', () => {
+  it('returns a clear unsupported-host reason', () => {
     expect(audioDeviceUnsupportedReason('win32')).toBeNull()
-    expect(audioDeviceUnsupportedReason('linux')).toContain('Windows')
-    expect(audioDeviceUnsupportedReason('darwin')).toContain('Windows')
+    expect(audioDeviceUnsupportedReason('linux')).toContain('pactl')
+    expect(audioDeviceUnsupportedReason('darwin')).toContain('Windows and Linux')
   })
 })
 
