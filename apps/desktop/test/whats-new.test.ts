@@ -32,7 +32,7 @@ describe('whatsNewDecision', () => {
 
 describe('whatsNewFor', () => {
   it('returns curated copy for the shipped releases', () => {
-    for (const version of ['0.21.0', '0.20.1', '0.20.0', '0.19.1', '0.19.0', '0.18.0', '0.17.0', '0.16.2', '0.16.1', '0.16.0', '0.15.0', '0.14.0', '0.13.2', '0.13.1', '0.13.0', '0.12.0', '0.11.0', '0.10.0', '0.9.0']) {
+    for (const version of ['0.22.0', '0.21.0', '0.20.1', '0.20.0', '0.19.1', '0.19.0', '0.18.0', '0.17.0', '0.16.2', '0.16.1', '0.16.0', '0.15.0', '0.14.0', '0.13.2', '0.13.1', '0.13.0', '0.12.0', '0.11.0', '0.10.0', '0.9.0']) {
       const entry = whatsNewFor(version)
       expect(entry.title.length).toBeGreaterThan(0)
       expect(entry.highlights.length).toBeGreaterThan(0)
