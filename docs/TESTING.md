@@ -67,3 +67,60 @@ Report issues with `%APPDATA%\PhoneDeck\phonedek.log`, the Windows version and t
 - [ ] Grant Local Network; QR pairing/discovery works.
 - [ ] Launch `.app` with arguments, URL and shell command actions.
 - [ ] Close the window; dock icon reopens it and the server stays alive; Cmd+Q stops it.
+
+## Audio devices (Windows, macOS, Linux)
+
+- [ ] Add **Audio → Set output device** and pick the current device; the tile
+  shows **OUT** and the status card shows **CURRENT**.
+- [ ] Switch to a second output and back; the OS default changes and the tile
+  chip follows within about a second.
+- [ ] Add **Cycle output devices** with two devices; each press toggles the
+  default and skips a disconnected device.
+- [ ] Add **Audio device** state as a generic output/input source and as a
+  specific target; confirm the current name, `ACTIVE` target and `NO AUDIO` /
+  `NO DEVICE` fallbacks.
+- [ ] Add an input device action; confirm the microphone/capture default
+  changes and apps see the new input after reopening audio.
+
+### Windows
+
+- [ ] Leave **Set all Windows roles** on; check Discord/Teams communications
+  input/output follows the change.
+- [ ] Turn it off; only the console/multimedia default should follow.
+- [ ] Test built-in speakers, USB interface, connected Bluetooth headset and
+  HDMI/DisplayPort; hotplug each and refresh the picker.
+- [ ] Confirm a disconnected Bluetooth endpoint is not selectable.
+- [ ] Use the packaged app, not only `npm run dev`; the helper must be beside
+  `resources/audio-device-helper.ps1`.
+
+### macOS
+
+- [ ] Test built-in speakers, USB interface, connected Bluetooth headset and
+  HDMI/DisplayPort; hotplug each and refresh the picker.
+- [ ] Confirm output switching changes both default output and system output.
+- [ ] Test an AirPlay or aggregate device; a rejected change must show an error
+  and leave the old default in place.
+- [ ] Confirm no Accessibility prompt appears for audio-only actions.
+- [ ] Use the packaged `.app`; the Swift helper must be the second process.
+
+### Linux
+
+- [ ] With PulseAudio or PipeWire and `pactl` installed, add set/cycle actions
+  and confirm new apps use the new sink/source.
+- [ ] Confirm an already-playing app keeps its old stream until it reopens
+  audio (PhoneDeck does not move live streams).
+- [ ] Test Bluetooth/USB/HDMI endpoints, monitor sources, duplicate names and
+  a missing PulseAudio server (`NO AUDIO` / clear error, no picker crash).
+- [ ] Without `pactl`, confirm the audio capability is absent rather than a
+  picker that can only fail.
+
+## Android video pages
+
+- [ ] Put a video background and a video button icon on two pages.
+- [ ] Swipe back and forth several times; the settled page plays, adjacent
+  pages show their fallback, and no black frame or decoder error remains.
+- [ ] Lock/unlock and background/foreground the app; video resumes on the
+  settled page only.
+- [ ] Rotate the phone; video fit/rotation still works.
+- [ ] Check the log for repeated `Video playback failed` entries after page
+  turns.
