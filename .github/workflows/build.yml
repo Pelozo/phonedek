@@ -103,6 +103,11 @@ jobs:
         run: npm run build:mac-helper -w @phonedek/desktop
       - name: Self-test Swift keyboard helper
         run: apps/desktop/resources/mac/keyboard-helper --self-test
+      - name: Verify macOS audio helper self-test
+        run: |
+          out=$(apps/desktop/resources/mac/keyboard-helper --self-test)
+          echo "$out"
+          node -e 'const r = JSON.parse(process.argv[1]); if (!r.audio || typeof r.audio.ok !== "boolean") { console.error("audio self-test payload missing"); process.exit(1) }' "$out"
       - run: npm test
       - run: npm run typecheck
       - run: npm run build
