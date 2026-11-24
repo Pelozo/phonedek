@@ -158,8 +158,13 @@ describe('audioDeviceHelperPath', () => {
     )
   })
 
-  it('has no helper on macOS or Linux', () => {
-    expect(audioDeviceHelperPath('darwin', options)).toBe('')
+  it('uses the macOS keyboard helper and has none on Linux', () => {
+    expect(audioDeviceHelperPath('darwin', options)).toBe(
+      join('/app', 'resources', 'mac', 'keyboard-helper'),
+    )
+    expect(audioDeviceHelperPath('darwin', { ...options, isPackaged: true })).toBe(
+      join('/resources', 'keyboard-helper'),
+    )
     expect(audioDeviceHelperPath('linux', options)).toBe('')
     expect(keyboardHelperPath('win32', options)).toBe(
       join('/app', 'resources', 'keyboard-helper.ps1'),

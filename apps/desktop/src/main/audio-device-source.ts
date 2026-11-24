@@ -2,7 +2,7 @@ import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:chil
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import type { AudioDeviceForm, AudioDeviceKind, AudioDeviceRef } from '@phonedek/shared'
-import { windowsHelperLaunch, type HelperLaunch } from './key-sender'
+import { macHelperLaunch, windowsHelperLaunch, type HelperLaunch } from './key-sender'
 import { runCommandCapture, type CommandRunner } from './volume-source'
 import type { Logger } from './logger'
 
@@ -91,10 +91,13 @@ const AUDIO_DEVICE_FORMS: ReadonlySet<string> = new Set([
 /** Why the platform has no audio-device controller (null when one is available). */
 export function audioDeviceUnsupportedReason(platform: NodeJS.Platform): string | null {
   if (platform === 'win32') return null
+  if (platform === 'darwin') {
+    return 'The macOS audio helper is not available in this build.'
+  }
   if (platform === 'linux') {
     return 'Audio device switching needs PulseAudio or PipeWire (pactl) on Linux.'
   }
-  return 'Audio device switching is only implemented on Windows and Linux in this build.'
+  return 'Audio device switching is only implemented on Windows, macOS and Linux in this build.'
 }
 
 /** Strip control characters/newlines, collapse whitespace and clamp the length. */
@@ -1092,14 +1095,26 @@ function pactlAvailable(): boolean {
 }
 
 /**
- * Build the desktop audio-device controller. Windows uses the Core Audio helper
- * and Linux uses `pactl` when PulseAudio/PipeWire is present. macOS has no
- * controller yet, so the capability stays absent there.
+ * Build the desktop audio-device controller. Windows and macOS use the Core
+ * Audio helper; Linux uses `pactl` when PulseAudio/PipeWire is present.
  */
 export function createAudioDeviceController(
   platform: NodeJS.Platform,
   options: AudioDeviceSourceOptions = {},
 ): AudioDeviceController | null {
+  if (platform === 'darwin') {
+    const backend =
+      options.backend ??
+      (options.helperPath && existsSync(options.helperPath)
+        ? new WindowsAudioDeviceBackend({
+            helperPath: options.helperPath,
+            launch: macHelperLaunch(options.helperPath),
+            ...(options.transport ? { transport: options.transport } : {}),
+            ...(options.logger ? { logger: options.logger } : {}),
+          })
+        : null)
+    return backend ? new CachedAudioDeviceController(backend, options) : null
+  }
   if (platform === 'linux') {
     const backend =
       options.backend ??

@@ -22,6 +22,8 @@
 import Foundation
 import AppKit
 import ApplicationServices
+import CoreAudio
+import CryptoKit
 import Darwin
 
 struct HelperFailure: Error {
@@ -655,6 +657,218 @@ final class KeyboardHelper {
     }
 }
 
+// MARK: - Default audio devices (CoreAudio)
+
+let audioSystemObject = AudioObjectID(kAudioObjectSystemObject)
+let audioOutputScope = kAudioObjectPropertyScopeOutput
+let audioInputScope = kAudioObjectPropertyScopeInput
+
+func audioAddress(_ selector: AudioObjectPropertySelector, scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> AudioObjectPropertyAddress {
+    return AudioObjectPropertyAddress(
+        mSelector: selector,
+        mScope: scope,
+        mElement: kAudioObjectPropertyElementMain
+    )
+}
+
+func audioDefaultDevice(_ selector: AudioObjectPropertySelector) throws -> AudioDeviceID {
+    var address = audioAddress(selector)
+    var device = AudioDeviceID(0)
+    var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+    let status = AudioObjectGetPropertyData(audioSystemObject, &address, 0, nil, &size, &device)
+    guard status == noErr, device != 0 else {
+        throw HelperFailure("CoreAudio default device query failed (\(status))")
+    }
+    return device
+}
+
+func audioDeviceIDs() throws -> [AudioDeviceID] {
+    var address = audioAddress(kAudioHardwarePropertyDevices)
+    var size: UInt32 = 0
+    let sizeStatus = AudioObjectGetPropertyDataSize(audioSystemObject, &address, 0, nil, &size)
+    guard sizeStatus == noErr else {
+        throw HelperFailure("CoreAudio device enumeration failed (\(sizeStatus))")
+    }
+    let count = Int(size) / MemoryLayout<AudioDeviceID>.size
+    guard count > 0 else { return [] }
+    var ids = [AudioDeviceID](repeating: 0, count: count)
+    let status = AudioObjectGetPropertyData(audioSystemObject, &address, 0, nil, &size, &ids)
+    guard status == noErr else {
+        throw HelperFailure("CoreAudio device list failed (\(status))")
+    }
+    return ids
+}
+
+func audioIsAlive(_ device: AudioDeviceID) -> Bool {
+    var address = audioAddress(kAudioDevicePropertyDeviceIsAlive)
+    var alive: UInt32 = 0
+    var size = UInt32(MemoryLayout<UInt32>.size)
+    let status = AudioObjectGetPropertyData(device, &address, 0, nil, &size, &alive)
+    return status != noErr || alive != 0
+}
+
+func audioChannelCount(_ device: AudioDeviceID, scope: AudioObjectPropertyScope) -> Int {
+    var address = audioAddress(kAudioDevicePropertyStreamConfiguration, scope: scope)
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(device, &address, 0, nil, &size) == noErr, size > 0 else {
+        return 0
+    }
+    let raw = UnsafeMutableRawPointer.allocate(
+        byteCount: Int(size),
+        alignment: MemoryLayout<AudioBufferList>.alignment
+    )
+    defer { raw.deallocate() }
+    let list = raw.bindMemory(to: AudioBufferList.self, capacity: 1)
+    guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, list) == noErr else {
+        return 0
+    }
+    let buffers = UnsafeMutableAudioBufferListPointer(list)
+    return buffers.reduce(0) { $0 + Int($1.mNumberChannels) }
+}
+
+func audioString(_ device: AudioDeviceID, _ selector: AudioObjectPropertySelector) -> String? {
+    var address = audioAddress(selector)
+    var value: CFString = "" as CFString
+    var size = UInt32(MemoryLayout<CFString>.size)
+    let status = AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value)
+    guard status == noErr else { return nil }
+    let text = value as String
+    return text.isEmpty ? nil : text
+}
+
+func audioOpaqueID(_ uid: String) -> String {
+    let digest = SHA256.hash(data: Data(uid.utf8))
+    return digest.prefix(8).map { String(format: "%02x", Int($0)) }.joined()
+}
+
+func audioCleanName(_ raw: String) -> String {
+    let collapsed = raw.components(separatedBy: .whitespacesAndNewlines)
+        .filter { !$0.isEmpty }
+        .joined(separator: " ")
+    return String(collapsed.prefix(120))
+}
+
+func audioDeviceForm(_ name: String, _ uid: String, kind: String) -> String {
+    let label = (name + " " + uid).lowercased()
+    if label.contains("bluetooth") || label.contains("airpods") || label.contains("beats")
+        || label.contains("wh-1000") || label.contains("buds") {
+        return "bluetooth"
+    }
+    if label.contains("usb") { return "usb" }
+    if label.contains("hdmi") || label.contains("displayport") { return "hdmi" }
+    if label.contains("virtual") || label.contains("aggregate") || label.contains("multi-output")
+        || label.contains("soundflower") || label.contains("blackhole") {
+        return "virtual"
+    }
+    if label.contains("headphone") || label.contains("headset") { return "headphones" }
+    if kind == "input" && (label.contains("microphone") || label.contains("mic")) {
+        return "microphone"
+    }
+    if kind == "output" && label.contains("speaker") { return "speakers" }
+    return "other"
+}
+
+func audioEntry(_ device: AudioDeviceID, kind: String, current: Bool) -> [String: Any] {
+    let rawName = audioString(device, kAudioObjectPropertyName) ?? "Unknown audio device"
+    let name = audioCleanName(rawName)
+    let uid = audioString(device, kAudioDevicePropertyDeviceUID) ?? String(device)
+    return [
+        "id": audioOpaqueID(uid),
+        "name": name.isEmpty ? "Unknown audio device" : name,
+        "form": audioDeviceForm(name, uid, kind: kind),
+        "current": current,
+        "available": true,
+    ]
+}
+
+func audioEntries(_ devices: [AudioDeviceID], kind: String, current: AudioDeviceID?) -> [[String: Any]] {
+    return devices.map { audioEntry($0, kind: kind, current: current == $0) }
+}
+
+func audioListPayload() throws -> [String: Any] {
+    let ids = try audioDeviceIDs()
+    let outputs = ids.filter {
+        audioIsAlive($0) && audioChannelCount($0, scope: audioOutputScope) > 0
+    }
+    let inputs = ids.filter {
+        audioIsAlive($0) && audioChannelCount($0, scope: audioInputScope) > 0
+    }
+    let currentOutput = try? audioDefaultDevice(kAudioHardwarePropertyDefaultOutputDevice)
+    let currentInput = try? audioDefaultDevice(kAudioHardwarePropertyDefaultInputDevice)
+    let outputEntries = audioEntries(outputs, kind: "output", current: currentOutput)
+    let inputEntries = audioEntries(inputs, kind: "input", current: currentInput)
+    var payload: [String: Any] = ["output": outputEntries, "input": inputEntries]
+    if currentOutput != nil,
+       let first = outputEntries.first(where: { ($0["current"] as? Bool) == true }),
+       let id = first["id"] {
+        payload["currentOutputId"] = id
+    }
+    if currentInput != nil,
+       let first = inputEntries.first(where: { ($0["current"] as? Bool) == true }),
+       let id = first["id"] {
+        payload["currentInputId"] = id
+    }
+    return payload
+}
+
+func audioCurrentPayload(_ kind: String) throws -> [String: Any] {
+    let selector = kind == "output"
+        ? kAudioHardwarePropertyDefaultOutputDevice
+        : kAudioHardwarePropertyDefaultInputDevice
+    let device = try audioDefaultDevice(selector)
+    return ["device": audioEntry(device, kind: kind, current: true)]
+}
+
+func setAudioDefault(_ selector: AudioObjectPropertySelector, device: AudioDeviceID) throws {
+    var address = audioAddress(selector)
+    var value = device
+    let size = UInt32(MemoryLayout<AudioDeviceID>.size)
+    let status = AudioObjectSetPropertyData(audioSystemObject, &address, 0, nil, size, &value)
+    guard status == noErr else {
+        throw HelperFailure("CoreAudio could not set the default device (\(status))")
+    }
+}
+
+func audioSetPayload(kind: String, id: String) throws -> [String: Any] {
+    let scope = kind == "output" ? audioOutputScope : audioInputScope
+    let ids = try audioDeviceIDs().filter {
+        audioIsAlive($0) && audioChannelCount($0, scope: scope) > 0
+    }
+    guard let target = ids.first(where: {
+        let uid = audioString($0, kAudioDevicePropertyDeviceUID) ?? String($0)
+        return audioOpaqueID(uid).lowercased() == id.lowercased()
+    }) else {
+        throw HelperFailure("Unknown \(kind) device.")
+    }
+    if kind == "output" {
+        try setAudioDefault(kAudioHardwarePropertyDefaultOutputDevice, device: target)
+        try setAudioDefault(kAudioHardwarePropertyDefaultSystemOutputDevice, device: target)
+    } else {
+        try setAudioDefault(kAudioHardwarePropertyDefaultInputDevice, device: target)
+    }
+    return ["device": audioEntry(target, kind: kind, current: true)]
+}
+
+func handleAudioCommand(_ command: String, object: [String: Any]) throws -> [String: Any] {
+    switch command {
+    case "list":
+        return try audioListPayload()
+    case "default":
+        guard let kind = object["kind"] as? String, kind == "output" || kind == "input" else {
+            throw HelperFailure("Audio device kind must be output or input.")
+        }
+        return try audioCurrentPayload(kind)
+    case "set":
+        guard let kind = object["kind"] as? String, kind == "output" || kind == "input",
+              let id = object["deviceId"] as? String, !id.isEmpty else {
+            throw HelperFailure("Audio device kind and id are required.")
+        }
+        return try audioSetPayload(kind: kind, id: id)
+    default:
+        throw HelperFailure("Unknown audio command: \(command)")
+    }
+}
+
 // MARK: - Entry point
 
 func runSelfTest() -> Bool {
@@ -673,7 +887,21 @@ func runSelfTest() -> Bool {
         emit(["selfTest": false, "error": "Missing key codes: \(missing.joined(separator: ", "))"])
         return false
     }
-    emit(["selfTest": true, "keys": keyCodes.count, "platform": "macOS"])
+    var audio: [String: Any] = ["ok": false]
+    do {
+        let list = try audioListPayload()
+        let outputs = list["output"] as? [[String: Any]] ?? []
+        let inputs = list["input"] as? [[String: Any]] ?? []
+        audio = ["ok": true, "outputs": outputs.count, "inputs": inputs.count]
+    } catch {
+        audio = ["ok": false, "error": error.localizedDescription]
+    }
+    emit([
+        "selfTest": true,
+        "keys": keyCodes.count,
+        "platform": "macOS",
+        "audio": audio,
+    ])
     return true
 }
 
@@ -708,6 +936,14 @@ while let line = readLine(strippingNewline: true) {
             throw HelperFailure("Command must be a JSON object")
         }
         id = object["id"] as? String ?? ""
+        if let command = object["command"] as? String {
+            var response: [String: Any] = ["id": id, "ok": true]
+            for (key, value) in try handleAudioCommand(command, object: object) {
+                response[key] = value
+            }
+            emit(response)
+            continue
+        }
         let steps = object["steps"] as? [[String: Any]] ?? []
         for step in steps {
             try helper.invoke(step)

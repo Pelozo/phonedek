@@ -102,7 +102,7 @@ No cloud, no account, no vendor lock-in: the phone talks directly to your PC ove
 - **Auto-profile** — Settings → Integrations → Games maps an executable to a deck profile; the phone switches once when the game starts. Optionally return to a chosen profile after the game closes (5 s debounce, cancelled if another mapped game starts).
 - **Microphone** — default capture-device gain and tap-to-mute, with live `MUTED` / `NO INPUT` state. Windows Core Audio, macOS input volume, Linux `pactl`.
 - **Per-app audio** — app-volume sliders/actions/status plus the full-screen mixer. Windows Core Audio sessions, Linux `pactl` sink-inputs; macOS unsupported.
-- **Default audio device (Windows, Linux)** — switch the PC’s default output or input from a deck button, or cycle a 2–8 device list (two devices make a toggle). Live current-device chip and active target; opaque ids with friendly-name fallback. Windows sets all three roles by default; Linux uses `pactl` (PulseAudio/PipeWire) and affects new streams. OBS/apps that pin their own device do not follow the OS default. macOS is not implemented yet.
+- **Default audio device (Windows, macOS, Linux)** — switch the PC’s default output or input from a deck button, or cycle a 2–8 device list (two devices make a toggle). Live current-device chip and active target; opaque ids with friendly-name fallback. Windows sets all three roles by default; macOS uses CoreAudio; Linux uses `pactl` (PulseAudio/PipeWire) and affects new streams. OBS/apps that pin their own device do not follow the OS default.
 - **Twitch** — device-code connect, live/viewers/uptime/title/game status tiles, chat, markers and title/game actions. Tokens are encrypted by the OS secret store.
 - **Stream lights** — Elgato Key Light, Philips Hue (link-button pairing) and Nanoleaf (token) brightness/temperature/power controls with live status.
 - **OBS Studio** — connect to OBS 28+ WebSocket (Settings → Integrations → OBS Studio, password stored only on the PC), then add an OBS input volume tile (0–200%, 100% = 0 dB) with tap-to-mute and live state (`MUTED`, `NO OBS`, `NO INPUT`).
@@ -131,7 +131,7 @@ Safety is deliberate:
 - An older desktop **strips `rules` on its next save** instead of resetting the config, so automation is lost on downgrade. Export a backup before downgrading.
 - Deleting a rig/profile/page in the editor removes matching rule actions and drops rules left with no actions. Hand-edited or imported configs with dangling references are still rejected rather than guessed at.
 - Phones paired to a pre-0.13.2 desktop fall back to a chord-per-key keyboard instead of live key down/up.
-- Default audio-device switching uses Windows Core Audio `IPolicyConfig` on Windows and `pactl` on Linux; macOS advertises no audio-device capability. Bluetooth endpoints must be connected and appear active; OBS and apps pinned to a device keep their own route.
+- Default audio-device switching uses Windows Core Audio `IPolicyConfig`, macOS CoreAudio, and `pactl` on Linux. Bluetooth endpoints must be connected and appear active; OBS and apps pinned to a device keep their own route.
 
 ## Quick start (Windows)
 

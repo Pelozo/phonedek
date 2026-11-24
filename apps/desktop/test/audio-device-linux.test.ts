@@ -193,6 +193,8 @@ describe('Linux platform wiring', () => {
     expect(createAudioDeviceController('linux', { backend })).toBeInstanceOf(
       CachedAudioDeviceController,
     )
-    expect(createAudioDeviceController('darwin', { backend })).toBeNull()
+    expect(createAudioDeviceController('darwin', { backend })).toBeInstanceOf(
+      CachedAudioDeviceController,
+    )
   })
 })

@@ -2345,7 +2345,7 @@ async function bootstrap(): Promise<void> {
     audioDevices = null
   } else if (audioDevices) {
     logger.info(
-      `Audio device switching enabled (${process.platform === 'linux' ? 'Linux pactl' : 'Windows Core Audio'})`,
+      `Audio device switching enabled (${process.platform === 'linux' ? 'Linux pactl' : process.platform === 'darwin' ? 'macOS CoreAudio' : 'Windows Core Audio'})`,
     )
   } else {
     logger.info(

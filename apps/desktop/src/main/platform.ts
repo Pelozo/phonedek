@@ -39,6 +39,7 @@ export function audioDeviceHelperPath(
   platform: NodeJS.Platform,
   options: HelperPathOptions,
 ): string {
+  if (platform === 'darwin') return keyboardHelperPath('darwin', options)
   if (platform !== 'win32') return ''
   return options.isPackaged
     ? join(options.resourcesPath, 'audio-device-helper.ps1')

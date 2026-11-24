@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import type { AudioDeviceKind, AudioDeviceRef } from '@phonedek/shared'
 import {
@@ -574,9 +575,12 @@ describe('CachedAudioDeviceController', () => {
 })
 
 describe('platform support', () => {
-  it('builds a controller on Windows and Linux with a backend', () => {
+  it('builds a controller on Windows, macOS and Linux with a backend', () => {
     const backend = new FakeBackend()
     expect(createAudioDeviceController('darwin')).toBeNull()
+    expect(createAudioDeviceController('darwin', { backend })).toBeInstanceOf(
+      CachedAudioDeviceController,
+    )
     expect(createAudioDeviceController('linux', { backend })).toBeInstanceOf(
       CachedAudioDeviceController,
     )
@@ -588,8 +592,28 @@ describe('platform support', () => {
   it('returns a clear unsupported-host reason', () => {
     expect(audioDeviceUnsupportedReason('win32')).toBeNull()
     expect(audioDeviceUnsupportedReason('linux')).toContain('pactl')
-    expect(audioDeviceUnsupportedReason('darwin')).toContain('Windows and Linux')
+    expect(audioDeviceUnsupportedReason('darwin')).toContain('macOS audio helper')
   })
+  it('builds a macOS helper controller when the helper exists', async () => {
+    const helperPath = fileURLToPath(
+      new URL('../resources/mac/keyboard-helper.swift', import.meta.url),
+    )
+    const transport: AudioDeviceTransport = {
+      request: async () => ({
+        output: [{ id: 'a1b2c3d4e5f6', name: 'Mac Speakers', current: true }],
+        input: [],
+        currentOutputId: 'a1b2c3d4e5f6',
+      }),
+      dispose: () => {},
+    }
+    const controller = createAudioDeviceController('darwin', { helperPath, transport })
+    expect(controller).toBeInstanceOf(CachedAudioDeviceController)
+    await expect(controller!.list()).resolves.toMatchObject({
+      currentOutputId: 'a1b2c3d4e5f6',
+      input: [],
+    })
+  })
+
 })
 
 describe('AudioDeviceRef typing helper', () => {

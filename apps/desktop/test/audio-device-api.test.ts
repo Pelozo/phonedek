@@ -41,7 +41,7 @@ describe('audio device API validation', () => {
 describe('audio device unsupported hosts', () => {
   it('reports a reason and builds no controller on unsupported hosts', () => {
     expect(audioDeviceUnsupportedReason('linux')).toContain('pactl')
-    expect(audioDeviceUnsupportedReason('darwin')).toContain('Windows and Linux')
+    expect(audioDeviceUnsupportedReason('darwin')).toContain('macOS audio helper')
     expect(audioDeviceUnsupportedReason('win32')).toBeNull()
 
     expect(createAudioDeviceController('darwin')).toBeNull()
