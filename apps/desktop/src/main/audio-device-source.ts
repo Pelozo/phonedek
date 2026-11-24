@@ -75,6 +75,7 @@ export const AUDIO_DEVICE_LIST_TTL_MS = 2000
 export const AUDIO_DEVICE_CURRENT_TTL_MS = 900
 export const AUDIO_DEVICE_LIST_TIMEOUT_MS = 5000
 export const AUDIO_DEVICE_CURRENT_TIMEOUT_MS = 2000
+export const AUDIO_DEVICE_MAX_ENTRIES = 64
 
 const AUDIO_DEVICE_FORMS: ReadonlySet<string> = new Set([
   'speakers',
@@ -182,6 +183,20 @@ function readCurrentId(value: unknown, entries: AudioDeviceEntry[]): string | un
   return entries.find((entry) => entry.current)?.id
 }
 
+function limitEntries(
+  entries: AudioDeviceEntry[],
+  currentId: string | undefined,
+): AudioDeviceEntry[] {
+  if (entries.length <= AUDIO_DEVICE_MAX_ENTRIES) return entries
+  if (!currentId) return entries.slice(0, AUDIO_DEVICE_MAX_ENTRIES)
+  const current = entries.find((entry) => entry.id.toLowerCase() === currentId.toLowerCase())
+  if (!current) return entries.slice(0, AUDIO_DEVICE_MAX_ENTRIES)
+  return [
+    current,
+    ...entries.filter((entry) => entry !== current).slice(0, AUDIO_DEVICE_MAX_ENTRIES - 1),
+  ]
+}
+
 /**
  * Parse a `list` helper response into a snapshot. The payload may be a single
  * object for an array field on old PowerShell builds; both are accepted.
@@ -199,10 +214,12 @@ export function parseAudioDeviceListPayload(
     throw new Error('Audio device helper returned no device lists.')
   }
 
-  const output = parseEntryList(raw.output, 'output')
-  const input = parseEntryList(raw.input, 'input')
-  const currentOutputId = readCurrentId(raw.currentOutputId, output)
-  const currentInputId = readCurrentId(raw.currentInputId, input)
+  const parsedOutput = parseEntryList(raw.output, 'output')
+  const parsedInput = parseEntryList(raw.input, 'input')
+  const currentOutputId = readCurrentId(raw.currentOutputId, parsedOutput)
+  const currentInputId = readCurrentId(raw.currentInputId, parsedInput)
+  const output = limitEntries(parsedOutput, currentOutputId)
+  const input = limitEntries(parsedInput, currentInputId)
 
   return {
     available: true,

@@ -575,6 +575,22 @@ describe('CachedAudioDeviceController', () => {
 })
 
 describe('platform support', () => {
+  it('caps a huge device list at 64 while keeping the current device', () => {
+    const id = (index: number): string => String(index).padStart(12, '0')
+    const output = Array.from({ length: 70 }, (_, index) => ({
+      id: id(index),
+      name: `Device ${index}`,
+      current: false,
+    }))
+    const snapshot = parseAudioDeviceListPayload(
+      { output, input: [], currentOutputId: id(69) },
+      Date.now(),
+    )
+    expect(snapshot.output).toHaveLength(64)
+    expect(snapshot.output[0]).toMatchObject({ id: id(69), current: true })
+    expect(snapshot.output.filter((entry) => entry.current)).toHaveLength(1)
+  })
+
   it('builds a controller on Windows, macOS and Linux with a backend', () => {
     const backend = new FakeBackend()
     expect(createAudioDeviceController('darwin')).toBeNull()
