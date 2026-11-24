@@ -10,6 +10,14 @@ export interface WhatsNewEntry {
  * Keep highlights short: the dialog is a summary, not release notes.
  */
 const WHATS_NEW: Readonly<Record<string, WhatsNewEntry>> = {
+  '0.21.0': {
+    title: 'Linux audio switching',
+    highlights: [
+      'Linux: set or cycle the default output/input from a deck button.',
+      'The editor and tile show live devices; changes apply to new streams.',
+      'Fixed a stuck shortcut key after a helper error. macOS audio switching is still unavailable.',
+    ],
+  },
   '0.20.1': {
     title: 'Audio-device release fix',
     highlights: [
